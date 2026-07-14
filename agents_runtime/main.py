@@ -416,7 +416,7 @@ function switchTab(name) {{
   document.getElementById('tab-'+name).classList.add('active');
   if (name==='fluxo') loadFluxo();
   if (name==='agentes') loadAgentes();
-  if (name==='gerenciar') { loadSkillsList(); loadAgentSelect(); }
+  if (name==='gerenciar') {{ loadSkillsList(); loadAgentSelect(); }}
 }}
 
 async function loadFluxo() {{
