@@ -46,9 +46,11 @@ def _decode_jwt_payload(token: str) -> dict:
 def _is_valid_firebase_jwt(token: str) -> bool:
     """Validate that the token looks like a valid Firebase JWT."""
     if not token or len(token) < 50:
+        logger.warning(f"Firebase JWT rejected: too short ({len(token)})")
         return False
     payload = _decode_jwt_payload(token)
     if not payload:
+        logger.warning("Firebase JWT rejected: empty payload")
         return False
     try:
         aud = payload.get("aud", "")
@@ -56,14 +58,18 @@ def _is_valid_firebase_jwt(token: str) -> bool:
         now = int(time.time())
         firebase_signer = payload.get("firebase", {}).get("sign_in_provider")
         if aud != FIREBASE_PROJECT:
+            logger.warning(f"Firebase JWT rejected: aud mismatch ({aud} != {FIREBASE_PROJECT})")
             return False
         if exp < now:
+            logger.warning(f"Firebase JWT rejected: expired (exp={exp} < now={now})")
             return False
         if firebase_signer is None:
+            logger.warning("Firebase JWT rejected: missing firebase.sign_in_provider")
             return False
         logger.info(f"Firebase JWT accepted for user: {payload.get('email', 'unknown')}")
         return True
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Firebase JWT rejected: {e}")
         return False
 
 
