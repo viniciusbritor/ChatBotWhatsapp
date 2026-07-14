@@ -14,6 +14,7 @@ This is a simplified orchestrator (not full Agno Team) for clarity and testabili
 import os
 import json
 import logging
+import time
 from typing import Dict, Any, Optional, List
 
 from core.llm_provider import LLMProvider, LLMError
@@ -26,6 +27,14 @@ from agent_loader import get_agent, get_skill, list_skills
 from core.audit import log_action
 
 logger = logging.getLogger(__name__)
+
+_interaction_history: List[Dict[str, Any]] = []
+MAX_HISTORY = 20
+
+
+def get_recent_interactions(limit: int = 5) -> List[Dict[str, Any]]:
+    """Return the most recent orchestration interactions."""
+    return _interaction_history[-limit:]
 
 GROSS_KEYWORDS = [
     "puta", "merda", "caralho", "fdp", "porra", "cu", "cuzão", "cuzão",
@@ -126,8 +135,12 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
     intent = _detect_intent(masked_text)
     specialist_id = _resolve_agent_for_intent(intent, instance)
 
+    path = []
+    path.append({"step": 1, "phase": "intent_detect", "details": {k: v for k, v in intent.items() if v}})
+
     cmd = detect_command(masked_text)
     if cmd:
+        path.append({"step": 2, "phase": "command", "agent": "command-handler", "command": cmd})
         logger.info(f"Proactive command detected from {phone}: {cmd}")
         cmd_result = await apply_command(phone, cmd)
         log_action(
@@ -136,7 +149,7 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
             target=phone,
             details={"command": cmd, "result": cmd_result},
         )
-        return {
+        result = {
             "reply": cmd_result.get("message", "Comando aplicado."),
             "delay_ms": 0,
             "presence": "paused",
@@ -146,21 +159,47 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "applied": True,
             },
         }
-
-    if specialist_id:
+    elif specialist_id:
         agent = get_agent(specialist_id)
         if agent and agent.get("enabled", True):
-            return await _execute_agent(agent, masked_text, payload, extra)
+            path.append({"step": 2, "phase": "specialist", "agent": specialist_id, "reason": {k: v for k, v in intent.items() if v}})
+            result = await _execute_agent(agent, masked_text, payload, extra)
+        else:
+            path.append({"step": 2, "phase": "fallback_to_orchestrator", "reason": "specialist_disabled"})
+            orchestrator_id = _select_orchestrator_agent(instance)
+            if not orchestrator_id:
+                return _error_response(503, "no_orchestrator", "Nenhum orchestrator disponivel")
+            orchestrator = get_agent(orchestrator_id)
+            if not orchestrator:
+                return _error_response(503, "agent_not_found", f"Orchestrator {orchestrator_id} nao encontrado")
+            result = await _execute_agent(orchestrator, masked_text, payload, extra)
+    else:
+        orchestrator_id = _select_orchestrator_agent(instance)
+        if not orchestrator_id:
+            return _error_response(503, "no_orchestrator", "Nenhum orchestrator disponivel")
+        orchestrator = get_agent(orchestrator_id)
+        if not orchestrator:
+            return _error_response(503, "agent_not_found", f"Orchestrator {orchestrator_id} nao encontrado")
+        path.append({"step": 2, "phase": "orchestrator", "agent": orchestrator_id, "reason": "default_route"})
+        result = await _execute_agent(orchestrator, masked_text, payload, extra)
 
-    orchestrator_id = _select_orchestrator_agent(instance)
-    if not orchestrator_id:
-        return _error_response(503, "no_orchestrator", "Nenhum orchestrator disponivel")
+    path.append({"step": 3, "phase": "result", "agent_id": result.get("metadata", {}).get("agent_id"),
+                 "model": result.get("metadata", {}).get("model_used"),
+                 "escalated": result.get("metadata", {}).get("escalated"),
+                 "confidence": result.get("metadata", {}).get("confidence_score")})
 
-    orchestrator = get_agent(orchestrator_id)
-    if not orchestrator:
-        return _error_response(503, "agent_not_found", f"Orchestrator {orchestrator_id} nao encontrado")
+    _interaction_history.append({
+        "timestamp": int(time.time()),
+        "phone": phone,
+        "text_preview": masked_text[:80],
+        "sender": sender_name,
+        "path": path,
+        "reply_preview": result.get("reply", "")[:80],
+    })
+    if len(_interaction_history) > MAX_HISTORY:
+        _interaction_history.pop(0)
 
-    return await _execute_agent(orchestrator, masked_text, payload, extra)
+    return result
 
 
 async def _execute_agent(

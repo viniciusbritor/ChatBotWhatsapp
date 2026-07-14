@@ -11,7 +11,7 @@ import os
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 
 from core.auth import auth_middleware
 from core.delay_calculator import calculate_delay_ms, calculate_presence
@@ -20,7 +20,7 @@ from core.masker import mask_pii
 from core.escalation import compute_confidence_score
 from agent_loader import start_loader, stop_loader, list_agents, list_skills, list_tools, get_agent
 from agent_loader import force_reload, upsert_agent, delete_agent, upsert_skill, upsert_tool
-from orchestrator import orchestrate
+from orchestrator import orchestrate, get_recent_interactions
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
@@ -253,6 +253,82 @@ async def admin_tools_post(request: Request):
 async def admin_tools_list():
     """List all tools (Portal proxy)."""
     return JSONResponse(content={"tools": list_tools()})
+
+
+@app.get("/admin/dashboard/orchestration")
+async def admin_dashboard_orchestration():
+    """Return last 5 orchestration interactions with full agent path."""
+    interactions = get_recent_interactions(limit=5)
+    return JSONResponse(content={
+        "interactions": interactions,
+        "count": len(interactions),
+    })
+
+
+@app.get("/admin/dashboard/diagrama")
+async def admin_dashboard_diagrama():
+    """Render Mermaid diagram of last 5 agent orchestration paths."""
+    interactions = get_recent_interactions(limit=5)
+
+    mermaid_lines = ["flowchart LR"]
+    node_id = 0
+
+    for idx, interaction in enumerate(interactions):
+        ts = interaction.get("timestamp", 0)
+        text = interaction.get("text_preview", "")[:30]
+        reply = interaction.get("reply_preview", "")[:30]
+        path = interaction.get("path", [])
+
+        mermaid_lines.append(f"")
+        mermaid_lines.append(f"    subgraph interacao{idx+1}[\" Msg {idx+1}: {text} \"]")
+        mermaid_lines.append(f"        direction LR")
+
+        prev_node = None
+        for step in path:
+            node_id += 1
+            phase = step.get("phase", "")
+            agent = step.get("agent", step.get("agent_id", phase))
+            label = f"{step.get('step')}. {agent}"
+
+            if phase == "result":
+                label += f"\\nmodel: {step.get('model','')}"
+                if step.get("escalated"):
+                    label += "\\nESCALADO"
+
+            node_style = "fill:#4CAF50,color:#fff" if phase == "result" else "fill:#2196F3,color:#fff"
+            mermaid_lines.append(f"        n{node_id}[\"{label}\"]")
+            mermaid_lines.append(f"        style n{node_id} {node_style}")
+
+            if prev_node:
+                mermaid_lines.append(f"        n{prev_node} --> n{node_id}")
+            prev_node = node_id
+
+        mermaid_lines.append(f"    end")
+
+    mermaid_code = "\n".join(mermaid_lines)
+
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Orchestration Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  body {{ font-family: monospace; background: #1a1a2e; color: #e0e0e0; padding: 20px; }}
+  h2 {{ color: #4CAF50; }}
+  .mermaid {{ background: #16213e; padding: 20px; border-radius: 8px; }}
+  .legend {{ margin-top: 20px; padding: 10px; background: #0f3460; border-radius: 8px; }}
+  .legend span {{ margin-right: 20px; }}
+</style></head><body>
+<h2>Agent Orchestration — Ultimas 5 Interacoes</h2>
+<div class="legend">
+  <span style="color:#2196F3">&#9632; Agente acionado</span>
+  <span style="color:#4CAF50">&#9632; Resultado final</span>
+</div>
+<div class="mermaid">
+{mermaid_code}
+</div>
+<script>mermaid.initialize({{startOnLoad:true, theme:'dark'}});</script>
+</body></html>"""
+
+    return HTMLResponse(content=html)
 
 
 @app.post("/admin/playground")
