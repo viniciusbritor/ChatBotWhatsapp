@@ -267,68 +267,302 @@ async def admin_dashboard_orchestration():
 
 
 @app.get("/admin/dashboard/diagrama")
-async def admin_dashboard_diagrama():
-    """Render Mermaid diagram of last 5 agent orchestration paths."""
-    interactions = get_recent_interactions(limit=5)
-
-    mermaid_lines = ["flowchart LR"]
-    node_id = 0
-
-    for idx, interaction in enumerate(interactions):
-        ts = interaction.get("timestamp", 0)
-        text = interaction.get("text_preview", "")[:30]
-        reply = interaction.get("reply_preview", "")[:30]
-        path = interaction.get("path", [])
-
-        mermaid_lines.append(f"")
-        mermaid_lines.append(f"    subgraph interacao{idx+1}[\" Msg {idx+1}: {text} \"]")
-        mermaid_lines.append(f"        direction LR")
-
-        prev_node = None
-        for step in path:
-            node_id += 1
-            phase = step.get("phase", "")
-            agent = step.get("agent", step.get("agent_id", phase))
-            label = f"{step.get('step')}. {agent}"
-
-            if phase == "result":
-                label += f"\\nmodel: {step.get('model','')}"
-                if step.get("escalated"):
-                    label += "\\nESCALADO"
-
-            node_style = "fill:#4CAF50,color:#fff" if phase == "result" else "fill:#2196F3,color:#fff"
-            mermaid_lines.append(f"        n{node_id}[\"{label}\"]")
-            mermaid_lines.append(f"        style n{node_id} {node_style}")
-
-            if prev_node:
-                mermaid_lines.append(f"        n{prev_node} --> n{node_id}")
-            prev_node = node_id
-
-        mermaid_lines.append(f"    end")
-
-    mermaid_code = "\n".join(mermaid_lines)
+async def admin_dashboard_diagrama(request: Request):
+    """Full dashboard with 3 tabs: Fluxo, Agentes, Gerenciar."""
+    token = request.query_params.get("token", "")
+    auth_param = f"?token={token}" if token else ""
 
     html = f"""<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>Orchestration Dashboard</title>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Agentes Omnichannel — Coherence</title>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <style>
-  body {{ font-family: monospace; background: #1a1a2e; color: #e0e0e0; padding: 20px; }}
-  h2 {{ color: #4CAF50; }}
-  .mermaid {{ background: #16213e; padding: 20px; border-radius: 8px; }}
-  .legend {{ margin-top: 20px; padding: 10px; background: #0f3460; border-radius: 8px; }}
-  .legend span {{ margin-right: 20px; }}
-</style></head><body>
-<h2>Agent Orchestration — Ultimas 5 Interacoes</h2>
-<div class="legend">
-  <span style="color:#2196F3">&#9632; Agente acionado</span>
-  <span style="color:#4CAF50">&#9632; Resultado final</span>
-</div>
-<div class="mermaid">
-{mermaid_code}
-</div>
-<script>mermaid.initialize({{startOnLoad:true, theme:'dark'}});</script>
-</body></html>"""
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{font-family:Inter,-apple-system,sans-serif;background:#f9fafb;color:#171717;min-height:100vh}}
+.header{{background:#fff;border-bottom:1px solid #e5e7eb;padding:0 24px;height:56px;display:flex;align-items:center;gap:12px}}
+.header img{{height:28px}}
+.header .divider{{width:1px;height:20px;background:#d1d5db}}
+.header h1{{font-size:15px;font-weight:600;color:#374151}}
+.tabs{{display:flex;gap:0;background:#fff;border-bottom:1px solid #e5e7eb;padding:0 24px}}
+.tab{{padding:12px 20px;cursor:pointer;font-size:13px;font-weight:500;color:#6b7280;border-bottom:2px solid transparent;transition:all .2s}}
+.tab:hover{{color:#374151}}
+.tab.active{{color:#3b82f6;border-bottom-color:#3b82f6}}
+.tab-content{{display:none;padding:24px}}
+.tab-content.active{{display:block}}
+.card{{background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:20px;margin-bottom:16px;box-shadow:0 1px 2px rgba(0,0,0,0.04)}}
+.card h3{{font-size:14px;font-weight:600;color:#111827;margin-bottom:12px}}
+.mermaid-box{{overflow-x:auto}}
+.interaction-row{{display:flex;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid #f3f4f6;font-size:13px}}
+.interaction-row .step{{background:#dbeafe;color:#1d4ed8;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600}}
+.interaction-row .step.green{{background:#dcfce7;color:#166534}}
+.agent-card{{border-left:3px solid #3b82f6;margin-bottom:12px}}
+.agent-card .role{{font-size:11px;text-transform:uppercase;color:#6b7280;letter-spacing:.5px}}
+.agent-card .name{{font-size:15px;font-weight:600;color:#111827}}
+.agent-card .skills{{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}}
+.agent-card .skill-tag{{background:#ede9fe;color:#5b21b6;padding:2px 8px;border-radius:10px;font-size:11px}}
+.agent-card .tool-tag{{background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:10px;font-size:11px}}
+.form-group{{margin-bottom:12px}}
+.form-group label{{display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:4px}}
+.form-group input,.form-group textarea,.form-group select{{width:100%;padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;font-family:inherit}}
+.form-group textarea{{min-height:100px;resize:vertical}}
+.btn{{padding:8px 16px;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;border:none;transition:all .15s}}
+.btn-primary{{background:#3b82f6;color:#fff}}
+.btn-primary:hover{{background:#2563eb}}
+.btn-danger{{background:#ef4444;color:#fff;margin-left:8px}}
+.btn-danger:hover{{background:#dc2626}}
+.btn-sm{{padding:4px 10px;font-size:11px}}
+.grid2{{display:grid;grid-template-columns:1fr 1fr;gap:16px}}
+.loading{{text-align:center;color:#9ca3af;padding:40px;font-size:14px}}
+.error{{background:#fef2f2;color:#dc2626;padding:12px;border-radius:6px;font-size:13px}}
+.legend{{display:flex;gap:16px;margin-bottom:16px;font-size:12px}}
+.legend span{{display:flex;align-items:center;gap:6px}}
+.dot{{width:10px;height:10px;border-radius:50%}}
+.dot.blue{{background:#3b82f6}}
+.dot.green{{background:#22c55e}}
+.dot.gray{{background:#9ca3af}}
+</style>
+</head>
+<body>
 
+<div class="header">
+  <img src="https://coherence-portal-test-c5nbfc5meq-uc.a.run.app/logo-top-v2.png" alt="Coherence" onerror="this.style.display='none'">
+  <div class="divider"></div>
+  <h1>Agentes Omnichannel</h1>
+</div>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('fluxo')">Fluxo de Orquestração</div>
+  <div class="tab" onclick="switchTab('agentes')">Agentes & Skills</div>
+  <div class="tab" onclick="switchTab('gerenciar')">Gerenciar</div>
+</div>
+
+<div id="tab-fluxo" class="tab-content active">
+  <div class="legend">
+    <span><span class="dot blue"></span> Agente acionado</span>
+    <span><span class="dot green"></span> Resultado final</span>
+    <span><span class="dot gray"></span> Passo intermediário</span>
+  </div>
+  <div id="fluxo-content" class="loading">Carregando fluxo de orquestração...</div>
+</div>
+
+<div id="tab-agentes" class="tab-content">
+  <div id="agentes-content" class="loading">Carregando agentes...</div>
+</div>
+
+<div id="tab-gerenciar" class="tab-content">
+  <div class="grid2">
+    <div class="card">
+      <h3>Criar / Editar Agente</h3>
+      <div class="form-group"><label>ID do Agente</label><input id="agent-id" placeholder="ex: manager-calendar"></div>
+      <div class="form-group"><label>Nome</label><input id="agent-name" placeholder="Calendar Manager"></div>
+      <div class="form-group"><label>Role</label><select id="agent-role"><option value="orchestrator">Orchestrator</option><option value="manager">Manager</option><option value="specialist">Specialist</option></select></div>
+      <div class="form-group"><label>Modelo</label><select id="agent-model"><option value="deepseek-v4-flash">DeepSeek V4 Flash</option><option value="deepseek-v4-pro">DeepSeek V4 Pro</option></select></div>
+      <div class="form-group"><label>System Prompt</label><textarea id="agent-prompt" placeholder="System prompt do agente..."></textarea></div>
+      <div class="form-group"><label>Skills (IDs separados por vírgula)</label><input id="agent-skills" placeholder="skill-motivacao,skill-busca-contexto"></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary" onclick="saveAgent()">Salvar Agente</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteAgent()">Excluir</button>
+      </div>
+      <div id="agent-msg" style="margin-top:8px;font-size:12px"></div>
+    </div>
+    <div>
+      <div class="card">
+        <h3>Criar / Editar Skill</h3>
+        <div class="form-group"><label>ID da Skill</label><input id="skill-id" placeholder="ex: skill-motivacao"></div>
+        <div class="form-group"><label>Nome</label><input id="skill-name" placeholder="Motivacao pre-reuniao"></div>
+        <div class="form-group"><label>Conteúdo (Markdown)</label><textarea id="skill-content" placeholder="Conteudo da skill em markdown..." style="min-height:80px"></textarea></div>
+        <button class="btn btn-primary" onclick="saveSkill()">Salvar Skill</button>
+        <div id="skill-msg" style="margin-top:8px;font-size:12px"></div>
+      </div>
+      <div class="card" id="skills-list-card">
+        <h3>Skills Existentes</h3>
+        <div id="skills-list" class="loading" style="padding:10px">Carregando...</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const AUTH = '{auth_param}';
+const BASE = '';
+
+async function api(path) {{
+  const url = BASE + path + AUTH;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(r.status);
+  return r.json();
+}}
+
+async function apiPost(path, body) {{
+  const url = BASE + path + AUTH;
+  const r = await fetch(url, {{ method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify(body) }});
+  return r.json();
+}}
+
+async function apiDelete(path) {{
+  const url = BASE + path + AUTH;
+  const r = await fetch(url, {{ method:'DELETE' }});
+  return r.json();
+}}
+
+function switchTab(name) {{
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  document.querySelector(`.tab:nth-child(${{name==='fluxo'?1:name==='agentes'?2:3}})`).classList.add('active');
+  document.getElementById('tab-'+name).classList.add('active');
+  if (name==='fluxo') loadFluxo();
+  if (name==='agentes') loadAgentes();
+  if (name==='gerenciar') loadSkillsList();
+}}
+
+async function loadFluxo() {{
+  try {{
+    const data = await api('/admin/dashboard/orchestration');
+    const interactions = data.interactions || [];
+    if (interactions.length===0) {{
+      document.getElementById('fluxo-content').innerHTML = '<div class="card"><p style="color:#9ca3af">Nenhuma interação registrada. Envie mensagens no WhatsApp para popular.</p></div>';
+      return;
+    }}
+    let mermaid = ['flowchart LR'];
+    let nid = 0;
+    interactions.forEach((ix, idx) => {{
+      const text = (ix.text_preview||'').substring(0,30);
+      const reply = (ix.reply_preview||'').substring(0,30);
+      const path = ix.path || [];
+      mermaid.push('',`    subgraph i${{idx+1}}["Msg ${{idx+1}}: ${{text}}"]`,`        direction LR`);
+      let prev = null;
+      path.forEach(step => {{
+        nid++;
+        const phase = step.phase||'';
+        const agent = step.agent||step.agent_id||phase;
+        let label = `${{step.step}}. ${{agent}}`;
+        let style = 'fill:#9ca3af,color:#fff';
+        if (phase==='result') {{
+          label += `\\nmodel: ${{step.model||''}}`;
+          if (step.escalated) label += '\\nESCALADO';
+          style = 'fill:#22c55e,color:#fff';
+        }} else if (phase!=='intent_detect') {{
+          style = 'fill:#3b82f6,color:#fff';
+        }}
+        mermaid.push(`        n${{nid}}["${{label}}"]`,`        style n${{nid}} ${{style}}`);
+        if (prev) mermaid.push(`        n${{prev}} --> n${{nid}}`);
+        prev = nid;
+      }});
+      mermaid.push('    end');
+    }});
+    document.getElementById('fluxo-content').innerHTML = `
+      <div class="card"><div class="mermaid-box"><div class="mermaid">${{mermaid.join('\\n')}}</div></div></div>
+      <div class="card"><h3>Últimas Interações</h3>
+        ${{interactions.map((ix,idx) => `
+          <div class="interaction-row">
+            <span style="color:#9ca3af;min-width:20px">#${{idx+1}}</span>
+            <span style="flex:1;font-weight:500">${{ix.text_preview||''}}</span>
+            <span class="step green">${{(ix.path||[]).slice(-1)[0]?.agent_id||'?'}}</span>
+            <span style="color:#9ca3af;font-size:11px">${{(ix.path||[]).slice(-1)[0]?.model||''}}</span>
+          </div>`).join('')}}
+      </div>`;
+    mermaid.initialize({{startOnLoad:true, theme:'neutral'}});
+  }} catch(e) {{
+    document.getElementById('fluxo-content').innerHTML = `<div class="error">Erro ao carregar fluxo: ${{e.message}}</div>`;
+  }}
+}}
+
+async function loadAgentes() {{
+  try {{
+    const agents = (await api('/admin/agents')).agents || [];
+    const skills = (await api('/admin/skills')).skills || [];
+    const skillMap = {{}};
+    skills.forEach(s => skillMap[s.id] = s);
+    document.getElementById('agentes-content').innerHTML = agents.map(a => `
+      <div class="card agent-card">
+        <div class="role">${{a.role}}</div>
+        <div class="name">${{a.name}} <span style="font-weight:400;font-size:12px;color:#9ca3af">(${{a.id}})</span></div>
+        <div style="font-size:12px;color:#6b7280;margin-top:4px">Modelo: ${{a.model||'-'}} ${{a.model_escalation?'| Escalação: '+a.model_escalation:''}}</div>
+        <div style="font-size:12px;color:#6b7280">Ativo: ${{a.enabled?'Sim':'Não'}} | Thinking: ${{a.thinking||'disabled'}}</div>
+        <div class="skills">
+          ${{(a.skills||[]).map(sid => `<span class="skill-tag">${{skillMap[sid]?.name||sid}}</span>`).join('')}}
+          ${{(a.tools||[]).map(tid => `<span class="tool-tag">${{tid}}</span>`).join('')}}
+        </div>
+        ${{(a.delegates_to||[]).length ? `<div style="font-size:11px;color:#9ca3af;margin-top:4px">Delega para: ${{a.delegates_to.join(', ')}}</div>` : ''}}
+      </div>`).join('');
+    if (agents.length===0) document.getElementById('agentes-content').innerHTML = '<p style="color:#9ca3af">Nenhum agente carregado.</p>';
+  }} catch(e) {{
+    document.getElementById('agentes-content').innerHTML = `<div class="error">Erro: ${{e.message}}</div>`;
+  }}
+}}
+
+async function loadSkillsList() {{
+  try {{
+    const skills = (await api('/admin/skills')).skills || [];
+    document.getElementById('skills-list').innerHTML = skills.map(s => `
+      <div style="padding:6px 0;border-bottom:1px solid #f3f4f6;font-size:13px">
+        <span style="font-weight:600">${{s.name}}</span>
+        <span style="color:#9ca3af;margin-left:8px">(${{s.id}})</span>
+      </div>`).join('') || '<span style="color:#9ca3af">Nenhuma skill cadastrada.</span>';
+  }} catch(e) {{}}
+}}
+
+async function saveAgent() {{
+  const body = {{
+    id: document.getElementById('agent-id').value.trim(),
+    name: document.getElementById('agent-name').value.trim(),
+    role: document.getElementById('agent-role').value,
+    model: document.getElementById('agent-model').value,
+    system_prompt: document.getElementById('agent-prompt').value.trim(),
+    skills: document.getElementById('agent-skills').value.split(',').map(s=>s.trim()).filter(Boolean),
+    tools: [],
+    instances: ['jennifer'],
+    enabled: true,
+    thinking: 'disabled',
+  }};
+  if (!body.id) {{ document.getElementById('agent-msg').innerHTML = '<span style="color:#dc2626">Preencha o ID</span>'; return; }}
+  try {{
+    const r = await apiPost('/admin/agents', body);
+    document.getElementById('agent-msg').innerHTML = r.upserted
+      ? '<span style="color:#16a34a">Agente salvo com sucesso!</span>'
+      : '<span style="color:#dc2626">Falha ao salvar</span>';
+  }} catch(e) {{
+    document.getElementById('agent-msg').innerHTML = `<span style="color:#dc2626">Erro: ${{e.message}}</span>`;
+  }}
+}}
+
+async function deleteAgent() {{
+  const id = document.getElementById('agent-id').value.trim();
+  if (!id) return;
+  if (!confirm(`Excluir agente "${{id}}"?`)) return;
+  try {{
+    await apiDelete('/admin/agents/'+id);
+    document.getElementById('agent-msg').innerHTML = '<span style="color:#16a34a">Agente excluído!</span>';
+    document.getElementById('agent-id').value = '';
+    document.getElementById('agent-name').value = '';
+  }} catch(e) {{
+    document.getElementById('agent-msg').innerHTML = `<span style="color:#dc2626">Erro: ${{e.message}}</span>`;
+  }}
+}}
+
+async function saveSkill() {{
+  const body = {{
+    id: document.getElementById('skill-id').value.trim(),
+    name: document.getElementById('skill-name').value.trim(),
+    content: document.getElementById('skill-content').value.trim(),
+  }};
+  if (!body.id) {{ document.getElementById('skill-msg').innerHTML = '<span style="color:#dc2626">Preencha o ID</span>'; return; }}
+  try {{
+    const r = await apiPost('/admin/skills', body);
+    document.getElementById('skill-msg').innerHTML = r.upserted
+      ? '<span style="color:#16a34a">Skill salva!</span>'
+      : '<span style="color:#dc2626">Falha ao salvar</span>';
+    loadSkillsList();
+  }} catch(e) {{
+    document.getElementById('skill-msg').innerHTML = `<span style="color:#dc2626">Erro: ${{e.message}}</span>`;
+  }}
+}}
+
+loadFluxo();
+</script>
+</body></html>"""
     return HTMLResponse(content=html)
 
 
