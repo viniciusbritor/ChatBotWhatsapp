@@ -112,7 +112,9 @@ async def auth_middleware(request: Request, call_next):
     if provided_token == expected_token:
         return await call_next(request)
 
-    if _is_valid_firebase_jwt(provided_token):
+    jwt_valid = _is_valid_firebase_jwt(provided_token)
+    logger.warning(f"Auth: SA mismatch, Firebase JWT valid={jwt_valid}, path={path}, token_len={len(provided_token)}")
+    if jwt_valid:
         return await call_next(request)
 
     logger.warning(f"Invalid SA token attempt for path {path}")
