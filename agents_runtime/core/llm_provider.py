@@ -349,14 +349,7 @@ class LLMProvider:
         thinking_disabled: bool = True,
         max_tool_rounds: int = 5,
     ) -> Dict[str, Any]:
-        """Call LLM with tool calling support.
-
-        Loops: LLM with tools -> execute tool calls -> add results -> re-call LLM
-
-        Args:
-            tool_executor: callable(tool_name, tool_args) -> str (tool result)
-            tools: OpenAI-compatible tools list
-        """
+        """Call LLM with tool calling support."""
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
@@ -369,17 +362,17 @@ class LLMProvider:
             )
             payload["messages"] = messages
 
-            result = self._call_provider(payload, model)
-            content = result.get("content", "")
-            tool_calls = self.parse_tool_calls(result)
+            response_data = self._call_provider(payload, model)
+            choices = response_data.get("choices", [])
+            if not choices:
+                return {"content": "Resposta vazia do LLM.", "model_used": model, "tool_rounds": tool_count}
+
+            msg = choices[0].get("message", {})
+            content = msg.get("content", "")
+            tool_calls = msg.get("tool_calls", [])
 
             if not tool_calls:
-                return {
-                    "content": content,
-                    "model_used": model,
-                    "provider": result.get("provider", ""),
-                    "tool_rounds": tool_count,
-                }
+                return {"content": content, "model_used": model, "tool_rounds": tool_count}
 
             messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
             for tc in tool_calls:
@@ -403,39 +396,31 @@ class LLMProvider:
                 logger.info(f"Tool {name} result: {str(tool_result)[:100]}")
             tool_count += 1
 
-        logger.warning(f"Max tool rounds ({max_tool_rounds}) reached, returning last content")
-        return {
-            "content": content if 'content' in locals() else "Maximo de execucoes de ferramentas atingido.",
-            "model_used": model,
-            "provider": result.get("provider", "") if 'result' in locals() else "",
-            "tool_rounds": tool_count,
-        }
+        logger.warning(f"Max tool rounds ({max_tool_rounds}) reached")
+        last_msg = messages[-1] if messages else {}
+        return {"content": last_msg.get("content", "Maximo de execucoes atingido."), "model_used": model, "tool_rounds": tool_count}
 
     def _call_provider(self, payload: Dict[str, Any], model: str) -> Dict[str, Any]:
-        """Execute a single provider call and return structured result."""
-        attempts = []
+        """Execute a single provider call and return the full API response dict."""
         cascade = self._build_cascade_providers(model)
 
         for attempt_idx, (pname, pmodel, method_name, call_model) in enumerate(cascade):
             try:
                 if method_name == "_call_deepseek":
-                    content = self._call_deepseek_raw(call_model, payload)
+                    data = self._call_deepseek_raw(call_model, payload)
                 elif method_name == "_call_nvidia":
-                    content = self._call_nvidia_raw(call_model, payload)
+                    data = self._call_nvidia_raw(call_model, payload)
                 elif method_name == "_call_minimax":
-                    content = self._call_minimax_raw(payload)
+                    data = self._call_minimax_raw(payload)
                 else:
                     raise LLMError(f"unknown_method: {method_name}")
-                attempts.append(f"{pname}:success")
-                return {"content": content, "model_used": pmodel, "provider": pname, "attempts": attempts}
+                return data
             except LLMError as e:
-                attempts.append(f"{pname}:{str(e)}")
                 self._backoff_sleep(attempt_idx)
                 continue
             except Exception as e:
-                attempts.append(f"{pname}:unexpected:{type(e).__name__}")
                 continue
-        raise LLMError(f"all_providers_failed: {attempts}")
+        raise LLMError(f"all_providers_failed")
 
     def _call_deepseek_raw(self, model: str, payload: Dict[str, Any]) -> str:
         if not self.deepseek_key:
