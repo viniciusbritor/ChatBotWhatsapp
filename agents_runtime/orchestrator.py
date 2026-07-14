@@ -50,6 +50,27 @@ CORRECTION_KEYWORDS = [
     "na verdade", "não é assim", "nao e assim", "errado", "errada",
     "meu nome e", "meu nome é", "na verdade meu nome",
 ]
+CALENDAR_KEYWORDS = [
+    "agenda", "reuniao", "evento", "compromisso", "lembrete",
+    "calendario", "disponivel", "semana que vem", "proxima semana",
+]
+DRIVE_KEYWORDS = [
+    "drive", "documento", "arquivo", "pasta", "upload",
+    "omnichannel", "atividades", "baixar", "encontrar arquivo",
+]
+EMAIL_KEYWORDS = [
+    "email", "e-mail", "caixa de entrada", "gmail",
+    "ler email", "enviar email", "ultimos emails",
+]
+WEB_KEYWORDS = [
+    "pesquisar", "buscar na internet", "procure por",
+    "o que e", "quem e", "noticia", "significa",
+    "busca pra mim", "pesquisa sobre",
+]
+INTIMACY_KEYWORDS = [
+    "me chame de", "pode me chamar de", "meu apelido",
+    "meu nome e", "meu nome é", "como devo te chamar",
+]
 
 
 def _detect_intent(text: str) -> Dict[str, Any]:
@@ -59,6 +80,11 @@ def _detect_intent(text: str) -> Dict[str, Any]:
         "is_gross": any(kw in text_lower for kw in GROSS_KEYWORDS),
         "is_assault_related": any(kw in text_lower for kw in ASSAULT_KEYWORDS),
         "is_correction": any(kw in text_lower for kw in CORRECTION_KEYWORDS),
+        "is_calendar": any(kw in text_lower for kw in CALENDAR_KEYWORDS),
+        "is_drive": any(kw in text_lower for kw in DRIVE_KEYWORDS),
+        "is_email": any(kw in text_lower for kw in EMAIL_KEYWORDS),
+        "is_web_search": any(kw in text_lower for kw in WEB_KEYWORDS),
+        "is_intimacy": any(kw in text_lower for kw in INTIMACY_KEYWORDS),
     }
 
 
@@ -91,11 +117,24 @@ def _iter_agents():
 
 
 def _resolve_agent_for_intent(intent: Dict[str, Any], instance: str) -> Optional[str]:
-    """Resolve which specialist agent should handle this intent."""
+    """Resolve which specialist or manager should handle this intent.
+
+    Priority: safety (morality) > learning > intimacy > managers > default
+    """
     if intent["is_gross"] or intent["is_assault_related"]:
         return "agent-morality"
     if intent["is_correction"]:
         return "agent-learning"
+    if intent["is_intimacy"]:
+        return "agent-intimacy"
+    if intent["is_calendar"]:
+        return "manager-calendar"
+    if intent["is_drive"]:
+        return "manager-drive"
+    if intent["is_email"]:
+        return "manager-email"
+    if intent["is_web_search"]:
+        return "manager-web"
     return None
 
 

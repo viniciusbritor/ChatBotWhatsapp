@@ -30,22 +30,22 @@ class TestDetectIntent:
 class TestResolveAgentForIntent:
     def test_gross_routes_to_morality(self):
         from orchestrator import _resolve_agent_for_intent
-        intent = {"is_gross": True, "is_assault_related": False, "is_correction": False}
+        intent = {"is_gross": True, "is_assault_related": False, "is_correction": False, "is_calendar": False, "is_drive": False, "is_email": False, "is_web_search": False, "is_intimacy": False}
         assert _resolve_agent_for_intent(intent, "jennifer") == "agent-morality"
 
     def test_assault_routes_to_morality(self):
         from orchestrator import _resolve_agent_for_intent
-        intent = {"is_gross": False, "is_assault_related": True, "is_correction": False}
+        intent = {"is_gross": False, "is_assault_related": True, "is_correction": False, "is_calendar": False, "is_drive": False, "is_email": False, "is_web_search": False, "is_intimacy": False}
         assert _resolve_agent_for_intent(intent, "jennifer") == "agent-morality"
 
     def test_correction_routes_to_learning(self):
         from orchestrator import _resolve_agent_for_intent
-        intent = {"is_gross": False, "is_assault_related": False, "is_correction": True}
+        intent = {"is_gross": False, "is_assault_related": False, "is_correction": True, "is_calendar": False, "is_drive": False, "is_email": False, "is_web_search": False, "is_intimacy": False}
         assert _resolve_agent_for_intent(intent, "jennifer") == "agent-learning"
 
     def test_clean_returns_none(self):
         from orchestrator import _resolve_agent_for_intent
-        intent = {"is_gross": False, "is_assault_related": False, "is_correction": False}
+        intent = {"is_gross": False, "is_assault_related": False, "is_correction": False, "is_calendar": False, "is_drive": False, "is_email": False, "is_web_search": False, "is_intimacy": False}
         assert _resolve_agent_for_intent(intent, "jennifer") is None
 
 
