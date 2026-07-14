@@ -15,6 +15,7 @@ import os
 import json
 import logging
 import time
+import asyncio
 from typing import Dict, Any, Optional, List
 
 from core.llm_provider import LLMProvider, LLMError
@@ -22,7 +23,7 @@ from core.masker import mask_pii
 from core.escalation import compute_confidence_score, should_escalate
 from core.delay_calculator import calculate_delay_ms, calculate_presence
 from core.commands import detect_command, apply_command
-from tool_registry import TOOL_REGISTRY, get_tool
+from tool_registry import TOOL_REGISTRY, get_tool, get_tool_schema
 from agent_loader import get_agent, get_skill, list_skills
 from core.audit import log_action
 
@@ -246,7 +247,7 @@ async def _execute_agent(
     payload: Dict[str, Any],
     extra: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Execute a specific agent with its system prompt and tools."""
+    """Execute a specific agent with tool calling loop."""
     skills_section = _build_skills_section(agent.get("skills", []))
     system_prompt = agent.get("system_prompt", "") + skills_section
 
@@ -266,30 +267,58 @@ async def _execute_agent(
     no_escalation = agent.get("no_escalation", False)
     thinking = agent.get("thinking", "disabled") == "enabled"
     fast_model = agent.get("model", "deepseek-v4-flash")
-    pro_model = agent.get("model_escalation") or "deepseek-v4-pro"
 
-    def scoring_fn(text_response: str) -> int:
-        return compute_confidence_score(text_response)
+    tool_schemas = []
+    for tid in available_tools:
+        schema = get_tool_schema(tid)
+        if schema:
+            tool_schemas.append({"type": "function", "function": schema})
+
+    def tool_executor(tool_name: str, tool_args: dict) -> str:
+        tool_fn = get_tool(tool_name)
+        if not tool_fn:
+            return json.dumps({"error": f"Tool '{tool_name}' not found"})
+        try:
+            if asyncio.iscoroutinefunction(tool_fn):
+                result = asyncio.run(tool_fn(**tool_args))
+            else:
+                result = tool_fn(**tool_args)
+            return json.dumps(result, ensure_ascii=False, default=str)
+        except Exception as e:
+            return json.dumps({"error": str(e)})
 
     try:
-        result = llm.chat_escalating(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            fast_model=fast_model,
-            pro_model=pro_model,
-            threshold=threshold,
-            no_escalation=no_escalation,
-            temperature=0.7,
-            max_tokens=500,
-            thinking_disabled=not thinking,
-            scoring_fn=scoring_fn,
-        )
+        if tool_schemas:
+            result = llm.chat_with_tools(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                tools=tool_schemas,
+                tool_executor=tool_executor,
+                model=fast_model,
+                temperature=0.7,
+                max_tokens=1000,
+                thinking_disabled=not thinking,
+                max_tool_rounds=5,
+            )
+        else:
+            result = llm.chat_escalating(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                fast_model=fast_model,
+                pro_model=agent.get("model_escalation") or "deepseek-v4-pro",
+                threshold=threshold,
+                no_escalation=no_escalation,
+                temperature=0.7,
+                max_tokens=500,
+                thinking_disabled=not thinking,
+                scoring_fn=lambda t: compute_confidence_score(t),
+            )
 
         reply_text = result["content"]
         delay_ms = calculate_delay_ms(reply_text)
         presence = calculate_presence()
 
-        tool_calls = _extract_tool_calls(reply_text, available_tools)
+        tool_calls_made = _extract_tool_calls(reply_text, available_tools)
 
         return {
             "reply": reply_text,
@@ -297,11 +326,10 @@ async def _execute_agent(
             "presence": presence,
             "metadata": {
                 "agent_id": agent.get("id"),
-                "model_used": result["model_used"],
-                "provider": result["provider"],
-                "escalated": result.get("escalated", False),
-                "confidence_score": result.get("confidence_score"),
-                "tool_calls": tool_calls,
+                "model_used": result.get("model_used", fast_model),
+                "provider": result.get("provider", ""),
+                "tool_rounds": result.get("tool_rounds", 0),
+                "tool_calls": tool_calls_made,
                 "has_audio": extra.get("has_audio", False),
             },
         }

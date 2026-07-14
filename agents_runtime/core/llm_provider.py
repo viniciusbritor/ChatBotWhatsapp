@@ -65,6 +65,7 @@ class LLMProvider:
         temperature: float,
         max_tokens: int,
         thinking_disabled: bool,
+        tools: Optional[List[Dict]] = None,
     ) -> Dict[str, Any]:
         """Build request payload (OpenAI-compatible)."""
         payload = {
@@ -80,6 +81,8 @@ class LLMProvider:
             payload["response_format"] = {"type": "json_object"}
         if thinking_disabled:
             payload["thinking"] = {"type": "disabled"}
+        if tools:
+            payload["tools"] = tools
         return payload
 
     def _call_deepseek(
@@ -298,7 +301,205 @@ class LLMProvider:
         thinking_disabled: bool = True,
         scoring_fn=None,
     ) -> Dict[str, Any]:
-        """Try Flash first; if cascade fails, escalate to Pro explicitly.
+        """Try Flash first; if cascade fails, escalate to Pro explicitly."""
+        if no_escalation:
+            result = self.chat(
+                system_prompt, user_prompt, fast_model, json_mode, temperature, max_tokens, thinking_disabled
+            )
+            return {**result, "escalated": False}
+
+        fast_resp = self.chat(
+            system_prompt, user_prompt, fast_model, json_mode, temperature, max_tokens, thinking_disabled
+        )
+        if scoring_fn is None:
+            return {**fast_resp, "escalated": False}
+        try:
+            score = scoring_fn(fast_resp["content"])
+        except Exception as e:
+            logger.warning(f"Scoring function failed: {e}")
+            return {**fast_resp, "escalated": False}
+        if score > threshold:
+            return {**fast_resp, "escalated": False, "confidence_score": score}
+
+        logger.info(f"Escalating to {pro_model} (score={score}, threshold={threshold})")
+        pro_resp = self.chat(
+            system_prompt, user_prompt, pro_model, json_mode, temperature, max_tokens, thinking_disabled
+        )
+        return {**pro_resp, "escalated": True, "confidence_score": score, "fast_response": fast_resp}
+
+    @staticmethod
+    def parse_tool_calls(response_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Extract tool_calls from LLM response."""
+        choices = response_data.get("choices", [])
+        if not choices:
+            return []
+        msg = choices[0].get("message", {})
+        return msg.get("tool_calls", [])
+
+    def chat_with_tools(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        tools: List[Dict[str, Any]],
+        tool_executor=None,
+        model: str = "deepseek-v4-flash",
+        json_mode: bool = False,
+        temperature: float = 0.7,
+        max_tokens: int = 1000,
+        thinking_disabled: bool = True,
+        max_tool_rounds: int = 5,
+    ) -> Dict[str, Any]:
+        """Call LLM with tool calling support.
+
+        Loops: LLM with tools -> execute tool calls -> add results -> re-call LLM
+
+        Args:
+            tool_executor: callable(tool_name, tool_args) -> str (tool result)
+            tools: OpenAI-compatible tools list
+        """
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        tool_count = 0
+
+        while tool_count < max_tool_rounds:
+            payload = self._build_payload(
+                model, "", "", json_mode, temperature, max_tokens, thinking_disabled, tools
+            )
+            payload["messages"] = messages
+
+            result = self._call_provider(payload, model)
+            content = result.get("content", "")
+            tool_calls = self.parse_tool_calls(result)
+
+            if not tool_calls:
+                return {
+                    "content": content,
+                    "model_used": model,
+                    "provider": result.get("provider", ""),
+                    "tool_rounds": tool_count,
+                }
+
+            messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
+            for tc in tool_calls:
+                func = tc.get("function", {})
+                name = func.get("name", "")
+                args_str = func.get("arguments", "{}")
+                try:
+                    args = json.loads(args_str) if isinstance(args_str, str) else args_str
+                    logger.info(f"Executing tool: {name}({args})")
+                    if tool_executor:
+                        tool_result = tool_executor(name, args)
+                    else:
+                        tool_result = json.dumps({"error": "tool_executor not configured"})
+                except Exception as e:
+                    tool_result = json.dumps({"error": str(e)})
+                messages.append({
+                    "role": "tool",
+                    "content": str(tool_result) if isinstance(tool_result, str) else json.dumps(tool_result),
+                    "tool_call_id": tc.get("id", ""),
+                })
+                logger.info(f"Tool {name} result: {str(tool_result)[:100]}")
+            tool_count += 1
+
+        logger.warning(f"Max tool rounds ({max_tool_rounds}) reached, returning last content")
+        return {
+            "content": content if 'content' in locals() else "Maximo de execucoes de ferramentas atingido.",
+            "model_used": model,
+            "provider": result.get("provider", "") if 'result' in locals() else "",
+            "tool_rounds": tool_count,
+        }
+
+    def _call_provider(self, payload: Dict[str, Any], model: str) -> Dict[str, Any]:
+        """Execute a single provider call and return structured result."""
+        attempts = []
+        cascade = self._build_cascade_providers(model)
+
+        for attempt_idx, (pname, pmodel, method_name, call_model) in enumerate(cascade):
+            try:
+                if method_name == "_call_deepseek":
+                    content = self._call_deepseek_raw(call_model, payload)
+                elif method_name == "_call_nvidia":
+                    content = self._call_nvidia_raw(call_model, payload)
+                elif method_name == "_call_minimax":
+                    content = self._call_minimax_raw(payload)
+                else:
+                    raise LLMError(f"unknown_method: {method_name}")
+                attempts.append(f"{pname}:success")
+                return {"content": content, "model_used": pmodel, "provider": pname, "attempts": attempts}
+            except LLMError as e:
+                attempts.append(f"{pname}:{str(e)}")
+                self._backoff_sleep(attempt_idx)
+                continue
+            except Exception as e:
+                attempts.append(f"{pname}:unexpected:{type(e).__name__}")
+                continue
+        raise LLMError(f"all_providers_failed: {attempts}")
+
+    def _call_deepseek_raw(self, model: str, payload: Dict[str, Any]) -> str:
+        if not self.deepseek_key:
+            raise LLMError("deepseek_key_not_configured")
+        url = f"{self.deepseek_base}/chat/completions"
+        headers = {"Authorization": f"Bearer {self.deepseek_key}", "Content-Type": "application/json"}
+        payload["model"] = model
+        resp = requests.post(url, headers=headers, json=payload, timeout=120)
+        if resp.status_code == 429:
+            raise LLMError("deepseek_quota_exceeded")
+        if resp.status_code == 401:
+            raise LLMError("deepseek_auth_failed")
+        resp.raise_for_status()
+        data = resp.json()
+        if "choices" not in data or not data["choices"]:
+            raise LLMError("deepseek_empty_response")
+        return data
+
+    def _call_nvidia_raw(self, model: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        if not self.nvidia_key:
+            raise LLMError("nvidia_key_not_configured")
+        url = f"{self.nvidia_base}/chat/completions"
+        headers = {"Authorization": f"Bearer {self.nvidia_key}", "Content-Type": "application/json"}
+        payload["model"] = model
+        resp = requests.post(url, headers=headers, json=payload, timeout=120)
+        if resp.status_code == 429:
+            raise LLMError("nvidia_quota_exceeded")
+        resp.raise_for_status()
+        data = resp.json()
+        if "choices" not in data or not data["choices"]:
+            raise LLMError("nvidia_empty_response")
+        return data
+
+    def _call_minimax_raw(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        if not self.minimax_key:
+            raise LLMError("minimax_key_not_configured")
+        url = f"{self.minimax_base}/chat/completions"
+        headers = {"Authorization": f"Bearer {self.minimax_key}", "Content-Type": "application/json"}
+        payload["model"] = self.minimax_model
+        payload.pop("thinking", None)
+        resp = requests.post(url, headers=headers, json=payload, timeout=120)
+        if resp.status_code == 429:
+            raise LLMError("minimax_quota_exceeded")
+        resp.raise_for_status()
+        data = resp.json()
+        if "choices" not in data or not data["choices"]:
+            raise LLMError("minimax_empty_response")
+        return data
+
+    def chat_escalating(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        fast_model: str = "deepseek-v4-flash",
+        pro_model: str = "deepseek-v4-pro",
+        threshold: int = -2,
+        no_escalation: bool = False,
+        json_mode: bool = False,
+        temperature: float = 0.7,
+        max_tokens: int = 1000,
+        thinking_disabled: bool = True,
+        scoring_fn=None,
+    ) -> Dict[str, Any]:
+        """Try Flash first; escalate to Pro if confidence is low.
 
         With the 5-tier cascade (Flash -> NVIDIA Flash -> Pro -> NVIDIA Pro -> MiniMax),
         the chat() already tries Pro after Flash. This method adds heuristic escalation:

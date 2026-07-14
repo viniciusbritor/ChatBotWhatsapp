@@ -355,16 +355,18 @@ body{{font-family:Inter,-apple-system,sans-serif;background:#f9fafb;color:#17171
   <div class="grid2">
     <div class="card">
       <h3>Criar / Editar Agente</h3>
+      <div class="form-group"><label>Selecionar Agente Existente</label><select id="agent-select" onchange="loadAgentForEdit()"><option value="">-- Novo Agente --</option></select></div>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <button class="btn btn-primary btn-sm" onclick="newAgentForm()">Novo Agente</button>
+        <button class="btn btn-danger btn-sm" id="btn-delete-agent" onclick="deleteAgent()" style="display:none">Excluir</button>
+      </div>
       <div class="form-group"><label>ID do Agente</label><input id="agent-id" placeholder="ex: manager-calendar"></div>
       <div class="form-group"><label>Nome</label><input id="agent-name" placeholder="Calendar Manager"></div>
       <div class="form-group"><label>Role</label><select id="agent-role"><option value="orchestrator">Orchestrator</option><option value="manager">Manager</option><option value="specialist">Specialist</option></select></div>
       <div class="form-group"><label>Modelo</label><select id="agent-model"><option value="deepseek-v4-flash">DeepSeek V4 Flash</option><option value="deepseek-v4-pro">DeepSeek V4 Pro</option></select></div>
-      <div class="form-group"><label>System Prompt</label><textarea id="agent-prompt" placeholder="System prompt do agente..."></textarea></div>
+      <div class="form-group"><label>System Prompt</label><textarea id="agent-prompt" placeholder="System prompt do agente..." style="min-height:120px"></textarea></div>
       <div class="form-group"><label>Skills (IDs separados por vírgula)</label><input id="agent-skills" placeholder="skill-motivacao,skill-busca-contexto"></div>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-primary" onclick="saveAgent()">Salvar Agente</button>
-        <button class="btn btn-danger btn-sm" onclick="deleteAgent()">Excluir</button>
-      </div>
+      <button class="btn btn-primary" onclick="saveAgent()">Salvar Agente</button>
       <div id="agent-msg" style="margin-top:8px;font-size:12px"></div>
     </div>
     <div>
@@ -414,7 +416,7 @@ function switchTab(name) {{
   document.getElementById('tab-'+name).classList.add('active');
   if (name==='fluxo') loadFluxo();
   if (name==='agentes') loadAgentes();
-  if (name==='gerenciar') loadSkillsList();
+  if (name==='gerenciar') { loadSkillsList(); loadAgentSelect(); }
 }}
 
 async function loadFluxo() {{
@@ -504,6 +506,51 @@ async function loadSkillsList() {{
   }} catch(e) {{}}
 }}
 
+var agentDataForEdit = null;
+
+async function loadAgentSelect() {{
+  try {{
+    const agents = (await api('/admin/agents')).agents || [];
+    const sel = document.getElementById('agent-select');
+    sel.innerHTML = '<option value="">-- Novo Agente --</option>';
+    agents.forEach(a => {{
+      const opt = document.createElement('option');
+      opt.value = a.id;
+      opt.textContent = a.name + ' (' + a.id + ')';
+      sel.appendChild(opt);
+    }});
+    agentDataForEdit = agents;
+  }} catch(e) {{}}
+}}
+
+function loadAgentForEdit() {{
+  const sel = document.getElementById('agent-select');
+  const id = sel.value;
+  if (!id) {{ newAgentForm(); return; }}
+  const agent = agentDataForEdit.find(a => a.id === id);
+  if (!agent) return;
+  document.getElementById('agent-id').value = agent.id || '';
+  document.getElementById('agent-name').value = agent.name || '';
+  document.getElementById('agent-role').value = agent.role || 'specialist';
+  document.getElementById('agent-model').value = agent.model || 'deepseek-v4-flash';
+  document.getElementById('agent-prompt').value = agent.system_prompt || '';
+  document.getElementById('agent-skills').value = (agent.skills||[]).join(', ');
+  document.getElementById('btn-delete-agent').style.display = 'inline-block';
+  document.getElementById('agent-msg').innerHTML = '';
+}}
+
+function newAgentForm() {{
+  document.getElementById('agent-select').value = '';
+  document.getElementById('agent-id').value = '';
+  document.getElementById('agent-name').value = '';
+  document.getElementById('agent-role').value = 'specialist';
+  document.getElementById('agent-model').value = 'deepseek-v4-flash';
+  document.getElementById('agent-prompt').value = '';
+  document.getElementById('agent-skills').value = '';
+  document.getElementById('btn-delete-agent').style.display = 'none';
+  document.getElementById('agent-msg').innerHTML = '';
+}}
+
 async function saveAgent() {{
   const body = {{
     id: document.getElementById('agent-id').value.trim(),
@@ -535,8 +582,8 @@ async function deleteAgent() {{
   try {{
     await apiDelete('/admin/agents/'+id);
     document.getElementById('agent-msg').innerHTML = '<span style="color:#16a34a">Agente excluído!</span>';
-    document.getElementById('agent-id').value = '';
-    document.getElementById('agent-name').value = '';
+    newAgentForm();
+    loadAgentSelect();
   }} catch(e) {{
     document.getElementById('agent-msg').innerHTML = `<span style="color:#dc2626">Erro: ${{e.message}}</span>`;
   }}
