@@ -142,22 +142,77 @@ Usuario autorizou saida do plan mode e inicio da implementacao com:
 - Verificar se o `whatsapp-agente-test` esta rodando e consegue chamar agents_runtime
 - Testar com curl direto no `/chat` para isolar se o problema e no LLM ou no WhatsApp
 
+---
+
+## 14/07/2026 17:00 BRT — Deploy Ambiente Test + Pipeline Completo
+
+### Cascade de Fallback — 5 niveis (`core/llm_provider.py`)
+Expandido de 3 para 5 niveis:
+1. `deepseek-v4-flash` (DeepSeek direto)
+2. `deepseek-ai/deepseek-v4-flash` (NVIDIA NIM)
+3. `deepseek-v4-pro` (DeepSeek direto)
+4. `deepseek-ai/deepseek-v4-pro` (NVIDIA NIM)
+5. `MiniMax-M3` (ultimo recurso)
+
+Adicionado `_build_cascade_providers()` que pula providers sem API key configurada.
+
+### Cloud Build — agents_runtime
+| Arquivo | Mudanca |
+|---|---|
+| `cloudbuild.yaml` -> `cloudbuild-test.yaml` | Secrets case-sensitive, `GCP_PROJECT`, paths relativos, `$BUILD_ID` |
+| `cloudbuild.yaml` (novo, prod) | Deploy `agents-runtime-prod`, min=1, max=5 |
+| `core/secrets.py` | `.strip().lstrip("\ufeff")` |
+
+### Cloud Build — WhatsApp Agent
+| Arquivo | Mudanca |
+|---|---|
+| `whatsapp-agente/cloudbuild.yaml` | Contexto Docker corrigido, env vars hardcoded |
+| `agente/main.py` | Logs debug no `extract_message` + `lstrip("\ufeff")` |
+| `agente/secrets_manager.py` | `.lstrip("\ufeff")` |
+
+### Triggers (region=global)
+| Trigger | Branch | Config |
+|---|---|---|
+| `deploy-agents-runtime-test` | `^test$` | `agents_runtime/cloudbuild-test.yaml` |
+| `deploy-agents-runtime-prod` | `^main$` | `agents_runtime/cloudbuild.yaml` |
+
+### Secrets Corrigidos
+| Secret | Problema | Solucao |
+|---|---|---|
+| `evolution-api-key` | BOM + placeholder | API HTTP + chave real `jennifer_secret_2025` |
+| `agents-runtime-url` | BOM | API HTTP |
+
+**Licao**: `gcloud secrets versions access` no Windows falha com BOM. Usar API HTTP.
+
+### Erro "Send failed: ascii codec"
+BOM no `evolution-api-key` quebrava `httpx` (headers HTTP precisam ser ASCII/Latin-1). Placeholder `PLACEHOLDER_...` mascarado. Chave real = `jennifer_secret_2025`.
+
+### Pipeline Final (funcionando)
 ```
-## [DD/MM/AAAA HH:MM BRT] - [Título da Sessão/Fase]
-
-### O que foi construido
-- [lista de itens]
-
-### Decisões arquiteturais importantes tomadas
-- **[Decisão]:** [Escolha] — [Justificativa]
-
-### Testes executados
-- pytest: [X passed, Y failed]
-- Smoke manual: [resultado]
-
-### Bugs contornados ou Limitações descobertas
-- [Descrição + workaround]
-
-### Próximos passos
-- [Próxima fase]
+WhatsApp -> Evolution -> whatsapp-agente -> agents_runtime -> LLM -> WhatsApp
 ```
+
+### Agentes Ativos
+9 no Firestore, 3 com roteamento: `jennifier`, `agent-morality`, `agent-learning`.
+
+### Pendencias
+- Trigger `deploy-whatsapp-agente-test` (repo nao conectado)
+- Delegacao para managers (calendar, drive, email, web)
+- `faster-whisper` no Dockerfile
+- Cloud Scheduler: `/version` -> `/healthz`
+
+---
+
+## 14/07/2026 17:45 BRT — Correções em Paralelo (Em Andamento)
+
+### 1. Confirmação de Leitura (WhatsApp blue ticks)
+
+**ANTES**: `mark_as_read()` em `whatsapp-agente/agente/main.py:232` usava payload v1 (`messageIds`/`remoteJids`) e endpoint singular (`markMessageAsRead`). Excecoes engolidas silenciosamente.
+
+**DEPOIS**: Payload v2 (`readMessages` array de objetos com `id`, `fromMe`, `remoteJid`) + endpoint plural (`markMessagesAsRead`) + `logger.error()` no except.
+
+### 2. Portal CRUD (admin endpoints)
+
+**ANTES**: `POST /admin/agents`, `/admin/skills`, `/admin/tools` em `agents_runtime/main.py:173-232` eram stubs — retornavam mock sem escrever no Firestore.
+
+**DEPOIS**: Implementado Firestore CRUD real:

@@ -163,6 +163,64 @@ def list_tools() -> List[Dict[str, Any]]:
 def force_reload():
     """Force immediate reload from Firestore."""
     _load_all()
+    logger.info("Forced reload complete")
+
+
+def upsert_agent(agent_id: str, data: Dict[str, Any]) -> bool:
+    db = _get_firestore_client()
+    if db is None:
+        return False
+    try:
+        data["updated_at"] = __import__("datetime").datetime.utcnow().isoformat() + "Z"
+        db.collection("agents").document(agent_id).set(data, merge=True)
+        logger.info(f"Agent '{agent_id}' upserted to Firestore")
+        force_reload()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to upsert agent '{agent_id}': {e}")
+        return False
+
+
+def delete_agent(agent_id: str) -> bool:
+    db = _get_firestore_client()
+    if db is None:
+        return False
+    try:
+        db.collection("agents").document(agent_id).delete()
+        logger.info(f"Agent '{agent_id}' deleted from Firestore")
+        force_reload()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to delete agent '{agent_id}': {e}")
+        return False
+
+
+def upsert_skill(skill_id: str, data: Dict[str, Any]) -> bool:
+    db = _get_firestore_client()
+    if db is None:
+        return False
+    try:
+        data["updated_at"] = __import__("datetime").datetime.utcnow().isoformat() + "Z"
+        db.collection("skills").document(skill_id).set(data, merge=True)
+        force_reload()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to upsert skill '{skill_id}': {e}")
+        return False
+
+
+def upsert_tool(tool_id: str, data: Dict[str, Any]) -> bool:
+    db = _get_firestore_client()
+    if db is None:
+        return False
+    try:
+        data["updated_at"] = __import__("datetime").datetime.utcnow().isoformat() + "Z"
+        db.collection("tools").document(tool_id).set(data, merge=True)
+        force_reload()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to upsert tool '{tool_id}': {e}")
+        return False
 
 
 def get_cache_stats() -> Dict[str, Any]:

@@ -19,6 +19,7 @@ from core.llm_provider import LLMProvider, LLMError
 from core.masker import mask_pii
 from core.escalation import compute_confidence_score
 from agent_loader import start_loader, stop_loader, list_agents, list_skills, list_tools, get_agent
+from agent_loader import force_reload, upsert_agent, delete_agent, upsert_skill, upsert_tool
 from orchestrator import orchestrate
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
@@ -174,18 +175,16 @@ async def proactive_send(request: Request):
 async def admin_agents_post(request: Request):
     """Create or update an agent (Portal proxy)."""
     body = await request.json()
-    agent_id = body.get("id", "unknown")
+    agent_id = body.get("id")
+    if not agent_id:
+        raise HTTPException(status_code=422, detail="id required")
 
-    from agent_loader import force_reload
-    force_reload()
-
-    return JSONResponse(
-        content={
-            "status": "ok",
-            "agent_id": agent_id,
-            "note": "Agent upsert + cache reload triggered",
-        }
-    )
+    success = upsert_agent(agent_id, body)
+    return JSONResponse(content={
+        "status": "ok" if success else "error",
+        "agent_id": agent_id,
+        "upserted": success,
+    })
 
 
 @app.get("/admin/agents")
@@ -203,37 +202,56 @@ async def admin_agents_get(agent_id: str):
     return JSONResponse(content={"agent": agent})
 
 
+@app.delete("/admin/agents/{agent_id}")
+async def admin_agents_delete(agent_id: str):
+    """Delete an agent (Portal proxy)."""
+    success = delete_agent(agent_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="delete_failed")
+    return JSONResponse(content={"status": "ok", "agent_id": agent_id, "deleted": True})
+
+
 @app.post("/admin/skills")
 async def admin_skills_post(request: Request):
+    """Create or update a skill (Portal proxy)."""
     body = await request.json()
-    return JSONResponse(
-        content={
-            "status": "ok",
-            "skill_id": body.get("id", "unknown"),
-            "note": "Skill upsert + cache reload triggered",
-        }
-    )
+    skill_id = body.get("id")
+    if not skill_id:
+        raise HTTPException(status_code=422, detail="id required")
+
+    success = upsert_skill(skill_id, body)
+    return JSONResponse(content={
+        "status": "ok" if success else "error",
+        "skill_id": skill_id,
+        "upserted": success,
+    })
 
 
 @app.get("/admin/skills")
 async def admin_skills_list():
+    """List all skills (Portal proxy)."""
     return JSONResponse(content={"skills": list_skills()})
 
 
 @app.post("/admin/tools")
 async def admin_tools_post(request: Request):
+    """Create or update a tool (Portal proxy)."""
     body = await request.json()
-    return JSONResponse(
-        content={
-            "status": "ok",
-            "tool_id": body.get("id", "unknown"),
-            "note": "Tool upsert + cache reload triggered",
-        }
-    )
+    tool_id = body.get("id")
+    if not tool_id:
+        raise HTTPException(status_code=422, detail="id required")
+
+    success = upsert_tool(tool_id, body)
+    return JSONResponse(content={
+        "status": "ok" if success else "error",
+        "tool_id": tool_id,
+        "upserted": success,
+    })
 
 
 @app.get("/admin/tools")
 async def admin_tools_list():
+    """List all tools (Portal proxy)."""
     return JSONResponse(content={"tools": list_tools()})
 
 
