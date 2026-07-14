@@ -39,7 +39,7 @@ def get_secret(key: str, default: Optional[str] = None) -> Optional[str]:
             client = secretmanager.SecretManagerServiceClient()
             name = f"projects/{gcp_project}/secrets/{key}/versions/latest"
             response = client.access_secret_version(request={"name": name})
-            return response.payload.data.decode("UTF-8")
+            return response.payload.data.decode("UTF-8").strip().lstrip("\ufeff")
         except Exception as e:
             logger.warning(f"Could not fetch secret {key} from Secret Manager: {e}")
 
