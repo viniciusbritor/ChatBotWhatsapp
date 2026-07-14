@@ -1,0 +1,1 @@
+{"webhook": {"url": "https://whatsapp-agente-test-894828119087.us-central1.run.app/webhook", "events": ["MESSAGES_UPSERT", "CONNECTION_UPDATE"], "enabled": true, "webhookByEvents": false, "webhookBase64": false}}

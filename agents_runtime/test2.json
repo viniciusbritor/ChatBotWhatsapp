@@ -1,0 +1,16 @@
+{
+  "event": "MESSAGES_UPSERT",
+  "instance": "jennifer",
+  "data": {
+    "key": {
+      "remoteJid": "5511966830020@s.whatsapp.net",
+      "fromMe": false,
+      "id": "TEST_MSG_002"
+    },
+    "pushName": "Vinicius",
+    "message": {
+      "conversation": "Teste fim a fim"
+    },
+    "messageType": "conversation"
+  }
+}

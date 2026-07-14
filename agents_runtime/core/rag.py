@@ -1,0 +1,221 @@
+"""RAG core - MiniMax embeddings + Firestore Vector search."""
+import os
+import hashlib
+import logging
+from typing import Optional, Dict, Any, List
+
+from core.secrets import get_secret
+
+logger = logging.getLogger(__name__)
+
+EMBEDDING_MODEL = os.getenv("RAG_EMBEDDING_MODEL", "embo-01")
+EMBEDDING_DIM = int(os.getenv("RAG_EMBEDDING_DIM", "1536"))
+COLLECTION_PREFIX = os.getenv("RAG_COLLECTION_PREFIX", "agente-knowledge-")
+
+_minimax_embeddings = None
+
+
+def _get_minimax_embeddings():
+    """Lazy load MiniMax embeddings (LangChain)."""
+    global _minimax_embeddings
+    if _minimax_embeddings is None:
+        try:
+            from langchain_community.embeddings import MiniMaxEmbeddings
+            api_key = get_secret("MINIMAX_API_KEY")
+            group_id = get_secret("MINIMAX_GROUP_ID") or os.getenv("MINIMAX_GROUP_ID", "")
+            if not api_key:
+                raise RuntimeError("MINIMAX_API_KEY not configured")
+            _minimax_embeddings = MiniMaxEmbeddings(model=EMBEDDING_MODEL)
+            logger.info(f"MiniMax embeddings initialized (model={EMBEDDING_MODEL})")
+        except Exception as e:
+            logger.error(f"Failed to init MiniMax embeddings: {e}")
+            return None
+    return _minimax_embeddings
+
+
+def _get_firestore():
+    """Get Firestore client."""
+    try:
+        from google.cloud import firestore
+        project = os.getenv("GCP_PROJECT") or os.getenv("GCLOUD_PROJECT")
+        if not project or os.getenv("FIRESTORE_EMULATOR_HOST"):
+            return None
+        return firestore.Client(project=project)
+    except Exception as e:
+        logger.warning(f"Firestore unavailable: {e}")
+        return None
+
+
+def _collection_name(phone: str) -> str:
+    """Build collection name for a phone."""
+    phone_clean = phone.replace("+", "").replace("-", "").replace(" ", "")
+    return f"{COLLECTION_PREFIX}{phone_clean}"
+
+
+async def embed_query(text: str) -> Optional[List[float]]:
+    """Embed a query string using MiniMax."""
+    emb = _get_minimax_embeddings()
+    if emb is None:
+        return None
+    try:
+        loop = __import__("asyncio").get_event_loop()
+        vec = await loop.run_in_executor(None, emb.embed_query, text)
+        return vec
+    except Exception as e:
+        logger.error(f"Embedding failed: {e}")
+        return None
+
+
+async def embed_documents(texts: List[str]) -> Optional[List[List[float]]]:
+    """Embed multiple documents."""
+    emb = _get_minimax_embeddings()
+    if emb is None:
+        return None
+    try:
+        loop = __import__("asyncio").get_event_loop()
+        vecs = await loop.run_in_executor(None, emb.embed_documents, texts)
+        return vecs
+    except Exception as e:
+        logger.error(f"Embedding batch failed: {e}")
+        return None
+
+
+async def index_document(
+    phone: str,
+    text_content: str,
+    source_title: str,
+    source_url: Optional[str] = None,
+    category: str = "legislacao",
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Index a document into the RAG vector store.
+
+    Args:
+        phone: Phone of agent-master (used in collection name)
+        text_content: Document text to embed
+        source_title: Human-readable title
+        source_url: Source URL (optional)
+        category: Category (legislacao, site_info, youtube_transcript)
+        metadata: Additional metadata
+
+    Returns:
+        {"doc_id": str, "phone": str, "chunks": int}
+    """
+    db = _get_firestore()
+    if db is None:
+        return {"error": "firestore_unavailable"}
+
+    chunks = _chunk_text(text_content)
+    if not chunks:
+        return {"error": "empty_content"}
+
+    vectors = await embed_documents(chunks)
+    if vectors is None or len(vectors) != len(chunks):
+        return {"error": "embedding_failed"}
+
+    from google.cloud.firestore_v1.vector import Vector
+
+    collection = _collection_name(phone)
+    doc_ids = []
+
+    batch = db.batch()
+    for i, (chunk, vec) in enumerate(zip(chunks, vectors)):
+        doc_id = hashlib.sha256(f"{source_title}_{i}_{chunk[:50]}".encode()).hexdigest()[:32]
+        ref = db.collection(collection).document(doc_id)
+        doc_data = {
+            "text_content": chunk,
+            "vector_embedding": Vector(vec),
+            "embedding_model": EMBEDDING_MODEL,
+            "embedding_dim": EMBEDDING_DIM,
+            "source_title": source_title,
+            "source_url": source_url,
+            "category": category,
+            "chunk_index": i,
+            "language": "pt",
+            "fetched_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        }
+        if metadata:
+            doc_data.update(metadata)
+        batch.set(ref, doc_data)
+        doc_ids.append(doc_id)
+    batch.commit()
+
+    return {
+        "doc_ids": doc_ids,
+        "phone": phone,
+        "chunks": len(chunks),
+        "source_title": source_title,
+    }
+
+
+async def search_legal_knowledge(
+    phone: str,
+    query: str,
+    k: int = 5,
+    min_score: float = 0.5,
+) -> Dict[str, Any]:
+    """Search RAG for relevant legal documents.
+
+    Args:
+        phone: Phone of agent-master
+        query: User query
+        k: Number of results to return
+        min_score: Minimum similarity score (0-1)
+
+    Returns:
+        {"results": [{"text": ..., "score": ..., "source": ...}], "query": str}
+    """
+    db = _get_firestore()
+    if db is None:
+        return {"results": [], "error": "firestore_unavailable"}
+
+    query_vec = await embed_query(query)
+    if query_vec is None:
+        return {"results": [], "error": "embedding_failed"}
+
+    try:
+        from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
+
+        collection = _collection_name(phone)
+        results = db.collection(collection).find_neighbors(
+            vector_field="vector_embedding",
+            query_vector=db.vector(query_vec),
+            distance_measure=DistanceMeasure.COSINE,
+            limit=k,
+        ).get()
+
+        chunks = []
+        for doc in results:
+            score = 1.0 - (doc.distance / 2.0)
+            if score < min_score:
+                continue
+            data = doc.to_dict()
+            chunks.append({
+                "text": data.get("text_content", ""),
+                "score": score,
+                "source": data.get("source_title", ""),
+                "source_url": data.get("source_url", ""),
+                "category": data.get("category", ""),
+            })
+
+        return {"results": chunks, "query": query, "phone": phone}
+    except Exception as e:
+        logger.error(f"Vector search failed: {e}")
+        return {"results": [], "error": str(e)}
+
+
+def _chunk_text(text: str, max_chars: int = 1200, overlap: int = 180) -> List[str]:
+    """Split text into overlapping chunks."""
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = min(start + max_chars, len(text))
+        if end < len(text):
+            for sep in ["\n\n", "\n", ". ", "? ", "! "]:
+                last_sep = text.rfind(sep, start, end)
+                if last_sep > start + max_chars // 2:
+                    end = last_sep + len(sep)
+                    break
+        chunks.append(text[start:end].strip())
+        start = end - overlap if end < len(text) else end
+    return [c for c in chunks if c]

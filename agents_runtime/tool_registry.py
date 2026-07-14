@@ -1,0 +1,299 @@
+"""Tool Registry - central map of tool_id -> implementation function.
+
+Each tool has:
+- id: unique identifier
+- function: callable
+- description: for LLM schema
+- parameters_schema: OpenAI-compatible JSON schema
+"""
+import logging
+from typing import Dict, Any, Callable, Awaitable
+
+from tools import google_calendar, google_drive, google_gmail, web_search, nickname
+
+logger = logging.getLogger(__name__)
+
+ToolFn = Callable[..., Awaitable[Dict[str, Any]]]
+
+TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
+    "calendar.list_events": {
+        "function": google_calendar.list_events,
+        "implementation": "google_calendar",
+        "description": "Lista eventos do Google Calendar entre time_min e time_max.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "time_min": {"type": "string", "description": "ISO 8601 datetime inicio"},
+                "time_max": {"type": "string", "description": "ISO 8601 datetime fim"},
+                "calendar_id": {"type": "string", "description": "ID do calendario (default: primary)"},
+                "max_results": {"type": "integer", "description": "Maximo de eventos (default: 50)"},
+            },
+            "required": ["time_min", "time_max"],
+        },
+    },
+    "calendar.create_event": {
+        "function": google_calendar.create_event,
+        "implementation": "google_calendar",
+        "description": "Cria um novo evento no Google Calendar.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "start": {"type": "string", "description": "ISO 8601 datetime inicio"},
+                "end": {"type": "string", "description": "ISO 8601 datetime fim"},
+                "summary": {"type": "string", "description": "Titulo do evento"},
+                "description": {"type": "string", "description": "Descricao opcional"},
+                "attendees": {"type": "array", "items": {"type": "string"}, "description": "Lista de emails"},
+                "location": {"type": "string", "description": "Local do evento"},
+                "calendar_id": {"type": "string"},
+            },
+            "required": ["start", "end", "summary"],
+        },
+    },
+    "calendar.update_event": {
+        "function": google_calendar.update_event,
+        "implementation": "google_calendar",
+        "description": "Atualiza um evento existente.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "event_id": {"type": "string"},
+                "start": {"type": "string"},
+                "end": {"type": "string"},
+                "summary": {"type": "string"},
+                "description": {"type": "string"},
+                "location": {"type": "string"},
+                "attendees": {"type": "array", "items": {"type": "string"}},
+                "calendar_id": {"type": "string"},
+            },
+            "required": ["event_id"],
+        },
+    },
+    "calendar.delete_event": {
+        "function": google_calendar.delete_event,
+        "implementation": "google_calendar",
+        "description": "Deleta um evento do calendar.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "event_id": {"type": "string"},
+                "calendar_id": {"type": "string"},
+            },
+            "required": ["event_id"],
+        },
+    },
+    "calendar.freebusy": {
+        "function": google_calendar.freebusy,
+        "implementation": "google_calendar",
+        "description": "Consulta free/busy de calendarios.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "time_min": {"type": "string"},
+                "time_max": {"type": "string"},
+                "calendars": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["time_min", "time_max"],
+        },
+    },
+    "drive.search_files": {
+        "function": google_drive.search_files,
+        "implementation": "google_drive",
+        "description": "Busca arquivos no Google Drive por nome.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "folder_id": {"type": "string"},
+                "mime_type": {"type": "string"},
+                "max_results": {"type": "integer"},
+            },
+            "required": ["query"],
+        },
+    },
+    "drive.upload_file": {
+        "function": google_drive.upload_file,
+        "implementation": "google_drive",
+        "description": "Faz upload de arquivo para uma pasta do Drive.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "folder_id": {"type": "string"},
+                "filename": {"type": "string"},
+                "content": {"type": "string"},
+                "mime_type": {"type": "string"},
+            },
+            "required": ["folder_id", "filename", "content"],
+        },
+    },
+    "drive.list_folder": {
+        "function": google_drive.list_folder,
+        "implementation": "google_drive",
+        "description": "Lista conteudo de uma pasta do Drive.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "folder_id": {"type": "string"},
+                "max_results": {"type": "integer"},
+            },
+        },
+    },
+    "drive.create_folder": {
+        "function": google_drive.create_folder,
+        "implementation": "google_drive",
+        "description": "Cria uma pasta no Drive.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "parent_id": {"type": "string"},
+            },
+            "required": ["name"],
+        },
+    },
+    "gmail.search_messages": {
+        "function": google_gmail.search_messages,
+        "implementation": "google_gmail",
+        "description": "Busca mensagens no Gmail por query.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "max_results": {"type": "integer"},
+                "label_ids": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["query"],
+        },
+    },
+    "gmail.get_thread": {
+        "function": google_gmail.get_thread,
+        "implementation": "google_gmail",
+        "description": "Retorna todas as mensagens de uma thread.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "thread_id": {"type": "string"},
+            },
+            "required": ["thread_id"],
+        },
+    },
+    "gmail.send_message": {
+        "function": google_gmail.send_message,
+        "implementation": "google_gmail",
+        "description": "Envia um email.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "to": {"type": "string"},
+                "subject": {"type": "string"},
+                "body": {"type": "string"},
+                "thread_id": {"type": "string"},
+                "html": {"type": "boolean"},
+            },
+            "required": ["to", "subject", "body"],
+        },
+    },
+    "web.search": {
+        "function": web_search.serper_search,
+        "implementation": "web_search",
+        "description": "Busca na web via Serper.dev (com cache 24h).",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "num": {"type": "integer", "description": "Numero de resultados (default: 10)"},
+            },
+            "required": ["query"],
+        },
+    },
+    "web.fetch_url": {
+        "function": web_search.fetch_url,
+        "implementation": "web_search",
+        "description": "Faz fetch do conteudo de uma URL.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string"},
+                "timeout": {"type": "integer"},
+            },
+            "required": ["url"],
+        },
+    },
+    "nickname.lookup": {
+        "function": nickname.lookup,
+        "implementation": "nickname",
+        "description": "Busca apelidos conhecidos para um nome.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+            },
+            "required": ["name"],
+        },
+    },
+    "nickname.set_consent": {
+        "function": nickname.set_consent,
+        "implementation": "nickname",
+        "description": "Registra consentimento do usuario sobre um apelido.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string"},
+                "name": {"type": "string"},
+                "nickname": {"type": "string"},
+                "accepted": {"type": "boolean"},
+            },
+            "required": ["phone", "name", "nickname"],
+        },
+    },
+    "nickname.get_preferred_name": {
+        "function": nickname.get_preferred_name,
+        "implementation": "nickname",
+        "description": "Retorna o nome preferido (apelido aceito) do usuario.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string"},
+            },
+            "required": ["phone"],
+        },
+    },
+    "drive.find_omnichannel_atas_folder": {
+        "function": google_drive.find_omnichannel_atas_folder,
+        "implementation": "google_drive",
+        "description": "Encontra a pasta Omnichannel/Atas/ no Drive.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+}
+
+
+def get_tool(tool_id: str):
+    """Get tool function by id."""
+    entry = TOOL_REGISTRY.get(tool_id)
+    if entry:
+        return entry["function"]
+    return None
+
+
+def get_tool_schema(tool_id: str):
+    """Get tool schema for LLM."""
+    entry = TOOL_REGISTRY.get(tool_id)
+    if entry:
+        return {
+            "name": tool_id,
+            "description": entry["description"],
+            "parameters": entry["parameters_schema"],
+        }
+    return None
+
+
+def list_tool_ids() -> list:
+    """List all registered tool IDs."""
+    return list(TOOL_REGISTRY.keys())
+
+
+def get_tools_for_agent(tool_ids: list) -> list:
+    """Get tool schemas for an agent."""
+    return [get_tool_schema(tid) for tid in tool_ids if get_tool_schema(tid)]
