@@ -1,27 +1,35 @@
 steps:
-  - name: "python:test"
-    image: "python:3.12-slim"
+  - name: "python:3.12-slim"
     entrypoint: "bash"
     args:
       - "-c"
       - "pip install -q -r requirements.txt && pytest -q tests/"
 
-  - name: "docker:build"
-    image: "gcr.io/cloud-builders/docker"
-    args: ["build", "-t", "gcr.io/$PROJECT_ID/agents-runtime:$COMMIT_SHA", "."]
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "build"
+      - "-t"
+      - "gcr.io/$PROJECT_ID/agents-runtime:$BUILD_ID"
+      - "-t"
+      - "gcr.io/$PROJECT_ID/agents-runtime:latest"
+      - "."
 
-  - name: "docker:push"
-    image: "gcr.io/cloud-builders/docker"
-    args: ["push", "gcr.io/$PROJECT_ID/agents-runtime:$COMMIT_SHA"]
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "push"
+      - "gcr.io/$PROJECT_ID/agents-runtime:$BUILD_ID"
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "push"
+      - "gcr.io/$PROJECT_ID/agents-runtime:latest"
 
-  - name: "gcloud:deploy"
-    image: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
     entrypoint: "gcloud"
     args:
       - "run"
       - "deploy"
       - "agents-runtime-test"
-      - "--image=gcr.io/$PROJECT_ID/agents-runtime:$COMMIT_SHA"
+      - "--image=gcr.io/$PROJECT_ID/agents-runtime:$BUILD_ID"
       - "--region=us-central1"
       - "--platform=managed"
       - "--allow-unauthenticated"
@@ -33,11 +41,12 @@ steps:
       - "--no-cpu-throttling"
       - "--port=8080"
       - "--timeout=120"
-      - "--set-env-vars=ENVIRONMENT=test,LOG_LEVEL=INFO,AGENT_RELOAD_INTERVAL_SEC=120"
-      - "--set-secrets=DEEPSEEK_API_KEY=deepseek-api-key:latest,NVIDIA_API_KEY=nvidia-api-key:latest,MINIMAX_API_KEY=minimax-api-key:latest,SERPER_API_KEY=serper-api-key:latest,GOOGLE_OAUTH_TOKEN=google-oauth-token:latest,AGENTS_RUNTIME_SA_TOKEN_SECRET=agents-runtime-sa-token:latest"
+      - "--set-env-vars=ENVIRONMENT=test,LOG_LEVEL=INFO,AGENT_RELOAD_INTERVAL_SEC=120,GCP_PROJECT=coherence-ominichannel-fs,WHISPER_MODEL=base,WHISPER_DEVICE=cpu,WHISPER_COMPUTE_TYPE=int8,WHISPER_DOWNLOAD_ROOT=/app/whisper_models"
+      - "--set-secrets=DEEPSEEK_API_KEY=DEEPSEEK_API_KEY:latest,NVIDIA_API_KEY=NVIDIA_API_KEY:latest,MINIMAX_API_KEY=MINIMAX_API_KEY:latest,SERPER_API_KEY=serper-api-key:latest,GOOGLE_OAUTH_TOKEN=google-oauth-token:latest,AGENTS_RUNTIME_SA_TOKEN_SECRET=agents-runtime-sa-token:latest"
 
 images:
-  - "gcr.io/$PROJECT_ID/agents-runtime:$COMMIT_SHA"
+  - "gcr.io/$PROJECT_ID/agents-runtime:$BUILD_ID"
+  - "gcr.io/$PROJECT_ID/agents-runtime:latest"
 
 options:
   logging: CLOUD_LOGGING_ONLY
