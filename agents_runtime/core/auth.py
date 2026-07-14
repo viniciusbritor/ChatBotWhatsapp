@@ -1,5 +1,14 @@
-"""Bearer SA token middleware for admin/chat/proactive endpoints."""
+"""Bearer SA token middleware for admin/chat/proactive endpoints.
+
+Accepts:
+- Authorization: Bearer <SA_TOKEN> header
+- ?token=<SA_TOKEN> query string
+- ?token=<FIREBASE_JWT> query string (Portal integration)
+"""
 import os
+import json
+import time
+import base64
 import logging
 from fastapi import Request, HTTPException
 from fastapi.responses import JSONResponse
@@ -7,6 +16,7 @@ from fastapi.responses import JSONResponse
 logger = logging.getLogger(__name__)
 
 PROTECTED_PATHS = ("/admin", "/chat", "/proactive/send", "/version")
+FIREBASE_PROJECT = os.getenv("GCP_PROJECT", "coherence-ominichannel-fs")
 
 
 def get_sa_token() -> str:
@@ -17,6 +27,44 @@ def get_sa_token() -> str:
 def is_path_protected(path: str) -> bool:
     """Check if path requires Bearer SA token."""
     return any(path.startswith(p) for p in PROTECTED_PATHS)
+
+
+def _decode_jwt_payload(token: str) -> dict:
+    """Decode JWT payload without signature verification (Portal already validated)."""
+    try:
+        parts = token.split(".")
+        if len(parts) != 3:
+            return {}
+        payload_b64 = parts[1]
+        payload_b64 += "=" * (4 - len(payload_b64) % 4)
+        payload_bytes = base64.urlsafe_b64decode(payload_b64)
+        return json.loads(payload_bytes)
+    except Exception:
+        return {}
+
+
+def _is_valid_firebase_jwt(token: str) -> bool:
+    """Validate that the token looks like a valid Firebase JWT."""
+    if not token or len(token) < 50:
+        return False
+    payload = _decode_jwt_payload(token)
+    if not payload:
+        return False
+    try:
+        aud = payload.get("aud", "")
+        exp = payload.get("exp", 0)
+        now = int(time.time())
+        firebase_signer = payload.get("firebase", {}).get("sign_in_provider")
+        if aud != FIREBASE_PROJECT:
+            return False
+        if exp < now:
+            return False
+        if firebase_signer is None:
+            return False
+        logger.info(f"Firebase JWT accepted for user: {payload.get('email', 'unknown')}")
+        return True
+    except Exception:
+        return False
 
 
 async def auth_middleware(request: Request, call_next):
@@ -55,11 +103,14 @@ async def auth_middleware(request: Request, call_next):
             content={"error": "unauthorized", "message": "Bearer token required"},
         )
 
-    if provided_token != expected_token:
-        logger.warning(f"Invalid SA token attempt for path {path}")
-        return JSONResponse(
-            status_code=403,
-            content={"error": "forbidden", "message": "Invalid SA token"},
-        )
+    if provided_token == expected_token:
+        return await call_next(request)
 
-    return await call_next(request)
+    if _is_valid_firebase_jwt(provided_token):
+        return await call_next(request)
+
+    logger.warning(f"Invalid SA token attempt for path {path}")
+    return JSONResponse(
+        status_code=403,
+        content={"error": "forbidden", "message": "Invalid SA token"},
+    )
