@@ -12,6 +12,7 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse, HTMLResponse
+from starlette.responses import RedirectResponse
 
 from core.auth import auth_middleware
 from core.delay_calculator import calculate_delay_ms, calculate_presence
@@ -342,3 +343,21 @@ async def admin_cache_stats():
     """Get agent loader cache statistics."""
     from agent_loader import get_cache_stats
     return JSONResponse(content=get_cache_stats())
+
+
+@app.get("/")
+async def root_redirect(request: Request):
+    """Redirect root to orchestration dashboard, preserving Firebase token."""
+    token = request.query_params.get("token", "")
+    if token:
+        return RedirectResponse(url=f"/admin/dashboard/diagrama?token={token}")
+    return JSONResponse(content={
+        "service": "agents_runtime",
+        "version": VERSION,
+        "endpoints": {
+            "health": "/healthz",
+            "dashboard": "/admin/dashboard/diagrama",
+            "orchestration": "/admin/dashboard/orchestration",
+            "agents": "/admin/agents",
+        },
+    })
