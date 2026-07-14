@@ -48,7 +48,6 @@ ASSAULT_KEYWORDS = [
 ]
 CORRECTION_KEYWORDS = [
     "na verdade", "não é assim", "nao e assim", "errado", "errada",
-    "meu nome e", "meu nome é", "na verdade meu nome",
 ]
 CALENDAR_KEYWORDS = [
     "agenda", "reuniao", "evento", "compromisso", "lembrete",
