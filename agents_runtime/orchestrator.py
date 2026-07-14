@@ -37,10 +37,10 @@ def get_recent_interactions(limit: int = 5) -> List[Dict[str, Any]]:
     return _interaction_history[-limit:]
 
 GROSS_KEYWORDS = [
-    "puta", "merda", "caralho", "fdp", "porra", "cu", "cuzão", "cuzão",
+    "puta", "merda", "caralho", "fdp", "porra",
     "buceta", "viado", "bicha", "desgraça",
     "foder", "fode", "piranha", "vagabunda", "puto",
-    "merda", "bosta", "porcaria", "desgraçado",
+    "bosta", "porcaria", "desgraçado",
 ]
 ASSAULT_KEYWORDS = [
     "assedio", "abuso", "estupro", "violencia", "agressao",
