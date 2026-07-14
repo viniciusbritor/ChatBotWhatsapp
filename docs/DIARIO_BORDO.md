@@ -116,7 +116,31 @@ Usuario autorizou saida do plan mode e inicio da implementacao com:
 
 ---
 
-## Formato Sugerido para Proximas Entradas
+## 14/07/2026 — Ajuste do Cascade de Fallback (5 níveis + skip de providers sem key)
+
+### O que foi alterado
+- **`core/llm_provider.py`**: Cascade expandido de 3 para 5 níveis:
+  1. DeepSeek V4 Flash (direct)
+  2. NVIDIA NIM V4 Flash
+  3. DeepSeek V4 Pro (direct)
+  4. NVIDIA NIM V4 Pro
+  5. MiniMax M3 (last resort)
+- Adicionado `_build_cascade_providers()` que monta a lista intercalada e **pula providers cuja API key nao esta configurada** (otimizacao de tempo no fallback).
+- `chat_escalating()` mantido como estava — a heuristica de confianca continua funcionando, com o Pro ja incluso no cascade natural.
+
+### Testes executados
+- pytest: 152 passed, 9 skipped, 0 failed
+- Teste `test_cascade_fallback_to_nvidia` corrigido: provider name `nvidia` -> `nvidia-flash`
+
+### Notas sobre entrega de mensagens
+- O fluxo `orchestrate() -> main.py /chat -> JSONResponse` esta correto e retorna sempre `{reply, delay_ms, presence, metadata}`.
+- Se o LLM cascade falha, retorna mensagem de erro visivel ao usuario no WhatsApp.
+- A causa do "nao recebe mensagem" provavelmente esta no **WhatsappAgente** (proxy externo) ou na **Evolution API**, nao no agents_runtime.
+
+### Próximos passos
+- Verificar logs do Cloud Run (`agents-runtime-test`) para confirmar se `/chat` recebe requests
+- Verificar se o `whatsapp-agente-test` esta rodando e consegue chamar agents_runtime
+- Testar com curl direto no `/chat` para isolar se o problema e no LLM ou no WhatsApp
 
 ```
 ## [DD/MM/AAAA HH:MM BRT] - [Título da Sessão/Fase]

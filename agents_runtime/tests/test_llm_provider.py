@@ -59,7 +59,7 @@ class TestChatCascade:
                 result = provider.chat("sys", "user", model="deepseek-v4-flash")
 
         assert result["content"] == "NVIDIA answer"
-        assert result["provider"] == "nvidia"
+        assert result["provider"] == "nvidia-flash"
         assert len(result["attempts"]) == 2
 
     def test_all_providers_fail(self, monkeypatch):

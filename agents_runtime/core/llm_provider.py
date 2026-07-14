@@ -1,11 +1,11 @@
-"""LLM cascade: DeepSeek V4 Flash -> NVIDIA NIM (V4 Flash) -> MiniMax M3.
+"""LLM cascade: DeepSeek V4 Flash -> NVIDIA V4 Flash -> DeepSeek V4 Pro -> NVIDIA V4 Pro -> MiniMax M3.
 
 Features:
 - Cascade fallback on failure (quota, auth, timeout)
 - Exponential backoff with jitter
-- Optional escalation from Flash to Pro via heuristic
 - JSON mode support (auto-injects "JSON:" prefix per DeepSeek requirement)
 - Thinking mode toggle per request
+- chat_escalating uses built-in cascade order (Pro comes after Flash in fallback chain)
 """
 import os
 import time
@@ -35,7 +35,7 @@ class LLMProvider:
         self.deepseek_base = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
         self.nvidia_base = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
         self.minimax_base = os.getenv(
-            "MINIMAX_BASE_URL", "https://api.minimax.io/v1/text/chatcompletions"
+            "MINIMAX_BASE_URL", "https://api.minimax.io/v1"
         )
         self.minimax_model = os.getenv("MINIMAX_MODEL", "MiniMax-M3")
 
@@ -174,7 +174,7 @@ class LLMProvider:
         if not self.minimax_key:
             raise LLMError("minimax_key_not_configured")
 
-        url = self.minimax_base
+        url = f"{self.minimax_base}/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.minimax_key}",
             "Content-Type": "application/json",
@@ -194,6 +194,34 @@ class LLMProvider:
             raise LLMError("minimax_empty_response")
         return data["choices"][0]["message"]["content"]
 
+    def _build_cascade_providers(self, model: str):
+        """Build interleaved cascade list, skipping providers without keys.
+
+        Cascade order (user-requested):
+        1. DeepSeek V4 Flash (direct)
+        2. NVIDIA NIM V4 Flash
+        3. DeepSeek V4 Pro (direct)
+        4. NVIDIA NIM V4 Pro
+        5. MiniMax M3 (last resort)
+        """
+        providers = []
+
+        if self.deepseek_key:
+            providers.append(("deepseek", model, "_call_deepseek", model))
+        if self.nvidia_key:
+            providers.append(("nvidia-flash", "deepseek-ai/deepseek-v4-flash", "_call_nvidia", "deepseek-ai/deepseek-v4-flash"))
+        if self.deepseek_key:
+            providers.append(("deepseek-pro", "deepseek-v4-pro", "_call_deepseek", "deepseek-v4-pro"))
+        if self.nvidia_key:
+            providers.append(("nvidia-pro", "deepseek-ai/deepseek-v4-pro", "_call_nvidia", "deepseek-ai/deepseek-v4-pro"))
+        if self.minimax_key:
+            providers.append(("minimax", self.minimax_model, "_call_minimax", self.minimax_model))
+
+        if not providers:
+            raise LLMError("no_provider_keys_configured")
+
+        return providers
+
     def chat(
         self,
         system_prompt: str,
@@ -206,26 +234,37 @@ class LLMProvider:
     ) -> Dict[str, Any]:
         """Call LLM with cascade fallback.
 
+        Cascade order (skips providers without keys):
+        1. DeepSeek V4 Flash (direct)
+        2. NVIDIA NIM V4 Flash
+        3. DeepSeek V4 Pro (direct)
+        4. NVIDIA NIM V4 Pro
+        5. MiniMax M3 (last resort)
+
         Returns:
             {"content": str, "model_used": str, "attempts": List[str]}
         """
         attempts = []
 
-        providers = [
-            ("deepseek", model, lambda: self._call_deepseek(
-                model, system_prompt, user_prompt, json_mode, temperature, max_tokens, thinking_disabled
-            )),
-            ("nvidia", "deepseek-ai/deepseek-v4-flash", lambda: self._call_nvidia(
-                "deepseek-ai/deepseek-v4-flash", system_prompt, user_prompt, json_mode, temperature, max_tokens, thinking_disabled
-            )),
-            ("minimax", self.minimax_model, lambda: self._call_minimax(
-                system_prompt, user_prompt, json_mode, temperature, max_tokens
-            )),
-        ]
+        cascade = self._build_cascade_providers(model)
 
-        for attempt_idx, (provider_name, provider_model, call_fn) in enumerate(providers):
+        for attempt_idx, (provider_name, provider_model, method_name, call_model) in enumerate(cascade):
             try:
-                content = call_fn()
+                if method_name == "_call_deepseek":
+                    content = self._call_deepseek(
+                        call_model, system_prompt, user_prompt, json_mode, temperature, max_tokens, thinking_disabled
+                    )
+                elif method_name == "_call_nvidia":
+                    content = self._call_nvidia(
+                        call_model, system_prompt, user_prompt, json_mode, temperature, max_tokens, thinking_disabled
+                    )
+                elif method_name == "_call_minimax":
+                    content = self._call_minimax(
+                        system_prompt, user_prompt, json_mode, temperature, max_tokens
+                    )
+                else:
+                    raise LLMError(f"unknown_method: {method_name}")
+
                 attempts.append(f"{provider_name}:success")
                 return {
                     "content": content,
@@ -259,7 +298,11 @@ class LLMProvider:
         thinking_disabled: bool = True,
         scoring_fn=None,
     ) -> Dict[str, Any]:
-        """Try Flash first; escalate to Pro if confidence is low.
+        """Try Flash first; if cascade fails, escalate to Pro explicitly.
+
+        With the 5-tier cascade (Flash -> NVIDIA Flash -> Pro -> NVIDIA Pro -> MiniMax),
+        the chat() already tries Pro after Flash. This method adds heuristic escalation:
+        if Flash response has low confidence, force a retry with pro_model explicitly.
 
         Args:
             scoring_fn: callable(text) -> int, computes confidence score.
