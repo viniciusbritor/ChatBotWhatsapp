@@ -216,3 +216,6 @@ WhatsApp -> Evolution -> whatsapp-agente -> agents_runtime -> LLM -> WhatsApp
 **ANTES**: `POST /admin/agents`, `/admin/skills`, `/admin/tools` em `agents_runtime/main.py:173-232` eram stubs — retornavam mock sem escrever no Firestore.
 
 **DEPOIS**: Implementado Firestore CRUD real:
+- `agent_loader.py`: funcoes `upsert_agent()`, `delete_agent()`, `upsert_skill()`, `upsert_tool()` com escrita Firestore + `force_reload()` automatico
+- `main.py`: endpoints `POST /admin/agents`, `DELETE /admin/agents/{id}`, `POST /admin/skills`, `POST /admin/tools` chamam as funcoes reais
+- Alteracoes propagam em ate 2min via polling (120s) do agent_loader
