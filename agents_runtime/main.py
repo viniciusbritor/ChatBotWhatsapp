@@ -299,7 +299,7 @@ async def admin_knowledge_post(request: Request):
 
     try:
         from core.rag import index_document
-        doc_id = index_document(titulo, conteudo, categoria)
+        doc_id = await index_document(titulo, conteudo, categoria)
         return JSONResponse(content={"status": "ok", "doc_id": doc_id})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -315,7 +315,7 @@ async def admin_knowledge_search(request: Request):
 
     try:
         from core.rag import search_knowledge
-        results = search_knowledge(query, limit=limit)
+        results = await search_knowledge(query, limit=limit)
         return JSONResponse(content={"query": query, "results": results})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

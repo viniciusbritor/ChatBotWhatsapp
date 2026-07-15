@@ -224,10 +224,10 @@ def _chunk_text(text: str, max_chars: int = 1200, overlap: int = 180) -> List[st
 SHARED_COLLECTION = "knowledge-shared"
 
 
-def search_knowledge(query: str, limit: int = 5) -> List[Dict[str, Any]]:
+async def search_knowledge(query: str, limit: int = 5) -> List[Dict[str, Any]]:
     """Semantic search in the shared knowledge base (public data)."""
     try:
-        embedding = _embed_text(query)
+        embedding = await embed_query(query)
         if not embedding:
             return []
         db = _get_firestore()
@@ -256,14 +256,14 @@ def search_knowledge(query: str, limit: int = 5) -> List[Dict[str, Any]]:
         return []
 
 
-def index_document(titulo: str, conteudo: str, categoria: str = "geral", fonte: str = "") -> str:
+async def index_document(titulo: str, conteudo: str, categoria: str = "geral", fonte: str = "") -> str:
     """Index a document in the shared knowledge base with embedding."""
     db = _get_firestore()
     if db is None:
         raise RuntimeError("Firestore not configured")
     import uuid
     doc_id = f"{categoria}-{uuid.uuid4().hex[:8]}"
-    embedding = _embed_text(f"{titulo}\n{conteudo[:2000]}")
+    embedding = await embed_query(f"{titulo}\n{conteudo[:2000]}")
     data = {
         "titulo": titulo,
         "conteudo": conteudo,
