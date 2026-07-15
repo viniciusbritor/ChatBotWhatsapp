@@ -25,7 +25,11 @@ def _get_minimax_embeddings():
             group_id = get_secret("MINIMAX_GROUP_ID") or os.getenv("MINIMAX_GROUP_ID", "")
             if not api_key:
                 raise RuntimeError("MINIMAX_API_KEY not configured")
-            _minimax_embeddings = MiniMaxEmbeddings(model=EMBEDDING_MODEL)
+            _minimax_embeddings = MiniMaxEmbeddings(
+                model=EMBEDDING_MODEL,
+                minimax_api_key=api_key,
+                minimax_group_id=group_id,
+            )
             logger.info(f"MiniMax embeddings initialized (model={EMBEDDING_MODEL})")
         except Exception as e:
             logger.error(f"Failed to init MiniMax embeddings: {e}")
