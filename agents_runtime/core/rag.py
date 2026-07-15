@@ -1,5 +1,6 @@
 """RAG core - MiniMax embeddings + Firestore Vector search."""
 import os
+import asyncio
 import hashlib
 import logging
 from typing import Optional, Dict, Any, List
@@ -21,10 +22,15 @@ def _get_minimax_embeddings():
     if _minimax_embeddings is None:
         try:
             from langchain_community.embeddings import MiniMaxEmbeddings
-            api_key = get_secret("MINIMAX_API_KEY")
-            group_id = get_secret("MINIMAX_GROUP_ID") or os.getenv("MINIMAX_GROUP_ID", "")
+            api_key_raw = get_secret("MINIMAX_API_KEY") or ""
+            group_id_raw = get_secret("MINIMAX_GROUP_ID") or os.getenv("MINIMAX_GROUP_ID", "")
+            api_key = api_key_raw.strip().lstrip("\ufeff")
+            group_id = group_id_raw.strip().lstrip("\ufeff")
             if not api_key:
                 raise RuntimeError("MINIMAX_API_KEY not configured")
+            os.environ["MINIMAX_API_KEY"] = api_key
+            if group_id:
+                os.environ["MINIMAX_GROUP_ID"] = group_id
             _minimax_embeddings = MiniMaxEmbeddings(
                 model=EMBEDDING_MODEL,
                 minimax_api_key=api_key,
@@ -62,7 +68,7 @@ async def embed_query(text: str) -> Optional[List[float]]:
     if emb is None:
         return None
     try:
-        loop = __import__("asyncio").get_event_loop()
+        loop = asyncio.get_running_loop()
         vec = await loop.run_in_executor(None, emb.embed_query, text)
         return vec
     except Exception as e:
@@ -76,7 +82,7 @@ async def embed_documents(texts: List[str]) -> Optional[List[List[float]]]:
     if emb is None:
         return None
     try:
-        loop = __import__("asyncio").get_event_loop()
+        loop = asyncio.get_running_loop()
         vecs = await loop.run_in_executor(None, emb.embed_documents, texts)
         return vecs
     except Exception as e:
