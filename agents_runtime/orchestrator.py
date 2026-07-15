@@ -16,6 +16,7 @@ import json
 import logging
 import time
 import asyncio
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, List
 
 from core.llm_provider import LLMProvider, LLMError
@@ -250,6 +251,14 @@ async def _execute_agent(
     """Execute a specific agent with tool calling loop."""
     skills_section = _build_skills_section(agent.get("skills", []))
     system_prompt = agent.get("system_prompt", "") + skills_section
+
+    brt = timezone(timedelta(hours=-3))
+    hoje = datetime.now(brt)
+    system_prompt += (
+        f"\n\n[DATA ATUAL: {hoje.strftime('%Y-%m-%d')} (horario de Brasilia, BRT, UTC-3). "
+        f"Hora atual: {hoje.strftime('%H:%M')}. "
+        "Use esta data para todas as consultas de calendario e referencias temporais.]"
+    )
 
     static_user_prefix = (
         f"User: {payload.get('sender_name', 'user')} ({payload.get('phone', '')})\n"
