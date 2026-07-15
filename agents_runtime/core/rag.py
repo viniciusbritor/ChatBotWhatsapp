@@ -219,3 +219,59 @@ def _chunk_text(text: str, max_chars: int = 1200, overlap: int = 180) -> List[st
         chunks.append(text[start:end].strip())
         start = end - overlap if end < len(text) else end
     return [c for c in chunks if c]
+
+
+SHARED_COLLECTION = "knowledge-shared"
+
+
+def search_knowledge(query: str, limit: int = 5) -> List[Dict[str, Any]]:
+    """Semantic search in the shared knowledge base (public data)."""
+    try:
+        embedding = _embed_text(query)
+        if not embedding:
+            return []
+        db = _get_firestore_client()
+        if db is None:
+            return []
+        results = []
+        docs = db.collection(SHARED_COLLECTION).limit(limit * 3).stream()
+        for doc in docs:
+            data = doc.to_dict()
+            stored_embedding = data.get("embedding", [])
+            if stored_embedding:
+                sim = _cosine_similarity(embedding, stored_embedding)
+                if sim > 0.5:
+                    results.append({
+                        "doc_id": doc.id,
+                        "titulo": data.get("titulo", ""),
+                        "conteudo": data.get("conteudo", "")[:500],
+                        "categoria": data.get("categoria", ""),
+                        "fonte": data.get("fonte", ""),
+                        "similarity": round(sim, 3),
+                    })
+        results.sort(key=lambda r: r["similarity"], reverse=True)
+        return results[:limit]
+    except Exception as e:
+        logger.error(f"Knowledge search failed: {e}")
+        return []
+
+
+def index_document(titulo: str, conteudo: str, categoria: str = "geral", fonte: str = "") -> str:
+    """Index a document in the shared knowledge base with embedding."""
+    db = _get_firestore_client()
+    if db is None:
+        raise RuntimeError("Firestore not configured")
+    import uuid
+    doc_id = f"{categoria}-{uuid.uuid4().hex[:8]}"
+    embedding = _embed_text(f"{titulo}\n{conteudo[:2000]}")
+    data = {
+        "titulo": titulo,
+        "conteudo": conteudo,
+        "categoria": categoria,
+        "fonte": fonte,
+        "embedding": embedding or [],
+        "created_at": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+    }
+    db.collection(SHARED_COLLECTION).document(doc_id).set(data)
+    logger.info(f"Document indexed: {doc_id} ({titulo})")
+    return doc_id

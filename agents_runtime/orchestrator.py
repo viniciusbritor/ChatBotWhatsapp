@@ -12,6 +12,7 @@ Flow:
 This is a simplified orchestrator (not full Agno Team) for clarity and testability.
 """
 import os
+import re
 import json
 import logging
 import time
@@ -25,7 +26,7 @@ from core.escalation import compute_confidence_score, should_escalate
 from core.delay_calculator import calculate_delay_ms, calculate_presence
 from core.commands import detect_command, apply_command
 from tool_registry import TOOL_REGISTRY, get_tool, get_tool_schema
-from agent_loader import get_agent, get_skill, list_skills
+from agent_loader import get_agent, get_skill, list_skills, get_user
 from core.audit import log_action
 
 logger = logging.getLogger(__name__)
@@ -139,6 +140,21 @@ def _resolve_agent_for_intent(intent: Dict[str, Any], instance: str) -> Optional
     return None
 
 
+PERSONAL_INTENTS = {"is_calendar", "is_drive", "is_email"}
+
+
+def _is_personal_intent(intent: Dict[str, Any]) -> bool:
+    """Check if intent involves personal data (calendar, email, drive)."""
+    return any(intent.get(k) for k in PERSONAL_INTENTS)
+
+
+def _is_group_message(payload: Dict[str, Any]) -> bool:
+    """Check if message is from a WhatsApp group."""
+    extra = payload.get("extra", {})
+    remote_jid = extra.get("remote_jid", payload.get("phone", ""))
+    return "@g.us" in str(remote_jid)
+
+
 async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Main orchestration entry point.
 
@@ -177,6 +193,27 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     path = []
     path.append({"step": 1, "phase": "intent_detect", "details": {k: v for k, v in intent.items() if v}})
+
+    if _is_personal_intent(intent) and _is_group_message(payload):
+        logger.info(f"Privacy guard: blocking personal intent in group from {phone}")
+        return {
+            "reply": f"Oi {sender_name}! Você pediu informações pessoais (agenda, email ou documentos). "
+                     "Em um grupo, prefiro não expor esses dados. Me chama no privado que te respondo! 🔒",
+            "delay_ms": 0,
+            "presence": "composing",
+            "metadata": {"agent_id": "privacy-guard", "blocked": "group_personal_data"},
+        }
+
+    if _is_personal_intent(intent) and not get_user(phone):
+        logger.info(f"Privacy guard: unregistered user {phone} requesting personal data")
+        return {
+            "reply": f"Oi {sender_name}! Para acessar agenda, emails ou documentos, "
+                     "você precisa vincular sua conta no Portal Coherence primeiro. "
+                     "Acesse o módulo 'Agentes Omnichannel' e registre seu token.",
+            "delay_ms": 0,
+            "presence": "composing",
+            "metadata": {"agent_id": "privacy-guard", "blocked": "unregistered_user"},
+        }
 
     cmd = detect_command(masked_text)
     if cmd:
@@ -257,7 +294,9 @@ async def _execute_agent(
     system_prompt += (
         f"\n\n[DATA ATUAL: {hoje.strftime('%Y-%m-%d')} (horario de Brasilia, BRT, UTC-3). "
         f"Hora atual: {hoje.strftime('%H:%M')}. "
-        "Use esta data para todas as consultas de calendario e referencias temporais.]"
+        "Use esta data para todas as consultas de calendario e referencias temporais. "
+        "IDIOMA: SEMPRE responda em portugues brasileiro (pt-BR). NAO use ingles. "
+        "NAO inclua tags XML como <think> nas suas respostas.]"
     )
 
     static_user_prefix = (
@@ -324,6 +363,7 @@ async def _execute_agent(
             )
 
         reply_text = result["content"]
+        reply_text = re.sub(r'\s*<think>.*?</think>\s*', '', reply_text, flags=re.DOTALL).strip()
         delay_ms = calculate_delay_ms(reply_text)
         presence = calculate_presence()
 

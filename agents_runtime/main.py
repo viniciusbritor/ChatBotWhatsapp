@@ -21,6 +21,7 @@ from core.masker import mask_pii
 from core.escalation import compute_confidence_score
 from agent_loader import start_loader, stop_loader, list_agents, list_skills, list_tools, get_agent
 from agent_loader import force_reload, upsert_agent, delete_agent, upsert_skill, upsert_tool
+from agent_loader import get_user, save_user, list_users
 from orchestrator import orchestrate, get_recent_interactions
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
@@ -254,6 +255,70 @@ async def admin_tools_post(request: Request):
 async def admin_tools_list():
     """List all tools (Portal proxy)."""
     return JSONResponse(content={"tools": list_tools()})
+
+
+@app.post("/admin/register-user")
+async def admin_register_user(request: Request):
+    """Register or update a user with their OAuth token."""
+    body = await request.json()
+    phone = body.get("phone")
+    if not phone:
+        raise HTTPException(status_code=422, detail="phone required")
+    success = save_user(phone, body)
+    return JSONResponse(content={
+        "status": "ok" if success else "error",
+        "phone": phone,
+        "registered": success,
+    })
+
+
+@app.get("/admin/users")
+async def admin_users_list():
+    """List all registered users."""
+    return JSONResponse(content={"users": list_users()})
+
+
+@app.get("/admin/users/{phone}")
+async def admin_users_get(phone: str):
+    """Get a specific user."""
+    user = get_user(phone)
+    if not user:
+        raise HTTPException(status_code=404, detail="user_not_found")
+    return JSONResponse(content={"user": user})
+
+
+@app.post("/admin/knowledge")
+async def admin_knowledge_post(request: Request):
+    """Index a document in the shared knowledge base."""
+    body = await request.json()
+    titulo = body.get("titulo", "")
+    conteudo = body.get("conteudo", "")
+    categoria = body.get("categoria", "geral")
+    if not titulo or not conteudo:
+        raise HTTPException(status_code=422, detail="titulo and conteudo required")
+
+    try:
+        from core.rag import index_document
+        doc_id = index_document(titulo, conteudo, categoria)
+        return JSONResponse(content={"status": "ok", "doc_id": doc_id})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/admin/knowledge/search")
+async def admin_knowledge_search(request: Request):
+    """Semantic search in shared knowledge base."""
+    query = request.query_params.get("q", "")
+    limit = int(request.query_params.get("limit", "5"))
+    if not query:
+        raise HTTPException(status_code=422, detail="q parameter required")
+
+    try:
+        from core.rag import search_knowledge
+        results = search_knowledge(query, limit=limit)
+        return JSONResponse(content={"query": query, "results": results})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/admin/dashboard/orchestration")

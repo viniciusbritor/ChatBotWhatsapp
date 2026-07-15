@@ -223,6 +223,48 @@ def upsert_tool(tool_id: str, data: Dict[str, Any]) -> bool:
         return False
 
 
+def get_user(phone: str) -> Optional[Dict[str, Any]]:
+    """Get user from Firestore usuarios/{phone}."""
+    db = _get_firestore_client()
+    if db is None:
+        return None
+    try:
+        doc = db.collection("usuarios").document(phone).get()
+        if doc.exists:
+            return doc.to_dict()
+        return None
+    except Exception as e:
+        logger.error(f"Failed to get user '{phone}': {e}")
+        return None
+
+
+def save_user(phone: str, data: Dict[str, Any]) -> bool:
+    """Create or update a user in Firestore."""
+    db = _get_firestore_client()
+    if db is None:
+        return False
+    try:
+        data["updated_at"] = __import__("datetime").datetime.utcnow().isoformat() + "Z"
+        data["phone"] = phone
+        db.collection("usuarios").document(phone).set(data, merge=True)
+        return True
+    except Exception as e:
+        logger.error(f"Failed to save user '{phone}': {e}")
+        return False
+
+
+def list_users() -> List[Dict[str, Any]]:
+    """List all registered users."""
+    db = _get_firestore_client()
+    if db is None:
+        return []
+    try:
+        return [doc.to_dict() for doc in db.collection("usuarios").stream()]
+    except Exception as e:
+        logger.error(f"Failed to list users: {e}")
+        return []
+
+
 def get_cache_stats() -> Dict[str, Any]:
     """Get cache statistics."""
     return {
