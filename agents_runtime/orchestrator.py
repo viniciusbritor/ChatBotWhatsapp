@@ -274,13 +274,13 @@ async def _execute_agent(
         if schema:
             tool_schemas.append({"type": "function", "function": schema})
 
-    def tool_executor(tool_name: str, tool_args: dict) -> str:
+    async def tool_executor(tool_name: str, tool_args: dict) -> str:
         tool_fn = get_tool(tool_name)
         if not tool_fn:
             return json.dumps({"error": f"Tool '{tool_name}' not found"})
         try:
             if asyncio.iscoroutinefunction(tool_fn):
-                result = asyncio.run(tool_fn(**tool_args))
+                result = await tool_fn(**tool_args)
             else:
                 result = tool_fn(**tool_args)
             return json.dumps(result, ensure_ascii=False, default=str)
@@ -289,7 +289,7 @@ async def _execute_agent(
 
     try:
         if tool_schemas:
-            result = llm.chat_with_tools(
+            result = await llm.chat_with_tools(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 tools=tool_schemas,

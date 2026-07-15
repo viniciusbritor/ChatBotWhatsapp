@@ -337,7 +337,7 @@ class LLMProvider:
         msg = choices[0].get("message", {})
         return msg.get("tool_calls", [])
 
-    def chat_with_tools(
+    async def chat_with_tools(
         self,
         system_prompt: str,
         user_prompt: str,
@@ -350,12 +350,13 @@ class LLMProvider:
         thinking_disabled: bool = True,
         max_tool_rounds: int = 5,
     ) -> Dict[str, Any]:
-        """Call LLM with tool calling support."""
+        """Call LLM with tool calling support. Async version."""
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
         tool_count = 0
+        last_content = ""
 
         while tool_count < max_tool_rounds:
             payload = self._build_payload(
@@ -371,6 +372,7 @@ class LLMProvider:
             msg = choices[0].get("message", {})
             content = msg.get("content", "")
             tool_calls = msg.get("tool_calls", [])
+            last_content = content
 
             if not tool_calls:
                 return {"content": content, "model_used": model, "tool_rounds": tool_count}
@@ -384,7 +386,7 @@ class LLMProvider:
                     args = json.loads(args_str) if isinstance(args_str, str) else args_str
                     logger.info(f"Executing tool: {name}({args})")
                     if tool_executor:
-                        tool_result = tool_executor(name, args)
+                        tool_result = await tool_executor(name, args)
                     else:
                         tool_result = json.dumps({"error": "tool_executor not configured"})
                 except Exception as e:
@@ -394,12 +396,9 @@ class LLMProvider:
                     "content": str(tool_result) if isinstance(tool_result, str) else json.dumps(tool_result),
                     "tool_call_id": tc.get("id", ""),
                 })
-                logger.info(f"Tool {name} result: {str(tool_result)[:100]}")
             tool_count += 1
 
-        logger.warning(f"Max tool rounds ({max_tool_rounds}) reached")
-        last_msg = messages[-1] if messages else {}
-        return {"content": last_msg.get("content", "Maximo de execucoes atingido."), "model_used": model, "tool_rounds": tool_count}
+        return {"content": last_content or "Maximo de execucoes atingido.", "model_used": model, "tool_rounds": tool_count}
 
     def _call_provider(self, payload: Dict[str, Any], model: str) -> Dict[str, Any]:
         """Execute a single provider call and return the full API response dict."""
