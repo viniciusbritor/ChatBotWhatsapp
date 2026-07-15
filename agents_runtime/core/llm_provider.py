@@ -8,6 +8,7 @@ Features:
 - chat_escalating uses built-in cascade order (Pro comes after Flash in fallback chain)
 """
 import os
+import json
 import time
 import random
 import logging
