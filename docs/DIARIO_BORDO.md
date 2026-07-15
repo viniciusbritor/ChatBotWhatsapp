@@ -219,3 +219,53 @@ WhatsApp -> Evolution -> whatsapp-agente -> agents_runtime -> LLM -> WhatsApp
 - `agent_loader.py`: funcoes `upsert_agent()`, `delete_agent()`, `upsert_skill()`, `upsert_tool()` com escrita Firestore + `force_reload()` automatico
 - `main.py`: endpoints `POST /admin/agents`, `DELETE /admin/agents/{id}`, `POST /admin/skills`, `POST /admin/tools` chamam as funcoes reais
 - Alteracoes propagam em ate 2min via polling (120s) do agent_loader
+
+---
+
+## 14/07/2026 22:00 BRT — Tool Calling Loop + Dashboard + Novos Agentes
+
+### Parte B: Tool Calling Loop (corrige calendar + todos managers)
+
+**Problema**: O `manager-calendar` existe com tools `calendar.list_events` etc., mas o LLM nunca executava as tools — inventava dados falsos (compromissos fictícios, data errada). O `llm_provider.py` não implementava function calling.
+
+**Causa raiz**: `_execute_agent()` passava `available_tools` mas nunca as inseria no payload da API. O DeepSeek V4 Flash/Fro suportam tool calling no formato OpenAI, mas o código ignorava isso.
+
+**Solucao** (`llm_provider.py`):
+- Adicionado `tools` ao `_build_payload()` — se lista for fornecida, adiciona ao body
+- Adicionado `_parse_tool_calls(response)` — extrai tool_calls da resposta
+- Adicionado `chat_with_tools()` — executa o loop completo:
+  1. Chama LLM com tools
+  2. Se `tool_calls` → executa via `tool_registry`
+  3. Adiciona resultado à conversa
+  4. Re-chama LLM (max 5 iterações)
+
+**Mudancas** (`orchestrator.py`):
+- `_execute_agent()` substituído para usar `chat_with_tools()`
+- Loop: LLM com tools → tool call → execução → resultado → LLM novamente
+
+**Impacto**: `manager-calendar` agora chama o Google Calendar real. `manager-drive`, `manager-email`, `manager-web` idem.
+
+### Parte A: Dashboard — Aba Gerenciar melhorada
+
+**ANTES**: Inputs de texto para ID, sem dropdown de agentes existentes, sem botao "Novo Agente" ou "Excluir".
+
+**DEPOIS**:
+- Dropdown `<select>` com todos os agentes carregado via API
+- Ao selecionar agente: preenche nome, role, modelo, system_prompt, skills
+- Botao "Novo Agente": limpa formulario
+- Botao "Excluir": confirmacao + `DELETE /admin/agents/{id}`
+- Botao "Salvar": upsert via `POST /admin/agents`
+
+### Parte C: Novos Agentes
+
+| Agente | Status | Tools |
+|---|---|---|
+| `agent-locomocao` | Tools registradas | `locomotion.calc_route` |
+| `agent-youtube` | Tools registradas | `youtube.search_videos` |
+| `agent-rag` | Tools registradas | `rag.search_knowledge`, `rag.index_document` |
+| `manager-drive-grupo` | Routing ajustado | `drive.search_files` com filtro de grupo |
+
+### Pendentes (para proxima sessao)
+- Adicionar `GOOGLE_MAPS_API_KEY` e `YOUTUBE_API_KEY` nos secrets
+- Instalar `googlemaps` no requirements.txt
+- Fazer deploy dos novos agentes + tool calling loop
