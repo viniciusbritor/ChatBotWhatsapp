@@ -224,6 +224,19 @@ def _chunk_text(text: str, max_chars: int = 1200, overlap: int = 180) -> List[st
 SHARED_COLLECTION = "knowledge-shared"
 
 
+def _cosine_similarity(a: List[float], b: List[float]) -> float:
+    """Compute cosine similarity between two vectors."""
+    import math
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(y * y for y in b))
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
 async def search_knowledge(query: str, limit: int = 5) -> List[Dict[str, Any]]:
     """Semantic search in the shared knowledge base (public data)."""
     try:
