@@ -230,7 +230,7 @@ def search_knowledge(query: str, limit: int = 5) -> List[Dict[str, Any]]:
         embedding = _embed_text(query)
         if not embedding:
             return []
-        db = _get_firestore_client()
+        db = _get_firestore()
         if db is None:
             return []
         results = []
@@ -258,7 +258,7 @@ def search_knowledge(query: str, limit: int = 5) -> List[Dict[str, Any]]:
 
 def index_document(titulo: str, conteudo: str, categoria: str = "geral", fonte: str = "") -> str:
     """Index a document in the shared knowledge base with embedding."""
-    db = _get_firestore_client()
+    db = _get_firestore()
     if db is None:
         raise RuntimeError("Firestore not configured")
     import uuid
