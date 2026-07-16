@@ -117,6 +117,15 @@ def _build_skills_section(skill_ids: List[str]) -> str:
     return "\n".join(parts)
 
 
+async def _get_orchestrator(instance: str) -> Optional[str]:
+    """Get orchestrator with cold-start retry."""
+    orchestrator_id = _select_orchestrator_agent(instance)
+    if not orchestrator_id:
+        await asyncio.sleep(3)
+        orchestrator_id = _select_orchestrator_agent(instance)
+    return orchestrator_id
+
+
 def _select_orchestrator_agent(instance: str) -> Optional[str]:
     """Select which orchestrator agent to use for this instance."""
     for agent_id, agent in _iter_agents():
@@ -264,7 +273,7 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
             result = await _execute_agent(agent, masked_text, payload, extra)
         else:
             path.append({"step": 2, "phase": "fallback_to_orchestrator", "reason": "specialist_disabled"})
-            orchestrator_id = _select_orchestrator_agent(instance)
+            orchestrator_id = await _get_orchestrator(instance)
             if not orchestrator_id:
                 return _error_response(503, "no_orchestrator", "Nenhum orchestrator disponivel")
             orchestrator = get_agent(orchestrator_id)
@@ -272,7 +281,7 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
                 return _error_response(503, "agent_not_found", f"Orchestrator {orchestrator_id} nao encontrado")
             result = await _execute_agent(orchestrator, masked_text, payload, extra)
     else:
-        orchestrator_id = _select_orchestrator_agent(instance)
+        orchestrator_id = await _get_orchestrator(instance)
         if not orchestrator_id:
             return _error_response(503, "no_orchestrator", "Nenhum orchestrator disponivel")
         orchestrator = get_agent(orchestrator_id)

@@ -412,6 +412,7 @@ body{{font-family:Inter,-apple-system,sans-serif;background:#f9fafb;color:#17171
   <div class="tab active" onclick="switchTab('fluxo')">Fluxo de Orquestração</div>
   <div class="tab" onclick="switchTab('agentes')">Agentes & Skills</div>
   <div class="tab" onclick="switchTab('gerenciar')">Gerenciar</div>
+  <div class="tab" onclick="switchTab('usuarios')">Usuários</div>
 </div>
 
 <div id="tab-fluxo" class="tab-content active">
@@ -462,6 +463,20 @@ body{{font-family:Inter,-apple-system,sans-serif;background:#f9fafb;color:#17171
   </div>
 </div>
 
+<div id="tab-usuarios" class="tab-content">
+  <div class="card">
+    <h3>Vincular Conta Google</h3>
+    <p style="font-size:13px;color:#6b7280;margin-bottom:12px">Autorize a Jennifer a acessar seu Calendar, Drive e Gmail. Cada pessoa tem seu proprio token.</p>
+    <div class="form-group"><label>Seu telefone (WhatsApp)</label><input id="user-phone" placeholder="+5511999999999"></div>
+    <button class="btn btn-primary" onclick="startOAuth()">🔑 Vincular Agenda / Email / Drive</button>
+    <div id="oauth-msg" style="margin-top:8px;font-size:12px"></div>
+  </div>
+  <div class="card">
+    <h3>Usuários Cadastrados</h3>
+    <div id="usuarios-content" class="loading">Carregando...</div>
+  </div>
+</div>
+
 <script>
 const AUTH = '{auth_param}';
 const BASE = '';
@@ -488,11 +503,13 @@ async function apiDelete(path) {{
 function switchTab(name) {{
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-  document.querySelector(`.tab:nth-child(${{name==='fluxo'?1:name==='agentes'?2:3}})`).classList.add('active');
+  const idx = name==='fluxo'?1:name==='agentes'?2:name==='gerenciar'?3:4;
+  document.querySelector(`.tab:nth-child(${{idx}})`).classList.add('active');
   document.getElementById('tab-'+name).classList.add('active');
   if (name==='fluxo') loadFluxo();
   if (name==='agentes') loadAgentes();
   if (name==='gerenciar') {{ loadSkillsList(); loadAgentSelect(); }}
+  if (name==='usuarios') loadUsuarios();
 }}
 
 async function loadFluxo() {{
@@ -683,6 +700,32 @@ async function saveSkill() {{
   }}
 }}
 
+function startOAuth() {{
+  const phone = document.getElementById('user-phone').value.trim();
+  if (!phone) {{ document.getElementById('oauth-msg').innerHTML = '<span style="color:#dc2626">Informe seu telefone</span>'; return; }}
+  document.getElementById('oauth-msg').innerHTML = '<span style="color:#3b82f6">Redirecionando para o Google...</span>';
+  window.location.href = '/oauth/google?phone=' + encodeURIComponent(phone);
+}}
+
+async function loadUsuarios() {{
+  try {{
+    const data = await api('/admin/users');
+    const users = data.users || [];
+    if (users.length===0) {{
+      document.getElementById('usuarios-content').innerHTML = '<p style="color:#9ca3af;font-size:13px">Nenhum usuario cadastrado. Use o formulario acima para vincular sua conta Google.</p>';
+      return;
+    }}
+    document.getElementById('usuarios-content').innerHTML = users.map(u => `
+      <div style="padding:8px 0;border-bottom:1px solid #f3f4f6;font-size:13px;display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <span style="font-weight:600">${{u.display_name||u.phone||'?'}}</span>
+          <span style="color:#9ca3af;margin-left:8px">(${{u.phone}})</span>
+        </div>
+        <span style="color:${{u.google_oauth_token?'#16a34a':'#9ca3af'}};font-size:12px">${{u.google_oauth_token?'Conectado':'Pendente'}}</span>
+      </div>`).join('');
+  }} catch(e) {{}}
+}}
+
 loadFluxo();
 </script>
 </body></html>"""
@@ -718,3 +761,92 @@ async def root_redirect(request: Request):
             "agents": "/admin/agents",
         },
     })
+
+
+OAUTH_CLIENT_ID = "894828119087-goo6lcl6vgm5bdq5qgafscb8qbr4ueet.apps.googleusercontent.com"
+OAUTH_CLIENT_SECRET = "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"
+OAUTH_SCOPES = [
+    "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/gmail.send",
+]
+OAUTH_REDIRECT_URI = "https://agents-runtime-test-c5nbfc5meq-uc.a.run.app/oauth/callback"
+
+
+@app.get("/oauth/google")
+async def oauth_google(request: Request):
+    """Redirect to Google OAuth consent screen."""
+    phone = request.query_params.get("phone", "")
+    if not phone:
+        raise HTTPException(status_code=422, detail="phone required")
+    import base64, urllib.parse
+    state = base64.urlsafe_b64encode(phone.encode()).decode().rstrip("=")
+    params = {
+        "client_id": OAUTH_CLIENT_ID,
+        "redirect_uri": OAUTH_REDIRECT_URI,
+        "scope": " ".join(OAUTH_SCOPES),
+        "response_type": "code",
+        "access_type": "offline",
+        "prompt": "consent",
+        "state": state,
+    }
+    auth_url = "https://accounts.google.com/o/oauth2/auth?" + urllib.parse.urlencode(params)
+    return RedirectResponse(url=auth_url)
+
+
+@app.get("/oauth/callback")
+async def oauth_callback(request: Request):
+    """Handle OAuth callback, exchange code for token, save to Firestore."""
+    import base64, requests
+    code = request.query_params.get("code", "")
+    state = request.query_params.get("state", "")
+    if not code:
+        return HTMLResponse(content="<h2>Erro: codigo de autorizacao nao recebido</h2>", status_code=400)
+
+    phone = ""
+    try:
+        padding = 4 - len(state) % 4
+        if padding != 4:
+            state += "=" * padding
+        phone = base64.urlsafe_b64decode(state).decode()
+    except Exception:
+        pass
+
+    try:
+        r = requests.post("https://oauth2.googleapis.com/token", data={
+            "client_id": OAUTH_CLIENT_ID,
+            "client_secret": OAUTH_CLIENT_SECRET,
+            "code": code,
+            "redirect_uri": OAUTH_REDIRECT_URI,
+            "grant_type": "authorization_code",
+        }, timeout=15)
+        tok = r.json()
+        if "error" in tok:
+            return HTMLResponse(content=f"<h2>Erro ao obter token: {tok.get('error')}</h2>", status_code=500)
+
+        token_data = {
+            "token": tok["access_token"],
+            "refresh_token": tok.get("refresh_token", ""),
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "client_id": OAUTH_CLIENT_ID,
+            "client_secret": OAUTH_CLIENT_SECRET,
+            "scopes": OAUTH_SCOPES,
+            "expiry": str(__import__("datetime").datetime.now(__import__("datetime").timezone.utc).timestamp() + tok.get("expires_in", 3600)),
+        }
+        from agent_loader import save_user
+        save_user(phone or "oauth-user", {
+            "phone": phone or "oauth-user",
+            "google_oauth_token": token_data,
+            "scopes": OAUTH_SCOPES,
+            "registered_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        })
+        return HTMLResponse(content=f"""
+        <html><body style="font-family:Inter,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;background:#f9fafb">
+        <div style="text-align:center"><h1 style="color:#16a34a">Vinculado com sucesso! 🎉</h1>
+        <p style="color:#374151">Sua conta Google foi conectada. A Jennifer ja pode acessar sua agenda e emails.</p>
+        <p style="color:#9ca3af;font-size:14px">Feche esta pagina e volte ao WhatsApp.</p></div></body></html>
+        """)
+    except Exception as e:
+        return HTMLResponse(content=f"<h2>Erro: {e}</h2>", status_code=500)
