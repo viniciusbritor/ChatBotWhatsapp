@@ -303,7 +303,7 @@ async def search_knowledge(query: str, limit: int = 5) -> List[Dict[str, Any]]:
         if db is None:
             return []
         results = []
-        docs = db.collection(SHARED_COLLECTION).limit(limit * 3).stream()
+        docs = db.collection(SHARED_COLLECTION).stream()
         for doc in docs:
             data = doc.to_dict()
             stored_embedding = data.get("embedding", [])
