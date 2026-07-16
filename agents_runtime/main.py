@@ -558,7 +558,7 @@ async function loadFluxo() {{
             <span style="color:#9ca3af;font-size:11px">${{(ix.path||[]).slice(-1)[0]?.model||''}}</span>
           </div>`).join('')}}
       </div>`;
-    mermaid.initialize({{startOnLoad:true, theme:'neutral'}});
+    setTimeout(() => {{ if (window.mermaid) mermaid.initialize({{startOnLoad:true, theme:'neutral'}}); }}, 100);
   }} catch(e) {{
     document.getElementById('fluxo-content').innerHTML = `<div class="error">Erro ao carregar fluxo: ${{e.message}}</div>`;
   }}
@@ -704,7 +704,8 @@ function startOAuth() {{
   const phone = document.getElementById('user-phone').value.trim();
   if (!phone) {{ document.getElementById('oauth-msg').innerHTML = '<span style="color:#dc2626">Informe seu telefone</span>'; return; }}
   document.getElementById('oauth-msg').innerHTML = '<span style="color:#3b82f6">Redirecionando para o Google...</span>';
-  window.location.href = '/oauth/google?phone=' + encodeURIComponent(phone);
+  const state = btoa(phone);
+  window.location.href = '/oauth/google?state=' + encodeURIComponent(state);
 }}
 
 async function loadUsuarios() {{
@@ -778,11 +779,10 @@ OAUTH_REDIRECT_URI = "https://agents-runtime-test-c5nbfc5meq-uc.a.run.app/oauth/
 @app.get("/oauth/google")
 async def oauth_google(request: Request):
     """Redirect to Google OAuth consent screen."""
-    phone = request.query_params.get("phone", "")
-    if not phone:
-        raise HTTPException(status_code=422, detail="phone required")
     import base64, urllib.parse
-    state = base64.urlsafe_b64encode(phone.encode()).decode().rstrip("=")
+    state = request.query_params.get("state", "")
+    if not state:
+        raise HTTPException(status_code=422, detail="state required (base64 phone)")
     params = {
         "client_id": OAUTH_CLIENT_ID,
         "redirect_uri": OAUTH_REDIRECT_URI,
@@ -807,10 +807,8 @@ async def oauth_callback(request: Request):
 
     phone = ""
     try:
-        padding = 4 - len(state) % 4
-        if padding != 4:
-            state += "=" * padding
-        phone = base64.urlsafe_b64decode(state).decode()
+        import base64
+        phone = base64.b64decode(state).decode()
     except Exception:
         pass
 

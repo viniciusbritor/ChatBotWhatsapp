@@ -120,6 +120,7 @@ def start_loader():
         return
     _stop_event.clear()
     _load_all()
+    seed_default_data()
     _loader_thread = threading.Thread(target=_poll_loop, daemon=True, name="agent-loader")
     _loader_thread.start()
     logger.info("Agent loader thread started")
