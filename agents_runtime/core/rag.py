@@ -30,7 +30,7 @@ def _embed_direct(text: str) -> Optional[List[float]]:
                 "Content-Type": "application/json",
                 "GroupId": group_id.strip(),
             },
-            json={"model": "embo-01", "input": text, "encoding_format": "float"},
+            json={"model": "embo-01", "texts": [text], "encoding_format": "float"},
             timeout=30,
         )
         data = resp.json()
