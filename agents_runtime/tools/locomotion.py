@@ -1,21 +1,20 @@
 """Google Maps tools: calc_route, geocode, search_places."""
 import os, logging
-import requests
-from core.secrets import get_secret
 
 logger = logging.getLogger(__name__)
-
 MAPS_API_KEY = None
+
 
 def _get_key():
     global MAPS_API_KEY
     if not MAPS_API_KEY:
+        from core.secrets import get_secret
         MAPS_API_KEY = (os.getenv("GOOGLE_MAPS_API_KEY") or get_secret("GOOGLE_MAPS_API_KEY") or "").strip()
     return MAPS_API_KEY
 
 
 async def calc_route(origem: str, destino: str) -> dict:
-    """Calcula rota, tempo, distancia e preco estimado Uber/99."""
+    import requests
     key = _get_key()
     if not key:
         return {"error": "GOOGLE_MAPS_API_KEY not configured"}
@@ -47,6 +46,7 @@ async def calc_route(origem: str, destino: str) -> dict:
 
 async def geocode(endereco: str) -> dict:
     """Converte endereco em coordenadas e formato padronizado."""
+    import requests
     key = _get_key()
     if not key:
         return {"error": "GOOGLE_MAPS_API_KEY not configured"}
