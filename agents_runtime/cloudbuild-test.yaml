@@ -42,8 +42,8 @@ steps:
       - "--no-cpu-throttling"
       - "--port=8080"
       - "--timeout=120"
-      - "--set-env-vars=ENVIRONMENT=test,LOG_LEVEL=INFO,AGENT_RELOAD_INTERVAL_SEC=120,GCP_PROJECT=coherence-ominichannel-fs,WHISPER_MODEL=base,WHISPER_DEVICE=cpu,WHISPER_COMPUTE_TYPE=int8,WHISPER_DOWNLOAD_ROOT=/app/whisper_models,RAG_EMBEDDING_MODEL=embo-01,RAG_EMBEDDING_DIM=1536"
-      - "--set-secrets=DEEPSEEK_API_KEY=DEEPSEEK_API_KEY:latest,NVIDIA_API_KEY=NVIDIA_API_KEY:latest,MINIMAX_API_KEY=MINIMAX_API_KEY:latest,MINIMAX_GROUP_ID=minimax-group-id:latest,SERPER_API_KEY=serper-api-key:latest,GOOGLE_OAUTH_TOKEN=google-oauth-token:latest,AGENTS_RUNTIME_SA_TOKEN_SECRET=agents-runtime-sa-token:latest,GOOGLE_MAPS_API_KEY=google-maps-api-key:latest,YOUTUBE_API_KEY=youtube-api-key:latest"
+      - "--set-env-vars=ENVIRONMENT=test,LOG_LEVEL=INFO,AGENT_RELOAD_INTERVAL_SEC=120,GCP_PROJECT=coherence-ominichannel-fs,WHISPER_MODEL=base,WHISPER_DEVICE=cpu,WHISPER_COMPUTE_TYPE=int8,WHISPER_DOWNLOAD_ROOT=/app/whisper_models,RAG_EMBEDDING_MODEL=embo-01,RAG_EMBEDDING_DIM=1536,OAUTH_CLIENT_ID=894828119087-goo6lcl6vgm5bdq5qgafscb8qbr4ueet.apps.googleusercontent.com"
+      - "--set-secrets=DEEPSEEK_API_KEY=DEEPSEEK_API_KEY:latest,NVIDIA_API_KEY=NVIDIA_API_KEY:latest,MINIMAX_API_KEY=MINIMAX_API_KEY:latest,MINIMAX_GROUP_ID=minimax-group-id:latest,SERPER_API_KEY=serper-api-key:latest,GOOGLE_OAUTH_TOKEN=google-oauth-token:latest,AGENTS_RUNTIME_SA_TOKEN_SECRET=agents-runtime-sa-token:latest,GOOGLE_MAPS_API_KEY=google-maps-api-key:latest,YOUTUBE_API_KEY=youtube-api-key:latest,OAUTH_CLIENT_SECRET=oauth-client-secret:latest"
 
 images:
   - "gcr.io/$PROJECT_ID/agents-runtime:$BUILD_ID"
