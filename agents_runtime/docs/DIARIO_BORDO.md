@@ -155,6 +155,56 @@ $ pytest tests/ -q
 
 ---
 
+## 16/07/2026 21:30 BRT — Deploy Corretivo + Teste Fim-a-Fim
+
+### Correcoes aplicadas
+- `agent_loader.py:122`: `seed_default_data()` chamado no `start_loader()` — cold-start resolvido. Sem Firestore, carrega 9 agentes padrao em memoria.
+- `main.py:767-768`: `OAUTH_CLIENT_SECRET` removido do codigo-fonte, agora lido de `os.getenv("OAUTH_CLIENT_SECRET")` + secret GCP `oauth-client-secret`.
+- `cloudbuild-test.yaml` e `cloudbuild.yaml`: `OAUTH_CLIENT_ID` como env var, `OAUTH_CLIENT_SECRET` como secret.
+
+### Seeds no Firestore
+- Executado `do_seed.py` contra `coherence-ominichannel-fs`.
+- Resultado: **15 agentes, 7 skills, 4 tools** persistidos (alguns ja existiam de seeds anteriores).
+
+### Status dos Servicos (16/07 21:30 BRT)
+| Servico | Cloud Run | Status |
+|---|---|---|
+| agents-runtime-test | `agents-runtime-test-c5nbfc5meq-uc.a.run.app` | OK — revisao 00058 |
+| whatsapp-agente-test | `whatsapp-agente-test-c5nbfc5meq-uc.a.run.app` | OK |
+| Evolution (Jennifer) | `evolution.coherenceai.com.br` | open, 384 msgs, 1356 contatos |
+
+### Webhook Evolution
+- URL: `https://whatsapp-agente-test-894828119087.us-central1.run.app/webhook`
+- Events: `MESSAGES_UPSERT`, `CONNECTION_UPDATE`, `MESSAGES_UPDATE`
+- Webhook funcional — ambas URLs (old/new format) resolvem para o mesmo servico.
+
+### Teste /chat (curl com SA token)
+- **Jennifer respondeu**: `"Ola, Vinicius! Tudo bem? 😊 Como posso ajudar voce hoje?"`
+- Modelo: `deepseek-v4-flash`, provider: `deepseek`
+- Pipeline completo validado: WhatsApp → Evolution → whatsapp-agente → agents_runtime → LLM ✅
+
+### 9 Secrets no GCP Secret Manager
+Todos presentes e com nomes corretos: `DEEPSEEK_API_KEY`, `NVIDIA_API_KEY`, `MINIMAX_API_KEY`, `minimax-group-id`, `serper-api-key`, `google-oauth-token`, `agents-runtime-sa-token`, `google-maps-api-key`, `youtube-api-key`, `oauth-client-secret`.
+
+### Bug Conhecido
+- `/healthz` retorna 404 do Google Front End (nao e o app). Causa nao identificada — usar `GET /` como health check alternativo. Todos os outros endpoints (`/chat`, `/version`, `/admin/*`) operam normalmente.
+
+### Issues Identificados (nao criticos)
+| Issue | Severidade |
+|---|---|
+| `AGENTS_RUNTIME_SA_TOKEN` (proxy) vs `AGENTS_RUNTIME_SA_TOKEN_SECRET` (runtime) — nomes diferentes, mesmo secret | Baixa |
+| `MAX_MSG_PER_INSTANCE_DAY` definido mas nunca usado no codigo do proxy | Media |
+| Time-gating de horario comercial BRT nao implementado no proxy | Media |
+| `OAUTH_REDIRECT_URI` hardcoded para test (vai quebrar em prod) | Media |
+
+### Pendencias
+- SSL no Evolution (`evolution.coherenceai.com.br`) — instalar certbot
+- Cloud Scheduler (5 jobs): ata-worker, proactive-events, proactive-topics, lgpd-cleanup, ping-warmup
+- OAuth Redirect URI — verificar no GCP Console
+- Registrar modulo `omnichannel-agentes` no Portal
+
+---
+
 ## Historico de fases anteriores
 
 (Conteudo das fases 0-6.5 preservado abaixo)

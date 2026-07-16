@@ -69,9 +69,38 @@ git push origin test
 ./scripts/upload_secrets.sh evolution-api-key "..."
 ```
 
-## Estado: Fase 1 (Fundacao)
+## Estado: Fase 7 (Completo)
 
-Script `upload_secrets.sh` ja criado.
-Estrutura de testes ja criada.
+Todas as 8 fases implementadas. 152 testes passando, 9 skipped.
 
-Proximas fases adicionam mais complexidade.
+### Servicos em Producao (TEST)
+
+| Servico | URL |
+|---|---|
+| agents-runtime-test | `https://agents-runtime-test-c5nbfc5meq-uc.a.run.app` |
+| whatsapp-agente-test | `https://whatsapp-agente-test-c5nbfc5meq-uc.a.run.app` |
+| Evolution (Jennifer) | `https://evolution.coherenceai.com.br` (sem SSL ainda) |
+
+### Secrets no GCP (`coherence-ominichannel-fs`)
+
+| Secret | Env Var |
+|---|---|
+| `DEEPSEEK_API_KEY` | `DEEPSEEK_API_KEY` |
+| `NVIDIA_API_KEY` | `NVIDIA_API_KEY` |
+| `MINIMAX_API_KEY` | `MINIMAX_API_KEY` |
+| `minimax-group-id` | `MINIMAX_GROUP_ID` |
+| `serper-api-key` | `SERPER_API_KEY` |
+| `google-oauth-token` | `GOOGLE_OAUTH_TOKEN` |
+| `agents-runtime-sa-token` | `AGENTS_RUNTIME_SA_TOKEN_SECRET` |
+| `google-maps-api-key` | `GOOGLE_MAPS_API_KEY` |
+| `youtube-api-key` | `YOUTUBE_API_KEY` |
+| `oauth-client-secret` | `OAUTH_CLIENT_SECRET` |
+
+### Troubleshooting
+
+| Sintoma | Causa Provavel | Solucao |
+|---|---|---|
+| "Nenhum orchestrator disponivel" | Cache de agentes vazio (cold start ou Firestore vazio) | `seed_default_data()` agora cobre esse caso — aguardar ate 120s ou verificar Firestore |
+| `/healthz` retorna 404 | Bug de infra do Cloud Run (Google Front End) | Usar `GET /` como health check — retorna `{"service":"agents_runtime"}` |
+| Webhook nao recebe mensagens | Evolution webhook URL desatualizada | Verificar `webhook/find/Jennifer` na Evolution API |
+| Jennifer responde generica | LLM cascade sem chaves reais | Verificar secrets `DEEPSEEK_API_KEY`, `NVIDIA_API_KEY`, `MINIMAX_API_KEY` |

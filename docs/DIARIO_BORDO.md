@@ -269,3 +269,29 @@ WhatsApp -> Evolution -> whatsapp-agente -> agents_runtime -> LLM -> WhatsApp
 - Adicionar `GOOGLE_MAPS_API_KEY` e `YOUTUBE_API_KEY` nos secrets
 - Instalar `googlemaps` no requirements.txt
 - Fazer deploy dos novos agentes + tool calling loop
+
+---
+
+## 16/07/2026 21:30 BRT — Deploy Corretivo + Teste Fim-a-Fim
+
+### Correcoes
+- `agent_loader.py`: `seed_default_data()` agora chamado no `start_loader()` — resolve "Nenhum orchestrator disponivel"
+- `main.py`: `OAUTH_CLIENT_SECRET` movido para GCP Secret Manager (`oauth-client-secret`)
+- `cloudbuild-test.yaml` e `cloudbuild.yaml`: `OAUTH_CLIENT_ID` e `OAUTH_CLIENT_SECRET` injetados
+
+### Seeds Firestore
+- `do_seed.py` executado: 15 agentes, 7 skills, 4 tools persistidos
+
+### Teste /chat
+- **Jennifer respondeu** via DeepSeek V4 Flash: "Ola, Vinicius! Tudo bem? 😊"
+- Pipeline fim-a-fim validado: WhatsApp → Evolution → whatsapp-agente → agents_runtime → LLM ✅
+
+### Webhook Evolution
+- URL: `https://whatsapp-agente-test-894828119087.us-central1.run.app/webhook`
+- Instancia "Jennifer": status `open`, 384 mensagens, 1356 contatos
+
+### Pendencias
+- SSL no Evolution (`evolution.coherenceai.com.br`)
+- Cloud Scheduler (5 jobs)
+- OAuth Redirect URI — verificar no GCP Console
+- Registrar modulo `omnichannel-agentes` no Portal
