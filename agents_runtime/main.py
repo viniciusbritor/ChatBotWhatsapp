@@ -304,9 +304,14 @@ async def admin_knowledge_post(request: Request):
         raise HTTPException(status_code=422, detail="titulo and conteudo required")
 
     try:
-        from core.rag import index_document
+        from core.rag import index_document, embed_query
+        emb_test = await embed_query(titulo + " " + conteudo[:500])
         doc_id = await index_document(titulo, conteudo, categoria)
-        return JSONResponse(content={"status": "ok", "doc_id": doc_id})
+        return JSONResponse(content={
+            "status": "ok",
+            "doc_id": doc_id,
+            "embedding_dim": len(emb_test) if emb_test else 0,
+        })
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
