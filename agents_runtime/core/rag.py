@@ -37,7 +37,11 @@ def _embed_direct(text: str) -> Optional[List[float]]:
         )
         data = resp.json()
         if data.get("base_resp", {}).get("status_code", 0) != 0:
-            logger.error(f"MiniMax embed error: {data.get('base_resp')}")
+            sc = data["base_resp"]["status_code"]
+            if sc == 1002:
+                logger.warning("MiniMax embed rate limited (1002)")
+            else:
+                logger.error(f"MiniMax embed error: {data.get('base_resp')}")
             return None
         emb = data.get("data", [{}])[0].get("embedding")
         logger.info(f"MiniMax embed success: {len(emb) if emb else 0}d")
@@ -45,6 +49,50 @@ def _embed_direct(text: str) -> Optional[List[float]]:
     except Exception as e:
         logger.error(f"MiniMax embed direct failed: {e}")
         return None
+
+
+def _embed_nvidia(text: str) -> Optional[List[float]]:
+    """Embed text using NVIDIA NIM (free, OpenAI-compatible)."""
+    import requests
+    api_key = os.getenv("NVIDIA_API_KEY") or get_secret("NVIDIA_API_KEY")
+    if not api_key:
+        logger.error("NVIDIA_API_KEY not configured")
+        return None
+    api_key = api_key.strip().lstrip("\ufeff")
+    try:
+        resp = requests.post(
+            "https://integrate.api.nvidia.com/v1/embeddings",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "input": [text],
+                "model": "nvidia/nv-embedqa-e5-v5",
+                "input_type": "passage",
+                "encoding_format": "float",
+            },
+            timeout=30,
+        )
+        data = resp.json()
+        if "data" not in data or not data["data"]:
+            logger.error(f"NVIDIA embed error: {data}")
+            return None
+        emb = data["data"][0]["embedding"]
+        logger.info(f"NVIDIA embed success: {len(emb)}d")
+        return emb
+    except Exception as e:
+        logger.error(f"NVIDIA embed failed: {e}")
+        return None
+
+
+def embed_best(text: str) -> Optional[List[float]]:
+    """Try MiniMax first, fallback to NVIDIA."""
+    emb = _embed_direct(text)
+    if emb:
+        return emb
+    logger.warning("MiniMax embed failed, trying NVIDIA fallback...")
+    return _embed_nvidia(text)
 
 
 def _get_firestore():
@@ -70,7 +118,7 @@ async def embed_query(text: str) -> Optional[List[float]]:
     """Embed a query string using MiniMax (direct API call)."""
     try:
         loop = asyncio.get_running_loop()
-        vec = await loop.run_in_executor(None, _embed_direct, text)
+        vec = await loop.run_in_executor(None, embed_best, text)
         return vec
     except Exception as e:
         logger.error(f"Embedding failed: {e}")
