@@ -75,10 +75,18 @@ INTIMACY_KEYWORDS = [
 ]
 
 
+def _get_routing_rules() -> List[Dict[str, Any]]:
+    """Load routing rules from Firestore config/routing."""
+    config = get_config("routing")
+    if config and config.get("rules"):
+        return [r for r in config["rules"] if r.get("enabled", True)]
+    return []
+
+
 def _detect_intent(text: str) -> Dict[str, Any]:
-    """Detect special intents in user message."""
+    """Detect special intents using hardcoded + Firestore keywords."""
     text_lower = text.lower()
-    return {
+    intent = {
         "is_gross": any(kw in text_lower for kw in GROSS_KEYWORDS),
         "is_assault_related": any(kw in text_lower for kw in ASSAULT_KEYWORDS),
         "is_correction": any(kw in text_lower for kw in CORRECTION_KEYWORDS),
@@ -88,6 +96,13 @@ def _detect_intent(text: str) -> Dict[str, Any]:
         "is_web_search": any(kw in text_lower for kw in WEB_KEYWORDS),
         "is_intimacy": any(kw in text_lower for kw in INTIMACY_KEYWORDS),
     }
+    rules = _get_routing_rules()
+    for rule in rules:
+        agent_id = rule.get("agent_id", "")
+        keywords = rule.get("keywords", [])
+        if any(kw in text_lower for kw in keywords):
+            intent[f"matched_{agent_id}"] = True
+    return intent
 
 
 def _build_skills_section(skill_ids: List[str]) -> str:
@@ -119,10 +134,7 @@ def _iter_agents():
 
 
 def _resolve_agent_for_intent(intent: Dict[str, Any], instance: str) -> Optional[str]:
-    """Resolve which specialist or manager should handle this intent.
-
-    Priority: safety (morality) > learning > intimacy > managers > default
-    """
+    """Resolve which agent should handle this intent (hardcoded + dynamic from Firestore)."""
     if intent["is_gross"] or intent["is_assault_related"]:
         return "agent-morality"
     if intent["is_correction"]:
@@ -137,6 +149,13 @@ def _resolve_agent_for_intent(intent: Dict[str, Any], instance: str) -> Optional
         return "manager-email"
     if intent["is_web_search"]:
         return "manager-web"
+
+    rules = _get_routing_rules()
+    for rule in sorted(rules, key=lambda r: r.get("priority", 99)):
+        agent_id = rule.get("agent_id", "")
+        if intent.get(f"matched_{agent_id}"):
+            return agent_id
+
     return None
 
 
