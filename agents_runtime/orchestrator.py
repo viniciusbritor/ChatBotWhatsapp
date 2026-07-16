@@ -206,10 +206,12 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     if _is_personal_intent(intent) and not get_user(phone):
         logger.info(f"Privacy guard: unregistered user {phone} requesting personal data")
+        portal_url = "https://coherence-portal-test-c5nbfc5meq-uc.a.run.app"
         return {
             "reply": f"Oi {sender_name}! Para acessar agenda, emails ou documentos, "
-                     "você precisa vincular sua conta no Portal Coherence primeiro. "
-                     "Acesse o módulo 'Agentes Omnichannel' e registre seu token.",
+                     f"vincule sua conta no Portal Coherence: {portal_url}\n\n"
+                     "Depois, no módulo 'Agentes Omnichannel', vá até a aba 'Usuários' e clique em 'Vincular Agenda'. "
+                     "É rapidinho! 🔑",
             "delay_ms": 0,
             "presence": "composing",
             "metadata": {"agent_id": "privacy-guard", "blocked": "unregistered_user"},
