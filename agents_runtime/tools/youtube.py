@@ -1,5 +1,5 @@
 """YouTube search tool."""
-import os, logging
+import os, logging, asyncio
 
 logger = logging.getLogger(__name__)
 _YOUTUBE_KEY = None
@@ -14,16 +14,16 @@ def _get_key():
 
 
 async def search_videos(query: str, max_results: int = 3) -> list:
-    """Busca videos no YouTube e retorna titulo, canal e link."""
-    import requests
     key = _get_key()
     if not key:
         return [{"error": "YOUTUBE_API_KEY not configured"}]
     try:
-        resp = requests.get("https://www.googleapis.com/youtube/v3/search", params={
+        import requests, functools
+        loop = asyncio.get_running_loop()
+        resp = await loop.run_in_executor(None, functools.partial(requests.get, "https://www.googleapis.com/youtube/v3/search", params={
             "part": "snippet", "q": query, "type": "video",
             "maxResults": max_results, "key": key, "relevanceLanguage": "pt"
-        }, timeout=15)
+        }, timeout=15))
         data = resp.json()
         results = []
         for item in data.get("items", []):

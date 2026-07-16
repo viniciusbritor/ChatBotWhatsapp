@@ -1,5 +1,5 @@
 """Google Maps tools: calc_route, geocode, search_places."""
-import os, logging
+import os, logging, asyncio
 
 logger = logging.getLogger(__name__)
 MAPS_API_KEY = None
@@ -13,15 +13,21 @@ def _get_key():
     return MAPS_API_KEY
 
 
-async def calc_route(origem: str, destino: str) -> dict:
+async def _fetch(url: str, params: dict = None, timeout: int = 15) -> dict:
     import requests
+    import functools
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, functools.partial(requests.get, url, params=params or {}, timeout=timeout))
+
+
+async def calc_route(origem: str, destino: str) -> dict:
     key = _get_key()
     if not key:
         return {"error": "GOOGLE_MAPS_API_KEY not configured"}
     try:
-        resp = requests.get("https://maps.googleapis.com/maps/api/directions/json", params={
+        resp = await _fetch("https://maps.googleapis.com/maps/api/directions/json", {
             "origin": origem, "destination": destino, "key": key, "language": "pt-BR"
-        }, timeout=15)
+        })
         data = resp.json()
         if data.get("status") != "OK":
             return {"error": data.get("status", "unknown")}
@@ -45,15 +51,13 @@ async def calc_route(origem: str, destino: str) -> dict:
 
 
 async def geocode(endereco: str) -> dict:
-    """Converte endereco em coordenadas e formato padronizado."""
-    import requests
     key = _get_key()
     if not key:
         return {"error": "GOOGLE_MAPS_API_KEY not configured"}
     try:
-        resp = requests.get("https://maps.googleapis.com/maps/api/geocode/json", params={
+        resp = await _fetch("https://maps.googleapis.com/maps/api/geocode/json", {
             "address": endereco, "key": key, "language": "pt-BR"
-        }, timeout=15)
+        })
         data = resp.json()
         if data.get("status") != "OK" or not data.get("results"):
             return {"error": data.get("status", "no results")}
@@ -72,22 +76,19 @@ async def geocode(endereco: str) -> dict:
 
 
 async def search_places(local: str, tipo: str = "restaurant") -> list:
-    """Busca lugares proximos usando Google Places API."""
     key = _get_key()
     if not key:
         return [{"error": "GOOGLE_MAPS_API_KEY not configured"}]
     try:
-        geo_resp = requests.get("https://maps.googleapis.com/maps/api/geocode/json", params={
-            "address": local, "key": key
-        }, timeout=10)
-        geo_data = geo_resp.json()
+        geo = await _fetch("https://maps.googleapis.com/maps/api/geocode/json", {"address": local, "key": key})
+        geo_data = geo.json()
         if geo_data.get("status") != "OK":
             return [{"error": f"Local nao encontrado: {local}"}]
         loc = geo_data["results"][0]["geometry"]["location"]
-        resp = requests.get("https://maps.googleapis.com/maps/api/place/nearbysearch/json", params={
+        places = await _fetch("https://maps.googleapis.com/maps/api/place/nearbysearch/json", {
             "location": f"{loc['lat']},{loc['lng']}", "radius": 3000, "type": tipo, "key": key, "language": "pt-BR"
-        }, timeout=10)
-        data = resp.json()
+        })
+        data = places.json()
         results = []
         for r in data.get("results", [])[:5]:
             results.append({
