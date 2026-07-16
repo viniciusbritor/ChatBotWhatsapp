@@ -10,6 +10,7 @@ import logging
 from typing import Dict, Any, Callable, Awaitable
 
 from tools import google_calendar, google_drive, google_gmail, web_search, nickname
+from tools import locomotion, youtube
 
 logger = logging.getLogger(__name__)
 
@@ -264,6 +265,70 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
         "parameters_schema": {
             "type": "object",
             "properties": {},
+        },
+    },
+    "locomotion.calc_route": {
+        "function": locomotion.calc_route,
+        "implementation": "locomotion",
+        "description": "Calcula rota entre dois enderecos. Retorna distancia, duracao, preco estimado Uber e 99.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "origem": {"type": "string", "description": "Endereco de partida"},
+                "destino": {"type": "string", "description": "Endereco de chegada"},
+            },
+            "required": ["origem", "destino"],
+        },
+    },
+    "locomotion.geocode": {
+        "function": locomotion.geocode,
+        "implementation": "locomotion",
+        "description": "Converte endereco em coordenadas e endereco formatado.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "endereco": {"type": "string", "description": "Endereco para geocodificar"},
+            },
+            "required": ["endereco"],
+        },
+    },
+    "locomotion.search_places": {
+        "function": locomotion.search_places,
+        "implementation": "locomotion",
+        "description": "Busca lugares proximos (restaurantes, farmacias, etc).",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "local": {"type": "string", "description": "Localizacao de referencia"},
+                "tipo": {"type": "string", "description": "Tipo: restaurant, pharmacy, gas_station"},
+            },
+            "required": ["local"],
+        },
+    },
+    "youtube.search_videos": {
+        "function": youtube.search_videos,
+        "implementation": "youtube",
+        "description": "Busca videos no YouTube e retorna titulo, canal e link.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Termo de busca"},
+                "max_results": {"type": "integer", "description": "Maximo de resultados (default 3)"},
+            },
+            "required": ["query"],
+        },
+    },
+    "rag.search_knowledge": {
+        "function": lambda **kwargs: __import__("asyncio").run(__import__("core.rag").search_knowledge(kwargs.get("query", ""), kwargs.get("limit", 5))),
+        "implementation": "rag",
+        "description": "Busca semantica na base de conhecimento publica (leis, editais, livros).",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Termo de busca semantica"},
+                "limit": {"type": "integer", "description": "Maximo de resultados"},
+            },
+            "required": ["query"],
         },
     },
 }

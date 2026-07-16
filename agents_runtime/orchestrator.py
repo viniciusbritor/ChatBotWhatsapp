@@ -26,7 +26,7 @@ from core.escalation import compute_confidence_score, should_escalate
 from core.delay_calculator import calculate_delay_ms, calculate_presence
 from core.commands import detect_command, apply_command
 from tool_registry import TOOL_REGISTRY, get_tool, get_tool_schema
-from agent_loader import get_agent, get_skill, list_skills, get_user
+from agent_loader import get_agent, get_skill, list_skills, get_user, get_config
 from core.audit import log_action
 
 logger = logging.getLogger(__name__)

@@ -265,6 +265,21 @@ def list_users() -> List[Dict[str, Any]]:
         return []
 
 
+def get_config(section: str) -> Optional[Dict[str, Any]]:
+    """Read config from Firestore config/{section}."""
+    db = _get_firestore_client()
+    if db is None:
+        return None
+    try:
+        doc = db.collection("config").document(section).get()
+        if doc.exists:
+            return doc.to_dict()
+        return None
+    except Exception as e:
+        logger.error(f"Failed to read config/{section}: {e}")
+        return None
+
+
 def get_cache_stats() -> Dict[str, Any]:
     """Get cache statistics."""
     return {
