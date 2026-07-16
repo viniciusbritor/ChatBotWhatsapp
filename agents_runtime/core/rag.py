@@ -17,27 +17,31 @@ COLLECTION_PREFIX = os.getenv("RAG_COLLECTION_PREFIX", "agente-knowledge-")
 def _embed_direct(text: str) -> Optional[List[float]]:
     """Embed text directly via MiniMax API (bypass LangChain)."""
     import requests
-    api_key = get_secret("MINIMAX_API_KEY") or os.getenv("MINIMAX_API_KEY", "")
-    group_id = get_secret("MINIMAX_GROUP_ID") or os.getenv("MINIMAX_GROUP_ID", "")
+    api_key = os.getenv("MINIMAX_API_KEY") or get_secret("MINIMAX_API_KEY")
+    group_id = os.getenv("MINIMAX_GROUP_ID") or get_secret("MINIMAX_GROUP_ID")
     if not api_key or not group_id:
-        logger.error("MINIMAX_API_KEY or MINIMAX_GROUP_ID not configured")
+        logger.error(f"MiniMax embed: api_key={'SET' if api_key else 'MISSING'} group_id={'SET' if group_id else 'MISSING'}")
         return None
+    api_key = api_key.strip().lstrip("\ufeff")
+    group_id = group_id.strip().lstrip("\ufeff")
     try:
         resp = requests.post(
             "https://api.minimax.io/v1/embeddings",
             headers={
-                "Authorization": f"Bearer {api_key.strip()}",
+                "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
-                "GroupId": group_id.strip(),
+                "GroupId": group_id,
             },
             json={"model": "embo-01", "texts": [text], "encoding_format": "float"},
             timeout=30,
         )
         data = resp.json()
         if data.get("base_resp", {}).get("status_code", 0) != 0:
-            logger.error(f"MiniMax embedding error: {data.get('base_resp')}")
+            logger.error(f"MiniMax embed error: {data.get('base_resp')}")
             return None
-        return data.get("data", [{}])[0].get("embedding")
+        emb = data.get("data", [{}])[0].get("embedding")
+        logger.info(f"MiniMax embed success: {len(emb) if emb else 0}d")
+        return emb
     except Exception as e:
         logger.error(f"MiniMax embed direct failed: {e}")
         return None
