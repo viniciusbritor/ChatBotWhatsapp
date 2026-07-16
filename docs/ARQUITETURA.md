@@ -118,24 +118,26 @@ sequenceDiagram
 
 ### Firestore Collections (project `coherence-ominichannel-fs`)
 
-| Collection | Funcao | Chave |
-|---|---|---|
-| `agents/{id}` | Definicoes de agentes | agent_id |
-| `skills/{id}` | Skills markdown reutilizaveis | skill_id |
-| `tools/{id}` | Tools pre-registradas com schema | tool_id |
-| `contatos/{phone}` | Memoria por contato | phone (E.164) |
-| `contatos/{phone}/historico/{msg_id}` | Mensagens individuais (TTL 90d) | msg_id |
-| `contatos/{phone}/corrections/{id}` | Log de correcoes aplicadas | correction_id |
-| `apelidos_custom/{phone}` | Apelidos aprendidos por contato | phone |
-| `nickname_dict_builtin` | Dict estatico (200+ nomes BR) | singleton |
-| `agente-knowledge-{phone}` | Firestore Vector (RAG juridico, 1536d MiniMax) | doc_id |
-| `grupos/{group_jid}` | Grupos onde Jennifer participa | group_jid |
-| `grupos/{group_jid}/membros/{phone}` | Membros de cada grupo | phone |
-| `ata_runs/{id}` | Log de geracao de atas | run_id |
-| `proactive_runs/{id}` | Log de proatividade | run_id |
-| `proactive_feedback/{id}` | Engagement de msgs proativas | feedback_id |
-| `proactive_weekly/{YYYY-WW}` | Avaliacao semanal | week_id |
-| `audit/{id}` | LGPD audit log (5y retention) | audit_id |
+| Collection | Funcao | Chave | Acesso |
+|---|---|---|---|
+| `usuarios/{phone}` | Dados pessoais + OAuth token individual | phone (E.164) | So o dono |
+| `contatos/{phone}` | Memoria por contato | phone (E.164) | So o dono |
+| `contatos/{phone}/historico/{msg_id}` | Mensagens individuais (TTL 90d) | msg_id | So o dono |
+| `contatos/{phone}/corrections/{id}` | Log de correcoes aplicadas | correction_id | So o dono |
+| `apelidos_custom/{phone}` | Apelidos aprendidos por contato | phone | So o dono |
+| `agente-Knowledge-{phone}/{doc_id}` | Conhecimento privado vetorial (1536d) | doc_id | So o dono |
+| `public-Knowledge-Shared/{doc_id}` | Conhecimento publico vetorial (1536d) | doc_id | Todos |
+| `group-Knowledge-{grupo}/{doc_id}` | Conhecimento de grupo vetorial (1536d) | doc_id | Membros |
+| `agents/{id}` | Definicoes de agentes | agent_id | Admin |
+| `skills/{id}` | Skills markdown reutilizaveis | skill_id | Admin |
+| `tools/{id}` | Tools pre-registradas com schema | tool_id | Admin |
+| `grupos/{group_jid}` | Grupos onde Jennifer participa | group_jid | Admin |
+| `grupos/{group_jid}/membros/{phone}` | Membros de cada grupo | phone | Admin |
+| `ata_runs/{id}` | Log de geracao de atas | run_id | Admin |
+| `proactive_runs/{id}` | Log de proatividade | run_id | Admin |
+| `proactive_feedback/{id}` | Engagement de msgs proativas | feedback_id | Admin |
+| `proactive_weekly/{YYYY-WW}` | Avaliacao semanal | week_id | Admin |
+| `audit/{id}` | LGPD audit log (5y retention) | audit_id | Admin |
 | `cost_runs/{month}` | Metricas de custo LLM | YYYY-MM |
 | `modules/{id}` | Registro de modulos (existente Portal) | module_id |
 

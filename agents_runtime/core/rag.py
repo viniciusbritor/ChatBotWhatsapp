@@ -13,34 +13,34 @@ EMBEDDING_MODEL = os.getenv("RAG_EMBEDDING_MODEL", "embo-01")
 EMBEDDING_DIM = int(os.getenv("RAG_EMBEDDING_DIM", "1536"))
 COLLECTION_PREFIX = os.getenv("RAG_COLLECTION_PREFIX", "agente-knowledge-")
 
-_minimax_embeddings = None
 
-
-def _get_minimax_embeddings():
-    """Lazy load MiniMax embeddings (LangChain)."""
-    global _minimax_embeddings
-    if _minimax_embeddings is None:
-        try:
-            from langchain_community.embeddings import MiniMaxEmbeddings
-            api_key_raw = get_secret("MINIMAX_API_KEY") or ""
-            group_id_raw = get_secret("MINIMAX_GROUP_ID") or os.getenv("MINIMAX_GROUP_ID", "")
-            api_key = api_key_raw.strip().lstrip("\ufeff")
-            group_id = group_id_raw.strip().lstrip("\ufeff")
-            if not api_key:
-                raise RuntimeError("MINIMAX_API_KEY not configured")
-            os.environ["MINIMAX_API_KEY"] = api_key
-            if group_id:
-                os.environ["MINIMAX_GROUP_ID"] = group_id
-            _minimax_embeddings = MiniMaxEmbeddings(
-                model=EMBEDDING_MODEL,
-                minimax_api_key=api_key,
-                minimax_group_id=group_id,
-            )
-            logger.info(f"MiniMax embeddings initialized (model={EMBEDDING_MODEL})")
-        except Exception as e:
-            logger.error(f"Failed to init MiniMax embeddings: {e}")
+def _embed_direct(text: str) -> Optional[List[float]]:
+    """Embed text directly via MiniMax API (bypass LangChain)."""
+    import requests
+    api_key = get_secret("MINIMAX_API_KEY") or os.getenv("MINIMAX_API_KEY", "")
+    group_id = get_secret("MINIMAX_GROUP_ID") or os.getenv("MINIMAX_GROUP_ID", "")
+    if not api_key or not group_id:
+        logger.error("MINIMAX_API_KEY or MINIMAX_GROUP_ID not configured")
+        return None
+    try:
+        resp = requests.post(
+            "https://api.minimax.io/v1/embeddings",
+            headers={
+                "Authorization": f"Bearer {api_key.strip()}",
+                "Content-Type": "application/json",
+                "GroupId": group_id.strip(),
+            },
+            json={"model": "embo-01", "input": text, "encoding_format": "float"},
+            timeout=30,
+        )
+        data = resp.json()
+        if data.get("base_resp", {}).get("status_code", 0) != 0:
+            logger.error(f"MiniMax embedding error: {data.get('base_resp')}")
             return None
-    return _minimax_embeddings
+        return data.get("data", [{}])[0].get("embedding")
+    except Exception as e:
+        logger.error(f"MiniMax embed direct failed: {e}")
+        return None
 
 
 def _get_firestore():
@@ -63,13 +63,10 @@ def _collection_name(phone: str) -> str:
 
 
 async def embed_query(text: str) -> Optional[List[float]]:
-    """Embed a query string using MiniMax."""
-    emb = _get_minimax_embeddings()
-    if emb is None:
-        return None
+    """Embed a query string using MiniMax (direct API call)."""
     try:
         loop = asyncio.get_running_loop()
-        vec = await loop.run_in_executor(None, emb.embed_query, text)
+        vec = await loop.run_in_executor(None, _embed_direct, text)
         return vec
     except Exception as e:
         logger.error(f"Embedding failed: {e}")
@@ -77,17 +74,14 @@ async def embed_query(text: str) -> Optional[List[float]]:
 
 
 async def embed_documents(texts: List[str]) -> Optional[List[List[float]]]:
-    """Embed multiple documents."""
-    emb = _get_minimax_embeddings()
-    if emb is None:
-        return None
-    try:
-        loop = asyncio.get_running_loop()
-        vecs = await loop.run_in_executor(None, emb.embed_documents, texts)
-        return vecs
-    except Exception as e:
-        logger.error(f"Embedding batch failed: {e}")
-        return None
+    """Embed multiple documents using MiniMax (direct API)."""
+    results = []
+    for text in texts:
+        vec = await embed_query(text)
+        if vec is None:
+            return None
+        results.append(vec)
+    return results
 
 
 async def index_document(
@@ -231,7 +225,7 @@ def _chunk_text(text: str, max_chars: int = 1200, overlap: int = 180) -> List[st
     return [c for c in chunks if c]
 
 
-SHARED_COLLECTION = "knowledge-shared"
+SHARED_COLLECTION = "public-Knowledge-Shared"
 
 
 def _cosine_similarity(a: List[float], b: List[float]) -> float:

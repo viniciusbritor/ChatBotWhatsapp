@@ -11,8 +11,14 @@ import os
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse as _JSONResponse, HTMLResponse
 from starlette.responses import RedirectResponse
+
+class JSONResponse(_JSONResponse):
+    """JSONResponse with ensure_ascii=False for UTF-8 characters."""
+    def render(self, content) -> bytes:
+        import json
+        return json.dumps(content, ensure_ascii=False, default=str).encode("utf-8")
 
 from core.auth import auth_middleware
 from core.delay_calculator import calculate_delay_ms, calculate_presence
@@ -492,13 +498,13 @@ async function loadFluxo() {{
       document.getElementById('fluxo-content').innerHTML = '<div class="card"><p style="color:#9ca3af">Nenhuma interação registrada. Envie mensagens no WhatsApp para popular.</p></div>';
       return;
     }}
-    let mermaid = ['flowchart LR'];
+    let mmd_lines = ['flowchart LR'];
     let nid = 0;
     interactions.forEach((ix, idx) => {{
       const text = (ix.text_preview||'').substring(0,30);
       const reply = (ix.reply_preview||'').substring(0,30);
       const path = ix.path || [];
-      mermaid.push('',`    subgraph i${{idx+1}}["Msg ${{idx+1}}: ${{text}}"]`,`        direction LR`);
+      mmd_lines.push('',`    subgraph i${{idx+1}}["Msg ${{idx+1}}: ${{text}}"]`,`        direction LR`);
       let prev = null;
       path.forEach(step => {{
         nid++;
@@ -513,14 +519,14 @@ async function loadFluxo() {{
         }} else if (phase!=='intent_detect') {{
           style = 'fill:#3b82f6,color:#fff';
         }}
-        mermaid.push(`        n${{nid}}["${{label}}"]`,`        style n${{nid}} ${{style}}`);
-        if (prev) mermaid.push(`        n${{prev}} --> n${{nid}}`);
+        mmd_lines.push(`        n${{nid}}["${{label}}"]`,`        style n${{nid}} ${{style}}`);
+        if (prev) mmd_lines.push(`        n${{prev}} --> n${{nid}}`);
         prev = nid;
       }});
-      mermaid.push('    end');
+      mmd_lines.push('    end');
     }});
     document.getElementById('fluxo-content').innerHTML = `
-      <div class="card"><div class="mermaid-box"><div class="mermaid">${{mermaid.join('\\n')}}</div></div></div>
+      <div class="card"><div class="mermaid-box"><div class="mermaid">${{mmd_lines.join('\\n')}}</div></div></div>
       <div class="card"><h3>Últimas Interações</h3>
         ${{interactions.map((ix,idx) => `
           <div class="interaction-row">
