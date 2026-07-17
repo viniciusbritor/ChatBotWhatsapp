@@ -251,6 +251,19 @@ def _is_read_query(text: str) -> bool:
     return True
 
 
+def _extract_search_terms(text: str) -> str:
+    """Extrai termos relevantes da query do usuario para busca no Drive."""
+    stopwords = {"jen", "jennifer", "voce", "pode", "me", "meu", "minha", "meus",
+                 "minhas", "um", "uma", "para", "com", "que", "nao", "sim", "por",
+                 "favor", "obrigado", "acessar", "consegue", "veja", "traga", "acesse",
+                 "busca", "buscar", "encontra", "encontrar", "ache", "achar",
+                 "listar", "lista", "mostre", "mostrar", "quero", "preciso",
+                 "de", "da", "do", "no", "na", "mais", "a", "o", "e", "se", "ja"}
+    words = text.lower().split()
+    terms = [w.strip(",.!?;:") for w in words if w.strip(",.!?;:") not in stopwords and len(w.strip(",.!?;:")) > 2]
+    return " ".join(terms[:10])
+
+
 async def _prefetch_calendar(phone: str) -> Optional[str]:
     """Fase B: pre-busca eventos do dia sem LLM."""
     try:
@@ -404,29 +417,42 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
     elif specialist_id:
         agent = get_agent(specialist_id)
         if agent and agent.get("enabled", True):
+            agent_copy = dict(agent)
             prefetch_data = None
+
             if _is_read_query(masked_text):
-                if intent["is_calendar"]:
-                    prefetch_data = await _prefetch_calendar(phone)
-                elif intent["is_email"]:
-                    prefetch_data = await _prefetch_email(phone)
-                elif intent["is_drive"]:
-                    prefetch_data = await _prefetch_drive(phone, masked_text)
-                if prefetch_data:
-                    data_label = "DADOS"
-                    if intent["is_drive"]: data_label = "DRIVE"
-                    elif intent["is_email"]: data_label = "EMAILS"
-                    elif intent["is_calendar"]: data_label = "CALENDARIO"
-                    agent["system_prompt"] += (
-                        f"\n\n[DADOS PRE-CARREGADOS DO {data_label}]\n{prefetch_data}\n\n"
-                        "Formate estes dados em portugues brasileiro de forma amigavel e direta. "
-                        "NAO chame ferramentas — os dados ja estao prontos."
-                    )
-                    agent["tools"] = []
+                try:
+                    if intent["is_calendar"]:
+                        prefetch_data = await asyncio.wait_for(
+                            _prefetch_calendar(phone), timeout=8)
+                    elif intent["is_email"]:
+                        prefetch_data = await asyncio.wait_for(
+                            _prefetch_email(phone), timeout=8)
+                    elif intent["is_drive"]:
+                        query = _extract_search_terms(masked_text)
+                        prefetch_data = await asyncio.wait_for(
+                            _prefetch_drive(phone, query), timeout=8)
+                except asyncio.TimeoutError:
+                    logger.warning(f"Prefetch timeout for {specialist_id}")
+                    prefetch_data = None
+                except Exception as e:
+                    logger.warning(f"Prefetch failed for {specialist_id}: {e}")
+                    prefetch_data = None
+
+            if prefetch_data:
+                data_label = "CALENDARIO" if intent["is_calendar"] else \
+                             "EMAILS" if intent["is_email"] else "DRIVE"
+                agent_copy["system_prompt"] += (
+                    f"\n\n[DADOS PRE-CARREGADOS DO {data_label}]\n{prefetch_data}\n\n"
+                    "Formate estes dados em portugues brasileiro de forma amigavel e direta. "
+                    "NAO chame ferramentas — os dados ja estao prontos."
+                )
+                agent_copy["tools"] = []
+
             path.append({"step": 2, "phase": "specialist", "agent": specialist_id,
                          "prefetch": bool(prefetch_data),
                          "reason": {k: v for k, v in intent.items() if v}})
-            result = await _execute_agent(agent, masked_text, payload, extra)
+            result = await _execute_agent(agent_copy, masked_text, payload, extra)
         else:
             path.append({"step": 2, "phase": "fallback_to_orchestrator", "reason": "specialist_disabled"})
             orchestrator_id = await _get_orchestrator(instance)
