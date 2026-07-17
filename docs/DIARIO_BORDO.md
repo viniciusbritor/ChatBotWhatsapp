@@ -335,3 +335,50 @@ WhatsApp -> Evolution -> whatsapp-agente -> agents_runtime -> LLM -> WhatsApp
 - `"sender_name": "Vinicius Rocha"` → Jennifer respondeu: **"Oi, Vinicius! ... posso te chamar de Vini?"**
 - Usou `nickname.lookup` (tool_rounds=1), extraiu primeiro nome, ofereceu apelido proativamente
 - 152 testes passando (pytest -q)
+
+---
+
+## 17/07/2026 00:30 BRT — Proactive Topics + Privacy Guard Grupos + Portal
+
+### Proactive Worker — Topics Scan
+
+- `run_topics_scan()` implementado: escaneia contatos elegiveis via Firestore `contatos/`
+- Coleta historico recente (`_get_recent_history`) e gera mensagem contextual via LLM (`_generate_topic_message`)
+- Passa pelo gate anti-spam de 8 camadas antes de enviar
+- `main()` aceita `--mode events|topics|all` para Cloud Scheduler
+- Trigger: Cloud Scheduler `0 8 * * 2,5` (terca+sexta 8h BRT)
+
+### Privacy Guard — Grupos Inteligente
+
+| Antes | Depois |
+|---|---|
+| Hard block: "Me chama no privado!" para toda intent pessoal em grupo | Verifica `membro.confirmed` no Firestore |
+| Se nao confirmado: pede confirmacao ("me manda 'sim' no privado") | Se confirmado: executa o especialista normalmente |
+
+- `orchestrator.py:236-258`: substituido hard block por `get_member_confirmation(group_jid, phone)`
+- `orchestrator.py:193-200`: nova funcao `_extract_group_jid()`
+
+### Firestore — Schema de Grupo
+
+| Campo | Colecao | Proposito |
+|---|---|---|
+| `membro.confirmed` | `grupos/{jid}/membros/{phone}` | Membro autorizou acesso a dados no grupo |
+| `group.drive_folder_id` | `grupos/{jid}` | Pasta Drive associada ao grupo |
+| `group.drive_folder_name` | `grupos/{jid}` | Nome da pasta Drive |
+
+Novas funcoes em `tools/group.py`:
+- `get_member_confirmation()`, `set_member_confirmation()`
+- `set_group_drive_folder()`, `get_group_drive_folder()`
+- `get_group_info()` — dados completos do grupo + contagem de confirmados
+
+### Portal — Aba "Grupos"
+
+- Nova aba "Grupos" no dashboard com campo de telefone e botao "Buscar Meus Grupos"
+- Lista grupos onde o usuario e membro com toggle "Permitir acesso"
+- Endpoints: `GET /admin/groups?phone=X`, `POST /admin/groups/confirm`
+
+### Teste Fim-a-Fim
+
+- `"Rafaela Silva Oliveira"` → "Oi, Rafaela! ... Posso te chamar de Rafa?"
+- `"Vinicius Rocha"` → "Oi, Vinicius! ... posso te chamar de Vini?"
+- 152 testes passando (pytest -q)
