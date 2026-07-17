@@ -31,12 +31,12 @@ class LLMProvider:
     """Multi-provider LLM client with cascade fallback."""
 
     def __init__(self):
-        self.gemini_key = get_secret("GEMINI_API_KEY")
         self.deepseek_key = get_secret("DEEPSEEK_API_KEY")
         self.nvidia_key = get_secret("NVIDIA_API_KEY")
         self.minimax_key = get_secret("MINIMAX_API_KEY")
 
-        self.gemini_base = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta")
+        self.gemini_project = os.getenv("GCP_PROJECT") or os.getenv("GCLOUD_PROJECT", "coherence-ominichannel-fs")
+        self.gemini_location = os.getenv("GEMINI_LOCATION", "us-central1")
         self.deepseek_base = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
         self.nvidia_base = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
         self.minimax_base = os.getenv(
@@ -46,7 +46,18 @@ class LLMProvider:
 
     def is_available(self) -> bool:
         """Check if at least one provider is configured."""
-        return bool(self.gemini_key or self.deepseek_key or self.nvidia_key or self.minimax_key)
+        return bool(self.gemini_available() or self.deepseek_key or self.nvidia_key or self.minimax_key)
+
+    def gemini_available(self) -> bool:
+        """Vertex AI usa ADC — disponivel se GCP_PROJECT ou ADC configurado."""
+        if self.gemini_project and self.gemini_project not in ("", "demo-project"):
+            return True
+        try:
+            import google.auth
+            creds, project = google.auth.default()
+            return bool(project)
+        except Exception:
+            return False
 
     def _backoff_sleep(self, attempt: int, base: float = 1.0, cap: float = 30.0):
         """Exponential backoff with jitter."""
@@ -215,7 +226,7 @@ class LLMProvider:
         """
         providers = []
 
-        if self.gemini_key:
+        if self.gemini_available():
             providers.append(("gemini", "gemini-2.5-flash", "_call_gemini", "gemini-2.5-flash"))
         if self.deepseek_key:
             providers.append(("deepseek", "deepseek-v4-flash", "_call_deepseek", "deepseek-v4-flash"))
@@ -424,13 +435,26 @@ class LLMProvider:
         raise LLMError(f"all_providers_failed")
 
     async def _call_gemini_raw(self, model: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Call Gemini 2.5 Flash via Google AI Studio API. Converte payload OpenAI→Gemini."""
-        if not self.gemini_key:
-            raise LLMError("gemini_key_not_configured")
-        url = f"{self.gemini_base}/models/{model}:generateContent?key={self.gemini_key}"
+        """Call Gemini 2.5 Flash via Vertex AI (ADC, sem API key)."""
+        import google.auth
+        import google.auth.transport.requests
+
+        creds, project = google.auth.default()
+        project = project or self.gemini_project
+        creds.refresh(google.auth.transport.requests.Request())
+
+        url = (
+            f"https://{self.gemini_location}-aiplatform.googleapis.com/v1/"
+            f"projects/{project}/locations/{self.gemini_location}/"
+            f"publishers/google/models/{model}:generateContent"
+        )
+        headers = {
+            "Authorization": f"Bearer {creds.token}",
+            "Content-Type": "application/json",
+        }
         gemini_payload = self._to_gemini_format(payload)
         async with httpx.AsyncClient(timeout=300) as client:
-            resp = await client.post(url, json=gemini_payload)
+            resp = await client.post(url, headers=headers, json=gemini_payload)
         if resp.status_code == 429:
             raise LLMError("gemini_quota_exceeded")
         if resp.status_code >= 400:
