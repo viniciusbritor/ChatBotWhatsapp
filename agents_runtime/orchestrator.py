@@ -313,13 +313,15 @@ async def _prefetch_drive(phone: str, query_text: str = "") -> Optional[str]:
 
 
 async def _prefetch_drive_multi(phone: str, text: str) -> Optional[str]:
-    """D1: 2 queries paralelas no Drive, usa a com mais resultados."""
+    """D1: 3 queries paralelas no Drive, usa a com mais resultados."""
     query1 = _extract_search_terms(text)
     query2 = " ".join(w for w in text.lower().split()
                       if len(w.strip(",.!?;:")) > 3)[:5]
     results = await asyncio.gather(
         _prefetch_drive(phone, query1),
         _prefetch_drive(phone, query2),
+        _prefetch_drive_docs(phone, query1),
+        _prefetch_drive_docs(phone, query2),
         return_exceptions=True,
     )
     best, best_count = None, 0
@@ -332,6 +334,31 @@ async def _prefetch_drive_multi(phone: str, text: str) -> Optional[str]:
             except Exception:
                 pass
     return best
+
+
+async def _prefetch_drive_docs(phone: str, query_text: str = "") -> Optional[str]:
+    """Prefetch so documentos e apresentacoes do Drive (atas, slides)."""
+    try:
+        from tools.google_drive import search_files
+        query_parts = []
+        if query_text:
+            query_parts.append(f"name contains '{query_text}'")
+        query_parts.append("mimeType contains 'document' or mimeType contains 'presentation'")
+        result = await search_files(query_text or "", mime_type="application/vnd.google-apps.document", max_results=20, phone=phone)
+        alt = await search_files(query_text or "", mime_type="application/vnd.google-apps.presentation", max_results=20, phone=phone)
+        all_files = result.get("files", []) + alt.get("files", [])
+        if not all_files:
+            return None
+        seen = set()
+        unique = []
+        for f in all_files:
+            if f["id"] not in seen:
+                seen.add(f["id"])
+                unique.append(f)
+        return json.dumps(unique[:20], ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.warning(f"Prefetch drive docs failed: {e}")
+        return None
 
 
 def _has_real_data(prefetch_text: str) -> bool:
@@ -379,6 +406,17 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
     payload["first_name"] = first_name
 
     masked_text = mask_pii(text)
+
+    if first_name and not has_nickname(phone):
+        text_lower = masked_text.lower().strip()
+        if any(term in text_lower for term in ACCEPTANCE_KEYWORDS):
+            suggested = _prefetch_nickname(first_name) or _generate_diminutive(first_name)
+            try:
+                from tools.nickname import set_consent
+                await set_consent(phone, first_name, suggested, True)
+                logger.info(f"Nickname auto-saved: {phone} -> {suggested}")
+            except Exception as e:
+                logger.warning(f"Nickname auto-save failed: {e}")
 
     intent = _detect_intent(masked_text)
     specialist_id = _resolve_agent_for_intent(intent, instance)
@@ -501,17 +539,6 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
         if not orchestrator:
             return _error_response(503, "agent_not_found", f"Orchestrator {orchestrator_id} nao encontrado")
         path.append({"step": 2, "phase": "orchestrator", "agent": orchestrator_id, "reason": "default_route"})
-
-        if first_name and not has_nickname(phone):
-            text_lower = masked_text.lower().strip()
-            if any(term in text_lower for term in ACCEPTANCE_KEYWORDS):
-                suggested = _prefetch_nickname(first_name) or _generate_diminutive(first_name)
-                try:
-                    from tools.nickname import set_consent
-                    await set_consent(phone, first_name, suggested, True)
-                    logger.info(f"Nickname auto-saved: {phone} -> {suggested}")
-                except Exception as e:
-                    logger.warning(f"Nickname auto-save failed: {e}")
 
         if first_name and not has_nickname(phone):
             suggested = _prefetch_nickname(first_name)
