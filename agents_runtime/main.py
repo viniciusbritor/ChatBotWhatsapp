@@ -293,6 +293,51 @@ async def admin_users_get(phone: str):
     return JSONResponse(content={"user": user})
 
 
+@app.get("/admin/groups")
+async def admin_groups_list(request: Request):
+    """List groups where a phone is a member (for Portal)."""
+    phone = request.query_params.get("phone", "")
+    if not phone:
+        raise HTTPException(status_code=422, detail="phone query param required")
+    try:
+        from tools.group import list_active_groups, get_member_confirmation
+        all_groups = await list_active_groups()
+        result = []
+        for g in all_groups:
+            members = g.get("members", [])
+            is_member = phone in members
+            if is_member:
+                group_jid = g.get("group_jid", "")
+                confirmed = await get_member_confirmation(group_jid, phone)
+                result.append({
+                    "group_jid": group_jid,
+                    "name": g.get("name", group_jid),
+                    "members_count": g.get("members_count", len(members)),
+                    "drive_folder_id": g.get("drive_folder_id"),
+                    "confirmed": confirmed,
+                })
+        return JSONResponse(content={"groups": result})
+    except Exception as e:
+        return JSONResponse(content={"groups": [], "error": str(e)})
+
+
+@app.post("/admin/groups/confirm")
+async def admin_groups_confirm(request: Request):
+    """Toggle group data sharing confirmation for a member."""
+    body = await request.json()
+    group_jid = body.get("group_jid", "")
+    phone = body.get("phone", "")
+    confirmed = body.get("confirmed", True)
+    if not group_jid or not phone:
+        raise HTTPException(status_code=422, detail="group_jid and phone required")
+    try:
+        from tools.group import set_member_confirmation
+        success = await set_member_confirmation(group_jid, phone, confirmed)
+        return JSONResponse(content={"status": "ok" if success else "error", "confirmed": confirmed})
+    except Exception as e:
+        return JSONResponse(content={"status": "error", "message": str(e)})
+
+
 @app.post("/admin/knowledge")
 async def admin_knowledge_post(request: Request):
     """Index a document in the shared knowledge base."""
@@ -413,6 +458,7 @@ body{{font-family:Inter,-apple-system,sans-serif;background:#f9fafb;color:#17171
   <div class="tab" onclick="switchTab('agentes')">Agentes & Skills</div>
   <div class="tab" onclick="switchTab('gerenciar')">Gerenciar</div>
   <div class="tab" onclick="switchTab('usuarios')">Usuários</div>
+  <div class="tab" onclick="switchTab('grupos')">Grupos</div>
 </div>
 
 <div id="tab-fluxo" class="tab-content active">
@@ -475,6 +521,19 @@ body{{font-family:Inter,-apple-system,sans-serif;background:#f9fafb;color:#17171
   <div class="card">
     <h3>Usuários Cadastrados</h3>
     <div id="usuarios-content" class="loading">Carregando...</div>
+  </div>
+</div>
+
+<div id="tab-grupos" class="tab-content">
+  <div class="card">
+    <h3>Meus Grupos</h3>
+    <p style="font-size:13px;color:#6b7280;margin-bottom:12px">Gerencie em quais grupos a Jennifer pode acessar seus dados (Drive, Calendar, Email).</p>
+    <div class="form-group">
+      <label>Seu telefone (com DDI)</label>
+      <input id="group-phone" placeholder="5511999999999" style="width:280px">
+      <button class="btn btn-primary" onclick="loadMeusGrupos()">Buscar Meus Grupos</button>
+    </div>
+    <div id="grupos-content" style="margin-top:12px;font-size:13px;color:#9ca3af">Informe seu telefone e clique em Buscar.</div>
   </div>
 </div>
 
@@ -728,6 +787,38 @@ async function loadUsuarios() {{
         <span style="color:${{u.google_oauth_token?'#16a34a':'#9ca3af'}};font-size:12px">${{u.google_oauth_token?'Conectado':'Pendente'}}</span>
       </div>`).join('');
   }} catch(e) {{}}
+}}
+
+async function loadMeusGrupos() {{
+  const phone = document.getElementById('group-phone').value.trim();
+  if (!phone) {{ document.getElementById('grupos-content').innerHTML = '<span style="color:#dc2626">Informe seu telefone</span>'; return; }}
+  document.getElementById('grupos-content').innerHTML = '<span style="color:#3b82f6">Buscando...</span>';
+  try {{
+    const data = await api('/admin/groups?phone=' + encodeURIComponent(phone));
+    const groups = data.groups || [];
+    if (groups.length===0) {{
+      document.getElementById('grupos-content').innerHTML = '<p style="color:#9ca3af">Voce nao esta em nenhum grupo com a Jennifer. Entre em contato pelo WhatsApp.</p>';
+      return;
+    }}
+    document.getElementById('grupos-content').innerHTML = groups.map(g => `
+      <div style="padding:10px 0;border-bottom:1px solid #f3f4f6;font-size:13px;display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <span style="font-weight:600">${{g.name||g.group_jid}}</span>
+          <span style="color:#9ca3af;margin-left:8px">(${{g.members_count||0}} membros)</span>
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px">
+          <input type="checkbox" ${{g.confirmed?'checked':''}} onchange="toggleGroupConfirm('${{g.group_jid}}', '${{phone}}', this.checked)">
+          Permitir acesso
+        </label>
+      </div>`).join('');
+  }} catch(e) {{ document.getElementById('grupos-content').innerHTML = '<span style="color:#dc2626">Erro: '+e.message+'</span>'; }}
+}}
+
+async function toggleGroupConfirm(groupJid, phone, checked) {{
+  try {{
+    await apiPost('/admin/groups/confirm', {{group_jid: groupJid, phone: phone, confirmed: checked}});
+    document.getElementById('grupos-content').innerHTML += '<div style="color:#16a34a;font-size:12px;margin-top:6px">Permissao '+(checked?'concedida':'revogada')+' com sucesso!</div>';
+  }} catch(e) {{ alert('Erro: '+e.message); }}
 }}
 
 loadFluxo();

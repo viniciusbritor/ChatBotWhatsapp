@@ -227,9 +227,178 @@ async def run_events_scan() -> Dict[str, Any]:
     }
 
 
+async def _get_eligible_contacts() -> List[Dict[str, Any]]:
+    """Get contacts eligible for proactive topics messages."""
+    try:
+        from google.cloud import firestore
+        project = os.getenv("GCP_PROJECT") or os.getenv("GCLOUD_PROJECT")
+        if not project:
+            return []
+        db = firestore.Client(project=project)
+        docs = db.collection("contatos").where("opted_in", "==", True).stream()
+        contacts = []
+        for doc in docs:
+            data = doc.to_dict()
+            phone = data.get("phone", doc.id)
+            if data.get("proactive_mode", "normal") not in ("off", "zen"):
+                contacts.append({"phone": phone, **data})
+        return contacts
+    except Exception as e:
+        logger.warning(f"Failed to get contacts: {e}")
+        return []
+
+
+async def _get_recent_history(phone: str, limit: int = 10) -> str:
+    """Get recent chat history for a contact."""
+    try:
+        from google.cloud import firestore
+        project = os.getenv("GCP_PROJECT") or os.getenv("GCLOUD_PROJECT")
+        if not project:
+            return ""
+        db = firestore.Client(project=project)
+        docs = (
+            db.collection("contatos").document(phone)
+            .collection("historico")
+            .order_by("ts", direction=firestore.Query.DESCENDING)
+            .limit(limit)
+            .stream()
+        )
+        messages = []
+        for d in docs:
+            data = d.to_dict()
+            direction = data.get("direction", "in")
+            text = data.get("text", "")[:100]
+            name = data.get("sender_name", "")
+            prefix = name if direction == "in" else "Jennifer"
+            messages.append(f"{prefix}: {text}")
+        return "\n".join(reversed(messages))
+    except Exception:
+        return ""
+
+
+async def _generate_topic_message(contact: Dict[str, Any], history: str) -> Optional[Dict[str, Any]]:
+    """Generate a contextual proactive message using LLM."""
+    phone = contact.get("phone", "")
+    display_name = contact.get("display_name", contact.get("preferred_name", ""))
+
+    llm = LLMProvider()
+    if not llm.is_available():
+        return None
+
+    system_prompt = (
+        "Voce e o agente de proatividade da Jennifer. Analise o historico recente do usuario "
+        "e sugira UMA mensagem proativa curta (max 2 linhas) que traga valor real:\n"
+        "- Se houver assunto pendente: lembre gentilmente\n"
+        "- Se houver interesse em topico: compartilhe algo relevante\n"
+        "- Se conversa parada ha dias: 'Saudades! Como vao as coisas?'\n"
+        "- Nunca pergunte 'tudo bem?' generico\n"
+        "- Tom: amigavel, profissional, caloroso\n"
+        "- JAMAIS faca spam, venda, ou pressione\n"
+        "- Se nao houver contexto relevante, responda exatamente: SKIP\n"
+        "Responda APENAS com JSON: {\"message\": \"...\", \"relevance\": 0.X, \"topic\": \"...\"}"
+    )
+
+    user_prompt = (
+        f"Contato: {display_name} ({phone})\n"
+        f"Historico recente:\n{history or '(sem historico)'}\n\n"
+        "Qual mensagem proativa voce sugere?"
+    )
+
+    try:
+        result = llm.chat(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model="deepseek-v4-flash",
+            temperature=0.7,
+            max_tokens=200,
+            json_mode=True,
+        )
+        content = result.get("content", "")
+        if "SKIP" in content.upper():
+            return None
+        import re
+        msg_match = re.search(r'"message":\s*"([^"]+)"', content)
+        rel_match = re.search(r'"relevance":\s*([\d.]+)', content)
+        topic_match = re.search(r'"topic":\s*"([^"]+)"', content)
+        if msg_match:
+            return {
+                "message": msg_match.group(1),
+                "relevance": float(rel_match.group(1)) if rel_match else 0.7,
+                "topic": topic_match.group(1) if topic_match else "conversation",
+                "phone": phone,
+                "trigger": "topics_scan",
+            }
+    except Exception as e:
+        logger.warning(f"Topic generation failed for {phone}: {e}")
+    return None
+
+
+async def run_topics_scan() -> Dict[str, Any]:
+    """Run the topics-based proactive scan (Tue+Fri 8h BRT)."""
+    contacts = await _get_eligible_contacts()
+    logger.info(f"Topics scan: {len(contacts)} eligible contacts")
+
+    sent = 0
+    blocked = 0
+    skipped = 0
+
+    for contact in contacts[:MAX_PROACTIVE_PER_RUN * 2]:
+        phone = contact.get("phone", "")
+        history = await _get_recent_history(phone, limit=8)
+        candidate = await _generate_topic_message(contact, history)
+        if not candidate:
+            skipped += 1
+            continue
+
+        if is_prohibited_template(candidate["message"]):
+            blocked += 1
+            continue
+
+        contact_state = _get_contact_state(phone)
+        allowed, reason = check(
+            phone=phone,
+            group_jid=None,
+            is_group_member=False,
+            contact_state=contact_state,
+            relevance_score=candidate.get("relevance", 0.7),
+        )
+        if not allowed:
+            logger.info(f"Topic blocked ({reason}): {phone}")
+            blocked += 1
+            continue
+
+        success = await send_proactive_message(
+            phone=phone,
+            message=candidate["message"],
+            trigger="topics_scan",
+        )
+        if success:
+            sent += 1
+        else:
+            blocked += 1
+
+    return {
+        "candidates": len(contacts),
+        "sent": sent,
+        "blocked": blocked,
+        "skipped": skipped,
+    }
+
+
 async def main():
-    logger.info("Proactive Worker starting (events scan mode)...")
-    result = await run_events_scan()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=["events", "topics", "all"], default="events")
+    args, _ = parser.parse_known_args()
+    logger.info(f"Proactive Worker starting (mode={args.mode})...")
+    if args.mode == "topics":
+        result = await run_topics_scan()
+    elif args.mode == "all":
+        events_result = await run_events_scan()
+        topics_result = await run_topics_scan()
+        result = {"events": events_result, "topics": topics_result}
+    else:
+        result = await run_events_scan()
     logger.info(f"Proactive Worker done: {result}")
     return result
 

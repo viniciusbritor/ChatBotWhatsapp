@@ -191,6 +191,15 @@ def _is_group_message(payload: Dict[str, Any]) -> bool:
     return "@g.us" in str(remote_jid)
 
 
+def _extract_group_jid(payload: Dict[str, Any]) -> str:
+    """Extract group JID from payload."""
+    extra = payload.get("extra", {})
+    remote_jid = extra.get("remote_jid", "")
+    if "@g.us" in str(remote_jid):
+        return remote_jid.split("@")[0] + "@g.us"
+    return ""
+
+
 async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Main orchestration entry point.
 
@@ -234,14 +243,30 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
     path.append({"step": 1, "phase": "intent_detect", "details": {k: v for k, v in intent.items() if v}})
 
     if _is_personal_intent(intent) and _is_group_message(payload):
-        logger.info(f"Privacy guard: blocking personal intent in group from {phone}")
-        return {
-            "reply": f"Oi {sender_name}! Você pediu informações pessoais (agenda, email ou documentos). "
-                     "Em um grupo, prefiro não expor esses dados. Me chama no privado que te respondo! 🔒",
-            "delay_ms": 0,
-            "presence": "composing",
-            "metadata": {"agent_id": "privacy-guard", "blocked": "group_personal_data"},
-        }
+        group_jid = extra.get("remote_jid", "") or _extract_group_jid(payload)
+        is_confirmed = False
+        if group_jid:
+            try:
+                from tools.group import get_member_confirmation
+                is_confirmed = await get_member_confirmation(group_jid, phone)
+            except Exception:
+                pass
+
+        if not is_confirmed:
+            logger.info(f"Privacy guard: unconfirmed member {phone} in group {group_jid}")
+            return {
+                "reply": (
+                    f"Oi {sender_name}! Voce pediu para acessar informacoes pessoais no grupo. "
+                    "Para sua seguranca, preciso que me confirme no privado primeiro. "
+                    "Me manda uma mensagem no privado dizendo 'sim' e eu libero o acesso para voce neste grupo. "
+                    "Tambem pode confirmar no Portal: https://coherence-portal-test-c5nbfc5meq-uc.a.run.app 🔒"
+                ),
+                "delay_ms": 0,
+                "presence": "composing",
+                "metadata": {"agent_id": "privacy-guard", "blocked": "group_unconfirmed_member"},
+            }
+
+        logger.info(f"Privacy guard: confirmed member {phone} in group {group_jid}, executing")
 
     if _is_personal_intent(intent) and not get_user(phone):
         logger.info(f"Privacy guard: unregistered user {phone} requesting personal data")

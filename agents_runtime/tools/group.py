@@ -202,3 +202,109 @@ async def list_active_groups() -> List[Dict[str, Any]]:
         return [{"group_jid": doc.id, **doc.to_dict()} for doc in docs]
     except Exception:
         return []
+
+
+async def get_member_confirmation(group_jid: str, phone: str) -> bool:
+    """Check if a member has confirmed data sharing in this group."""
+    db = _get_firestore()
+    if db is None:
+        return False
+    try:
+        doc = (
+            db.collection("grupos")
+            .document(group_jid.replace("/", "_"))
+            .collection("membros")
+            .document(phone)
+            .get()
+        )
+        if doc.exists:
+            return bool(doc.to_dict().get("confirmed", False))
+        return False
+    except Exception:
+        return False
+
+
+async def set_member_confirmation(group_jid: str, phone: str, confirmed: bool = True) -> bool:
+    """Set member data sharing confirmation in a group."""
+    db = _get_firestore()
+    if db is None:
+        return False
+    try:
+        doc_ref = (
+            db.collection("grupos")
+            .document(group_jid.replace("/", "_"))
+            .collection("membros")
+            .document(phone)
+        )
+        doc_ref.set({
+            "phone": phone,
+            "confirmed": confirmed,
+            "confirmed_at": _now_iso(),
+        }, merge=True)
+        return True
+    except Exception as e:
+        logger.error(f"set_member_confirmation error: {e}")
+        return False
+
+
+async def set_group_drive_folder(group_jid: str, folder_id: str, folder_name: str = "") -> bool:
+    """Set the Drive folder ID associated with this group."""
+    db = _get_firestore()
+    if db is None:
+        return False
+    try:
+        db.collection("grupos").document(group_jid.replace("/", "_")).update({
+            "drive_folder_id": folder_id,
+            "drive_folder_name": folder_name or "Drive do Grupo",
+        })
+        return True
+    except Exception as e:
+        logger.error(f"set_group_drive_folder error: {e}")
+        return False
+
+
+async def get_group_drive_folder(group_jid: str) -> Optional[str]:
+    """Get the Drive folder ID for this group."""
+    db = _get_firestore()
+    if db is None:
+        return None
+    try:
+        doc = db.collection("grupos").document(group_jid.replace("/", "_")).get()
+        if doc.exists:
+            return doc.to_dict().get("drive_folder_id")
+        return None
+    except Exception:
+        return None
+
+
+async def get_group_info(group_jid: str) -> Dict[str, Any]:
+    """Get group info including drive folder, members, settings."""
+    db = _get_firestore()
+    if db is None:
+        return {"error": "firestore_unavailable"}
+    try:
+        doc = db.collection("grupos").document(group_jid.replace("/", "_")).get()
+        if not doc.exists:
+            return {"error": "group_not_found"}
+        group_data = doc.to_dict()
+        members = await get_group_members(group_jid)
+        confirmed_count = 0
+        for m in members:
+            member_doc = (
+                db.collection("grupos")
+                .document(group_jid.replace("/", "_"))
+                .collection("membros")
+                .document(m)
+                .get()
+            )
+            if member_doc.exists and member_doc.to_dict().get("confirmed"):
+                confirmed_count += 1
+        return {
+            **group_data,
+            "members": members,
+            "members_count": len(members),
+            "confirmed_count": confirmed_count,
+        }
+    except Exception as e:
+        logger.error(f"get_group_info error: {e}")
+        return {"error": str(e)}
