@@ -2,6 +2,7 @@
 import os
 import json
 import logging
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 
 from google.oauth2.credentials import Credentials
@@ -28,14 +29,19 @@ def _get_credentials(phone: Optional[str] = None) -> Credentials:
             if user and user.get("google_oauth_token"):
                 token_data = user["google_oauth_token"]
                 if isinstance(token_data.get("token"), str):
-                    return Credentials(
+                    creds = Credentials(
                         token=token_data["token"],
                         refresh_token=token_data.get("refresh_token"),
                         token_uri=token_data.get("token_uri", "https://oauth2.googleapis.com/token"),
                         client_id=token_data.get("client_id", ""),
                         client_secret=token_data.get("client_secret", ""),
                         scopes=SCOPES,
+                        expiry=datetime.fromtimestamp(float(token_data.get("expiry", 0))) if token_data.get("expiry") else None,
                     )
+                    if creds.expired:
+                        from google.auth.transport.requests import Request
+                        creds.refresh(Request())
+                    return creds
         except Exception as e:
             logger.warning(f"Per-user credentials failed for {phone}: {e}")
 
