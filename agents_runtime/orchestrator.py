@@ -130,7 +130,7 @@ def _select_orchestrator_agent(instance: str) -> Optional[str]:
     """Select which orchestrator agent to use for this instance."""
     for agent_id, agent in _iter_agents():
         if agent.get("role") == "orchestrator" and agent.get("enabled", True):
-            if instance in agent.get("instances", []) or not agent.get("instances"):
+            if instance.lower() in [i.lower() for i in agent.get("instances", [])] or not agent.get("instances"):
                 return agent_id
     return None
 
