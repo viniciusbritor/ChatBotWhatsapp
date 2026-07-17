@@ -372,6 +372,19 @@ def _has_real_data(prefetch_text: str) -> bool:
 ACCEPTANCE_KEYWORDS = {"sim", "pode", "ok", "claro", "aceito", "perfeito", "otimo", "pode sim"}
 
 
+def _get_db():
+    """Get Firestore client (fallback robusto)."""
+    try:
+        from google.cloud import firestore
+        import os
+        project = os.getenv("GCP_PROJECT") or os.getenv("GCLOUD_PROJECT")
+        if not project:
+            return None
+        return firestore.Client(project=project)
+    except Exception:
+        return None
+
+
 async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Main orchestration entry point.
 
@@ -413,13 +426,18 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
         if any(term in text_lower[:20] for term in ACCEPTANCE_KEYWORDS):
             suggested = _prefetch_nickname(first_name) or _generate_diminutive(first_name)
             try:
-                from tools.nickname import set_consent
-                await set_consent(phone, first_name, suggested, True)
-                logger.info(f"Nickname auto-saved: {phone} -> {suggested}")
-                has_nickname.cache = getattr(has_nickname, "cache", {})
-                has_nickname.cache[phone] = True
+                import hashlib
+                db = _get_db()
+                if db:
+                    ph = hashlib.sha256(phone.encode()).hexdigest()[:32]
+                    db.collection("apelidos_custom").document(ph).set({
+                        "phone": phone, "accepted": True,
+                        "offered_nickname": suggested, "detected_name": first_name,
+                        "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    })
+                    logger.info(f"Nickname direct-saved to Firestore: {phone} -> {suggested}")
             except Exception as e:
-                logger.warning(f"Nickname auto-save failed: {e}")
+                logger.warning(f"Nickname save failed: {e}")
 
     intent = _detect_intent(masked_text)
     specialist_id = _resolve_agent_for_intent(intent, instance)
@@ -595,6 +613,13 @@ async def _execute_agent(
     """Execute a specific agent with tool calling loop."""
     skills_section = _build_skills_section(agent.get("skills", []))
     system_prompt = agent.get("system_prompt", "") + skills_section
+
+    phone = payload.get("phone", "")
+    recent = [i for i in _interaction_history[-4:] if i.get("phone") == phone]
+    if recent:
+        ctx = "\n".join(f"- User: {r['text_preview'][:60]}\n- Jennifer: {r['reply_preview'][:60]}"
+                        for r in recent[-2:])
+        system_prompt += f"\n\n[CONTEXTO RECENTE DA CONVERSA]\n{ctx}\nConsidere este contexto ao responder."
 
     brt = timezone(timedelta(hours=-3))
     hoje = datetime.now(brt)
