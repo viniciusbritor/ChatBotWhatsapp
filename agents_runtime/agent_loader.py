@@ -263,6 +263,9 @@ def _normalize_phones(phone: str) -> List[str]:
 
 def has_nickname(phone: str) -> bool:
     """Verifica se usuario ja tem apelido consentido no Firestore."""
+    cache = getattr(has_nickname, "cache", {})
+    if phone in cache:
+        return cache[phone]
     import hashlib
     db = _get_firestore_client()
     if db is None:
@@ -272,7 +275,10 @@ def has_nickname(phone: str) -> bool:
         doc = db.collection("apelidos_custom").document(ph).get()
         if doc.exists:
             data = doc.to_dict()
-            return bool(data.get("accepted", False))
+            result = bool(data.get("accepted", False))
+            cache[phone] = result
+            has_nickname.cache = cache
+            return result
         return False
     except Exception:
         return False

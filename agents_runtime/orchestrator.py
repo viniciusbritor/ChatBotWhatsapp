@@ -61,6 +61,7 @@ DRIVE_KEYWORDS = [
     "omnichannel", "atividades", "baixar", "encontrar arquivo",
     "meus arquivos", "meus documentos", "buscar arquivo",
     "procurar documento", "lista de arquivos", "mostrar arquivos",
+    "ata", "minuta", "relatorio", "apresentação", "apresentacao",
 ]
 EMAIL_KEYWORDS = [
     "email", "e-mail", "caixa de entrada", "gmail",
@@ -407,14 +408,16 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     masked_text = mask_pii(text)
 
-    if first_name and not has_nickname(phone):
+    if first_name:
         text_lower = masked_text.lower().strip()
-        if any(term in text_lower for term in ACCEPTANCE_KEYWORDS):
+        if any(term in text_lower[:20] for term in ACCEPTANCE_KEYWORDS):
             suggested = _prefetch_nickname(first_name) or _generate_diminutive(first_name)
             try:
                 from tools.nickname import set_consent
                 await set_consent(phone, first_name, suggested, True)
                 logger.info(f"Nickname auto-saved: {phone} -> {suggested}")
+                has_nickname.cache = getattr(has_nickname, "cache", {})
+                has_nickname.cache[phone] = True
             except Exception as e:
                 logger.warning(f"Nickname auto-save failed: {e}")
 
