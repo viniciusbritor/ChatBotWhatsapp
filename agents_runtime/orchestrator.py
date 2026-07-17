@@ -59,6 +59,8 @@ CALENDAR_KEYWORDS = [
 DRIVE_KEYWORDS = [
     "drive", "documento", "arquivo", "pasta", "upload",
     "omnichannel", "atividades", "baixar", "encontrar arquivo",
+    "meus arquivos", "meus documentos", "buscar arquivo",
+    "procurar documento", "lista de arquivos", "mostrar arquivos",
 ]
 EMAIL_KEYWORDS = [
     "email", "e-mail", "caixa de entrada", "gmail",
@@ -238,6 +240,65 @@ def _generate_diminutive(name: str) -> str:
         return name[:4]
 
 
+def _is_read_query(text: str) -> bool:
+    """Fase B: detecta se query eh de leitura (pre-fetch) ou escrita (tool loop)."""
+    text_lower = text.lower()
+    write_kw = {"cria", "criar", "envia", "enviar", "manda", "mandar", "agenda", "agendar",
+                "marca", "marcar", "deleta", "deletar", "apaga", "apagar", "atualiza", "atualizar",
+                "remove", "remover", "sobe", "upload"}
+    if any(kw in text_lower for kw in write_kw):
+        return False
+    return True
+
+
+async def _prefetch_calendar(phone: str) -> Optional[str]:
+    """Fase B: pre-busca eventos do dia sem LLM."""
+    try:
+        from tools.google_calendar import list_events
+        from datetime import datetime, timezone, timedelta
+        brt = timezone(timedelta(hours=-3))
+        hoje = datetime.now(brt)
+        result = await list_events(
+            time_min=hoje.strftime("%Y-%m-%dT00:00:00-03:00"),
+            time_max=hoje.strftime("%Y-%m-%dT23:59:59-03:00"),
+            max_results=50, phone=phone)
+        events = result.get("events", [])
+        if not events:
+            return "Nenhum compromisso na agenda hoje."
+        return json.dumps(events, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.warning(f"Prefetch calendar failed: {e}")
+        return None
+
+
+async def _prefetch_email(phone: str) -> Optional[str]:
+    """Fase B: pre-busca ultimos emails sem LLM."""
+    try:
+        from tools.google_gmail import search_messages
+        result = await search_messages("in:inbox newer_than:30d", max_results=10, phone=phone)
+        messages = result.get("messages", [])
+        if not messages:
+            return "Nenhum email recente na caixa de entrada."
+        return json.dumps(messages, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.warning(f"Prefetch email failed: {e}")
+        return None
+
+
+async def _prefetch_drive(phone: str, query_text: str = "") -> Optional[str]:
+    """Fase B: pre-busca arquivos no Drive sem LLM."""
+    try:
+        from tools.google_drive import search_files
+        result = await search_files(query_text or "", max_results=20, phone=phone)
+        files = result.get("files", [])
+        if not files:
+            return "Nenhum arquivo encontrado no Drive."
+        return json.dumps(files, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.warning(f"Prefetch drive failed: {e}")
+        return None
+
+
 async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Main orchestration entry point.
 
@@ -343,7 +404,28 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
     elif specialist_id:
         agent = get_agent(specialist_id)
         if agent and agent.get("enabled", True):
-            path.append({"step": 2, "phase": "specialist", "agent": specialist_id, "reason": {k: v for k, v in intent.items() if v}})
+            prefetch_data = None
+            if _is_read_query(masked_text):
+                if intent["is_calendar"]:
+                    prefetch_data = await _prefetch_calendar(phone)
+                elif intent["is_email"]:
+                    prefetch_data = await _prefetch_email(phone)
+                elif intent["is_drive"]:
+                    prefetch_data = await _prefetch_drive(phone, masked_text)
+                if prefetch_data:
+                    data_label = "DADOS"
+                    if intent["is_drive"]: data_label = "DRIVE"
+                    elif intent["is_email"]: data_label = "EMAILS"
+                    elif intent["is_calendar"]: data_label = "CALENDARIO"
+                    agent["system_prompt"] += (
+                        f"\n\n[DADOS PRE-CARREGADOS DO {data_label}]\n{prefetch_data}\n\n"
+                        "Formate estes dados em portugues brasileiro de forma amigavel e direta. "
+                        "NAO chame ferramentas — os dados ja estao prontos."
+                    )
+                    agent["tools"] = []
+            path.append({"step": 2, "phase": "specialist", "agent": specialist_id,
+                         "prefetch": bool(prefetch_data),
+                         "reason": {k: v for k, v in intent.items() if v}})
             result = await _execute_agent(agent, masked_text, payload, extra)
         else:
             path.append({"step": 2, "phase": "fallback_to_orchestrator", "reason": "specialist_disabled"})
