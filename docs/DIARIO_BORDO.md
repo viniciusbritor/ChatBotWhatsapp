@@ -295,3 +295,43 @@ WhatsApp -> Evolution -> whatsapp-agente -> agents_runtime -> LLM -> WhatsApp
 - Cloud Scheduler (5 jobs)
 - OAuth Redirect URI — verificar no GCP Console
 - Registrar modulo `omnichannel-agentes` no Portal
+
+---
+
+## 17/07/2026 00:00 BRT — Refatoracao Agente Intimidade + Fix Portal
+
+### Correcoes
+
+**Bug: "Nenhum orchestrator disponivel"**
+- `orchestrator.py:133`: `_select_orchestrator_agent` agora faz comparacao case-insensitive de `instance` (Jennifer vs jennifer)
+- Evolution API envia `"Jennifer"` (capital J), seed tinha `"jennifer"` (minusculo)
+- Deploy `502a7ca` → Cloud Run `agents-runtime-test`
+
+**Bug: Privacy Guard bloqueava usuario registrado**
+- `agent_loader.py:227`: `get_user()` agora normaliza telefone (tenta com/sem `+`, com/sem DDI 55)
+- Portal salvava `11966830020` mas WhatsApp envia `5511966830020`
+- `main.py:468-472`: Portal agora exige DDI 55 com validacao JS
+
+### Agente de Intimidade — Refatoracao
+
+**Problema**: Jennifer chamava "Oi Vinicius Rocha" (nome completo) e nunca oferecia apelido proativamente.
+
+**Mudancas**:
+
+| Arquivo | Mudanca |
+|---|---|
+| `orchestrator.py:129-135` | Nova funcao `_extract_first_name()` — extrai primeiro nome do sender_name |
+| `orchestrator.py:218-219` | `first_name` injetado no payload para todos os agentes |
+| `orchestrator.py:296-316` | Gatilho de intimidade na default route: se usuario sem apelido, injeta contexto + tools de nickname no jennifier |
+| `orchestrator.py:345-349` | `first_name` adicionado ao `user_prompt` (ex: "primeiro nome: Vinicius") |
+| `seed_initial_data.py` | System prompt jennifier com 9 regras de intimidade (primeiro nome, apelido, consentimento, anti-derrogatorio) |
+| `seed_initial_data.py` | System prompt agent-intimacy completo com algoritmo de geracao de diminutivos (3+, 2, 1 silaba) |
+| `agent_loader.py:257-272` | Nova funcao `has_nickname(phone)` — verifica Firestore `apelidos_custom` |
+| `tools/nickname.py:13-21` | Firewall `FORBIDDEN_NICKNAMES` com 42 termos (rejeita no `set_consent()`) |
+| `main.py:468-472` | Portal: label "com DDI", placeholder sem `+`, hint de formato, validacao JS `startsWith('55')` |
+
+### Teste Fim-a-Fim
+
+- `"sender_name": "Vinicius Rocha"` → Jennifer respondeu: **"Oi, Vinicius! ... posso te chamar de Vini?"**
+- Usou `nickname.lookup` (tool_rounds=1), extraiu primeiro nome, ofereceu apelido proativamente
+- 152 testes passando (pytest -q)
