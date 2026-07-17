@@ -387,6 +387,34 @@ def _get_db():
         return None
 
 
+def _get_conversation_history(phone: str, limit: int = 10) -> str:
+    """A2: Busca historico de conversas do Firestore para injetar no prompt."""
+    db = _get_db()
+    if not db:
+        return ""
+    try:
+        import hashlib
+        ph = hashlib.sha256(phone.encode()).hexdigest()[:16]
+        docs = (
+            db.collection("contatos").document(ph)
+            .collection("historico")
+            .order_by("ts", direction="DESCENDING")
+            .limit(limit)
+            .stream()
+        )
+        msgs = []
+        for d in docs:
+            data = d.to_dict()
+            direction = data.get("direction", "in")
+            text = data.get("text", "")[:80]
+            prefix = "Usuario" if direction == "in" else "Jennifer"
+            msgs.append(f"{prefix}: {text}")
+        return "\n".join(reversed(msgs)) if msgs else ""
+    except Exception as e:
+        logger.warning(f"Conversation history failed: {e}")
+        return ""
+
+
 async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Main orchestration entry point.
 
@@ -631,11 +659,16 @@ async def _execute_agent(
     system_prompt = agent.get("system_prompt", "") + skills_section
 
     phone = payload.get("phone", "")
+    history = _get_conversation_history(phone, limit=10)
     recent = [i for i in _interaction_history[-4:] if i.get("phone") == phone]
+    ctx_parts = []
     if recent:
-        ctx = "\n".join(f"- User: {r['text_preview'][:60]}\n- Jennifer: {r['reply_preview'][:60]}"
-                        for r in recent[-2:])
-        system_prompt += f"\n\n[CONTEXTO RECENTE DA CONVERSA]\n{ctx}\nConsidere este contexto ao responder."
+        ctx_parts.append("\n".join(f"- User: {r['text_preview'][:60]}\n- Jennifer: {r['reply_preview'][:60]}"
+                                    for r in recent[-2:]))
+    ctx_parts.insert(0, f"[HISTORICO DE CONVERSAS NO FIRESTORE]\n{history}")
+    ctx = "\n\n".join(p for p in ctx_parts if p)
+    if ctx:
+        system_prompt += f"\n\n[CONTEXTO DA CONVERSA]\n{ctx}\nVoce JA conhece este usuario. Use o historico para personalizar a resposta."
 
     brt = timezone(timedelta(hours=-3))
     hoje = datetime.now(brt)
