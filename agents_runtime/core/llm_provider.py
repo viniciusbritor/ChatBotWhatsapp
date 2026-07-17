@@ -31,10 +31,12 @@ class LLMProvider:
     """Multi-provider LLM client with cascade fallback."""
 
     def __init__(self):
+        self.gemini_key = get_secret("GEMINI_API_KEY")
         self.deepseek_key = get_secret("DEEPSEEK_API_KEY")
         self.nvidia_key = get_secret("NVIDIA_API_KEY")
         self.minimax_key = get_secret("MINIMAX_API_KEY")
 
+        self.gemini_base = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta")
         self.deepseek_base = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
         self.nvidia_base = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
         self.minimax_base = os.getenv(
@@ -44,7 +46,7 @@ class LLMProvider:
 
     def is_available(self) -> bool:
         """Check if at least one provider is configured."""
-        return bool(self.deepseek_key or self.nvidia_key or self.minimax_key)
+        return bool(self.gemini_key or self.deepseek_key or self.nvidia_key or self.minimax_key)
 
     def _backoff_sleep(self, attempt: int, base: float = 1.0, cap: float = 30.0):
         """Exponential backoff with jitter."""
@@ -203,21 +205,24 @@ class LLMProvider:
     def _build_cascade_providers(self, model: str):
         """Build interleaved cascade list, skipping providers without keys.
 
-        Cascade order (user-requested):
-        1. DeepSeek V4 Flash (direct)
-        2. NVIDIA NIM V4 Flash
+        Cascade order:
+        1. Gemini 2.5 Flash (primary, mais rapido + barato)
+        2. DeepSeek V4 Flash (direct)
         3. DeepSeek V4 Pro (direct)
-        4. NVIDIA NIM V4 Pro
-        5. MiniMax M3 (last resort)
+        4. NVIDIA NIM V4 Flash
+        5. NVIDIA NIM V4 Pro
+        6. MiniMax M3 (last resort)
         """
         providers = []
 
+        if self.gemini_key:
+            providers.append(("gemini", "gemini-2.5-flash", "_call_gemini", "gemini-2.5-flash"))
         if self.deepseek_key:
-            providers.append(("deepseek", model, "_call_deepseek", model))
-        if self.nvidia_key:
-            providers.append(("nvidia-flash", "deepseek-ai/deepseek-v4-flash", "_call_nvidia", "deepseek-ai/deepseek-v4-flash"))
+            providers.append(("deepseek", "deepseek-v4-flash", "_call_deepseek", "deepseek-v4-flash"))
         if self.deepseek_key:
             providers.append(("deepseek-pro", "deepseek-v4-pro", "_call_deepseek", "deepseek-v4-pro"))
+        if self.nvidia_key:
+            providers.append(("nvidia-flash", "deepseek-ai/deepseek-v4-flash", "_call_nvidia", "deepseek-ai/deepseek-v4-flash"))
         if self.nvidia_key:
             providers.append(("nvidia-pro", "deepseek-ai/deepseek-v4-pro", "_call_nvidia", "deepseek-ai/deepseek-v4-pro"))
         if self.minimax_key:
@@ -400,7 +405,9 @@ class LLMProvider:
 
         for attempt_idx, (pname, pmodel, method_name, call_model) in enumerate(cascade):
             try:
-                if method_name == "_call_deepseek":
+                if method_name == "_call_gemini":
+                    data = await self._call_gemini_raw(call_model, payload)
+                elif method_name == "_call_deepseek":
                     data = await self._call_deepseek_raw(call_model, payload)
                 elif method_name == "_call_nvidia":
                     data = await self._call_nvidia_raw(call_model, payload)
@@ -415,6 +422,95 @@ class LLMProvider:
             except Exception as e:
                 continue
         raise LLMError(f"all_providers_failed")
+
+    async def _call_gemini_raw(self, model: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Call Gemini 2.5 Flash via Google AI Studio API. Converte payload OpenAI→Gemini."""
+        if not self.gemini_key:
+            raise LLMError("gemini_key_not_configured")
+        url = f"{self.gemini_base}/models/{model}:generateContent?key={self.gemini_key}"
+        gemini_payload = self._to_gemini_format(payload)
+        async with httpx.AsyncClient(timeout=300) as client:
+            resp = await client.post(url, json=gemini_payload)
+        if resp.status_code == 429:
+            raise LLMError("gemini_quota_exceeded")
+        if resp.status_code >= 400:
+            raise LLMError(f"gemini_error_{resp.status_code}")
+        data = resp.json()
+        return self._from_gemini_response(data)
+
+    def _to_gemini_format(self, openai_payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Converte payload OpenAI → Gemini format."""
+        gemini = {}
+        messages = openai_payload.get("messages", [])
+        system_content = ""
+        contents = []
+        for msg in messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            if role == "system":
+                system_content = content
+            elif role == "user":
+                contents.append({"role": "user", "parts": [{"text": content}]})
+            elif role == "assistant":
+                parts = []
+                if content:
+                    parts.append({"text": content})
+                for tc in msg.get("tool_calls", []):
+                    fn = tc.get("function", {})
+                    parts.append({"functionCall": {"name": fn.get("name", ""), "args": json.loads(fn.get("arguments", "{}")) if isinstance(fn.get("arguments", ""), str) else fn.get("arguments", {})}})
+                contents.append({"role": "model", "parts": parts})
+            elif role == "tool":
+                name = msg.get("name", "")
+                contents.append({"role": "function", "parts": [{"functionResponse": {"name": name, "response": {"content": str(content)}}}]})
+        if system_content:
+            gemini["systemInstruction"] = {"parts": [{"text": system_content}]}
+        gemini["contents"] = contents
+
+        tools = openai_payload.get("tools", [])
+        if tools:
+            gemini_tools = []
+            for t in tools:
+                fn = t.get("function", {})
+                gemini_tools.append({"functionDeclarations": [{
+                    "name": fn.get("name", ""),
+                    "description": fn.get("description", ""),
+                    "parameters": fn.get("parameters", {}),
+                }]})
+            gemini["tools"] = gemini_tools
+
+        gen_config = {}
+        if openai_payload.get("temperature"):
+            gen_config["temperature"] = openai_payload["temperature"]
+        if openai_payload.get("max_tokens"):
+            gen_config["maxOutputTokens"] = openai_payload["max_tokens"]
+        if gen_config:
+            gemini["generationConfig"] = gen_config
+
+        return gemini
+
+    def _from_gemini_response(self, gemini_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Converte resposta Gemini → formato OpenAI-compatible."""
+        candidates = gemini_data.get("candidates", [])
+        if not candidates:
+            raise LLMError("gemini_empty_response")
+        candidate = candidates[0]
+        content_obj = candidate.get("content", {})
+        parts = content_obj.get("parts", [])
+        text = ""
+        tool_calls = []
+        for part in parts:
+            if "text" in part:
+                text += part["text"]
+            if "functionCall" in part:
+                fc = part["functionCall"]
+                tool_calls.append({
+                    "id": fc.get("name", "call_0"),
+                    "type": "function",
+                    "function": {"name": fc["name"], "arguments": json.dumps(fc.get("args", {}))},
+                })
+        return {
+            "choices": [{"message": {"content": text, "tool_calls": tool_calls if tool_calls else None}}]
+        }
 
     async def _call_deepseek_raw(self, model: str, payload: Dict[str, Any]) -> str:
         if not self.deepseek_key:
