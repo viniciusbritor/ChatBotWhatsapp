@@ -86,7 +86,7 @@ async def score_relevance_with_llm(message: str, context: str) -> float:
         return 0.85
 
     try:
-        result = llm.chat(
+        result = await llm.chat(
             system_prompt=(
                 "Voce avalia a relevancia de uma mensagem proativa para o usuario. "
                 "Responda APENAS com um JSON: {\"score\": 0.X, \"reason\": \"...\"}"
@@ -305,7 +305,7 @@ async def _generate_topic_message(contact: Dict[str, Any], history: str) -> Opti
     )
 
     try:
-        result = llm.chat(
+        result = await llm.chat(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             model="deepseek-v4-flash",

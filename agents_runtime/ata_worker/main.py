@@ -145,7 +145,7 @@ async def generate_ata_via_llm(event: Dict[str, Any], emails: List[Dict[str, Any
         return await generate_ata_markdown(event, emails)
 
     try:
-        result = llm.chat(
+        result = await llm.chat(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             model="deepseek-v4-pro",

@@ -479,7 +479,7 @@ async def _execute_agent(
                 max_tool_rounds=5,
             )
         else:
-            result = llm.chat_escalating(
+            result = await llm.chat_escalating(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 fast_model=fast_model,

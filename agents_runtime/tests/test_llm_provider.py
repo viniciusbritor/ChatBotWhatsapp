@@ -1,5 +1,6 @@
 """Tests for core.llm_provider module (cascade fallback with mocks)."""
 import pytest
+import asyncio
 from unittest.mock import patch, MagicMock
 from core.llm_provider import LLMProvider, LLMError
 
@@ -36,7 +37,7 @@ class TestChatCascade:
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
         provider = LLMProvider()
         with patch("requests.post", return_value=mock_responses("DeepSeek answer")):
-            result = provider.chat("sys", "user", model="deepseek-v4-flash")
+            result = asyncio.run(provider.chat("sys", "user", model="deepseek-v4-flash"))
         assert result["content"] == "DeepSeek answer"
         assert result["provider"] == "deepseek"
         assert result["model_used"] == "deepseek-v4-flash"
@@ -56,7 +57,7 @@ class TestChatCascade:
 
         with patch("requests.post", side_effect=[deepseek_fail, nvidia_ok]):
             with patch("time.sleep"):
-                result = provider.chat("sys", "user", model="deepseek-v4-flash")
+                result = asyncio.run(provider.chat("sys", "user", model="deepseek-v4-flash"))
 
         assert result["content"] == "NVIDIA answer"
         assert result["provider"] == "nvidia-flash"
@@ -75,7 +76,7 @@ class TestChatCascade:
         with patch("requests.post", return_value=fail_response):
             with patch("time.sleep"):
                 with pytest.raises(LLMError, match="all_providers_failed"):
-                    provider.chat("sys", "user", model="deepseek-v4-flash")
+                    asyncio.run(provider.chat("sys", "user", model="deepseek-v4-flash"))
 
 
 class TestChatEscalating:
@@ -84,13 +85,13 @@ class TestChatEscalating:
         provider = LLMProvider()
 
         with patch("requests.post", return_value=mock_responses("Good long answer with many words")):
-            result = provider.chat_escalating(
+            result = asyncio.run(provider.chat_escalating(
                 "sys", "user",
                 fast_model="deepseek-v4-flash",
                 pro_model="deepseek-v4-pro",
                 threshold=-2,
                 scoring_fn=lambda t: 0,
-            )
+            ))
         assert result["escalated"] is False
         assert result["provider"] == "deepseek"
 
@@ -103,13 +104,13 @@ class TestChatEscalating:
 
         with patch("requests.post", side_effect=[flash_response, pro_response]):
             with patch("time.sleep"):
-                result = provider.chat_escalating(
+                result = asyncio.run(provider.chat_escalating(
                     "sys", "user",
                     fast_model="deepseek-v4-flash",
                     pro_model="deepseek-v4-pro",
                     threshold=-2,
                     scoring_fn=lambda t: -3,
-                )
+                ))
         assert result["escalated"] is True
         assert "fast_response" in result
         assert result["confidence_score"] == -3
@@ -119,11 +120,11 @@ class TestChatEscalating:
         provider = LLMProvider()
 
         with patch("requests.post", return_value=mock_responses("sim")):
-            result = provider.chat_escalating(
+            result = asyncio.run(provider.chat_escalating(
                 "sys", "user",
                 no_escalation=True,
                 scoring_fn=lambda t: -5,
-            )
+            ))
         assert result["escalated"] is False
 
 

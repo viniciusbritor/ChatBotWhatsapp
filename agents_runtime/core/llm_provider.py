@@ -11,10 +11,12 @@ import os
 import json
 import time
 import random
+import asyncio
 import logging
-import requests
 from typing import Optional, Dict, Any, List
 
+import httpx
+import requests
 from core.secrets import get_secret
 
 logger = logging.getLogger(__name__)
@@ -226,7 +228,7 @@ class LLMProvider:
 
         return providers
 
-    def chat(
+    async def chat(
         self,
         system_prompt: str,
         user_prompt: str,
@@ -236,18 +238,7 @@ class LLMProvider:
         max_tokens: int = 1000,
         thinking_disabled: bool = True,
     ) -> Dict[str, Any]:
-        """Call LLM with cascade fallback.
-
-        Cascade order (skips providers without keys):
-        1. DeepSeek V4 Flash (direct)
-        2. NVIDIA NIM V4 Flash
-        3. DeepSeek V4 Pro (direct)
-        4. NVIDIA NIM V4 Pro
-        5. MiniMax M3 (last resort)
-
-        Returns:
-            {"content": str, "model_used": str, "attempts": List[str]}
-        """
+        """Call LLM with cascade fallback. Async."""
         attempts = []
 
         cascade = self._build_cascade_providers(model)
@@ -255,15 +246,18 @@ class LLMProvider:
         for attempt_idx, (provider_name, provider_model, method_name, call_model) in enumerate(cascade):
             try:
                 if method_name == "_call_deepseek":
-                    content = self._call_deepseek(
+                    content = await asyncio.to_thread(
+                        self._call_deepseek,
                         call_model, system_prompt, user_prompt, json_mode, temperature, max_tokens, thinking_disabled
                     )
                 elif method_name == "_call_nvidia":
-                    content = self._call_nvidia(
+                    content = await asyncio.to_thread(
+                        self._call_nvidia,
                         call_model, system_prompt, user_prompt, json_mode, temperature, max_tokens, thinking_disabled
                     )
                 elif method_name == "_call_minimax":
-                    content = self._call_minimax(
+                    content = await asyncio.to_thread(
+                        self._call_minimax,
                         system_prompt, user_prompt, json_mode, temperature, max_tokens
                     )
                 else:
@@ -288,7 +282,7 @@ class LLMProvider:
 
         raise LLMError(f"all_providers_failed: {attempts}")
 
-    def chat_escalating(
+    async def chat_escalating(
         self,
         system_prompt: str,
         user_prompt: str,
@@ -302,14 +296,14 @@ class LLMProvider:
         thinking_disabled: bool = True,
         scoring_fn=None,
     ) -> Dict[str, Any]:
-        """Try Flash first; if cascade fails, escalate to Pro explicitly."""
+        """Try Flash first; if cascade fails, escalate to Pro explicitly. Async."""
         if no_escalation:
-            result = self.chat(
+            result = await self.chat(
                 system_prompt, user_prompt, fast_model, json_mode, temperature, max_tokens, thinking_disabled
             )
             return {**result, "escalated": False}
 
-        fast_resp = self.chat(
+        fast_resp = await self.chat(
             system_prompt, user_prompt, fast_model, json_mode, temperature, max_tokens, thinking_disabled
         )
         if scoring_fn is None:
@@ -323,7 +317,7 @@ class LLMProvider:
             return {**fast_resp, "escalated": False, "confidence_score": score}
 
         logger.info(f"Escalating to {pro_model} (score={score}, threshold={threshold})")
-        pro_resp = self.chat(
+        pro_resp = await self.chat(
             system_prompt, user_prompt, pro_model, json_mode, temperature, max_tokens, thinking_disabled
         )
         return {**pro_resp, "escalated": True, "confidence_score": score, "fast_response": fast_resp}
@@ -364,7 +358,7 @@ class LLMProvider:
             )
             payload["messages"] = messages
 
-            response_data = self._call_provider(payload, model)
+            response_data = await self._call_provider(payload, model)
             choices = response_data.get("choices", [])
             if not choices:
                 return {"content": "Resposta vazia do LLM.", "model_used": model, "tool_rounds": tool_count}
@@ -400,18 +394,18 @@ class LLMProvider:
 
         return {"content": last_content or "Maximo de execucoes atingido.", "model_used": model, "tool_rounds": tool_count}
 
-    def _call_provider(self, payload: Dict[str, Any], model: str) -> Dict[str, Any]:
-        """Execute a single provider call and return the full API response dict."""
+    async def _call_provider(self, payload: Dict[str, Any], model: str) -> Dict[str, Any]:
+        """Execute a single provider call and return the full API response dict. Async."""
         cascade = self._build_cascade_providers(model)
 
         for attempt_idx, (pname, pmodel, method_name, call_model) in enumerate(cascade):
             try:
                 if method_name == "_call_deepseek":
-                    data = self._call_deepseek_raw(call_model, payload)
+                    data = await self._call_deepseek_raw(call_model, payload)
                 elif method_name == "_call_nvidia":
-                    data = self._call_nvidia_raw(call_model, payload)
+                    data = await self._call_nvidia_raw(call_model, payload)
                 elif method_name == "_call_minimax":
-                    data = self._call_minimax_raw(payload)
+                    data = await self._call_minimax_raw(payload)
                 else:
                     raise LLMError(f"unknown_method: {method_name}")
                 return data
@@ -422,13 +416,14 @@ class LLMProvider:
                 continue
         raise LLMError(f"all_providers_failed")
 
-    def _call_deepseek_raw(self, model: str, payload: Dict[str, Any]) -> str:
+    async def _call_deepseek_raw(self, model: str, payload: Dict[str, Any]) -> str:
         if not self.deepseek_key:
             raise LLMError("deepseek_key_not_configured")
         url = f"{self.deepseek_base}/chat/completions"
         headers = {"Authorization": f"Bearer {self.deepseek_key}", "Content-Type": "application/json"}
         payload["model"] = model
-        resp = requests.post(url, headers=headers, json=payload, timeout=120)
+        async with httpx.AsyncClient(timeout=300) as client:
+            resp = await client.post(url, headers=headers, json=payload)
         if resp.status_code == 429:
             raise LLMError("deepseek_quota_exceeded")
         if resp.status_code == 401:
@@ -439,13 +434,14 @@ class LLMProvider:
             raise LLMError("deepseek_empty_response")
         return data
 
-    def _call_nvidia_raw(self, model: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    async def _call_nvidia_raw(self, model: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         if not self.nvidia_key:
             raise LLMError("nvidia_key_not_configured")
         url = f"{self.nvidia_base}/chat/completions"
         headers = {"Authorization": f"Bearer {self.nvidia_key}", "Content-Type": "application/json"}
         payload["model"] = model
-        resp = requests.post(url, headers=headers, json=payload, timeout=120)
+        async with httpx.AsyncClient(timeout=300) as client:
+            resp = await client.post(url, headers=headers, json=payload)
         if resp.status_code == 429:
             raise LLMError("nvidia_quota_exceeded")
         resp.raise_for_status()
@@ -454,14 +450,15 @@ class LLMProvider:
             raise LLMError("nvidia_empty_response")
         return data
 
-    def _call_minimax_raw(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    async def _call_minimax_raw(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         if not self.minimax_key:
             raise LLMError("minimax_key_not_configured")
         url = f"{self.minimax_base}/chat/completions"
         headers = {"Authorization": f"Bearer {self.minimax_key}", "Content-Type": "application/json"}
         payload["model"] = self.minimax_model
         payload.pop("thinking", None)
-        resp = requests.post(url, headers=headers, json=payload, timeout=120)
+        async with httpx.AsyncClient(timeout=300) as client:
+            resp = await client.post(url, headers=headers, json=payload)
         if resp.status_code == 429:
             raise LLMError("minimax_quota_exceeded")
         resp.raise_for_status()
@@ -469,58 +466,3 @@ class LLMProvider:
         if "choices" not in data or not data["choices"]:
             raise LLMError("minimax_empty_response")
         return data
-
-    def chat_escalating(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        fast_model: str = "deepseek-v4-flash",
-        pro_model: str = "deepseek-v4-pro",
-        threshold: int = -2,
-        no_escalation: bool = False,
-        json_mode: bool = False,
-        temperature: float = 0.7,
-        max_tokens: int = 1000,
-        thinking_disabled: bool = True,
-        scoring_fn=None,
-    ) -> Dict[str, Any]:
-        """Try Flash first; escalate to Pro if confidence is low.
-
-        With the 5-tier cascade (Flash -> NVIDIA Flash -> Pro -> NVIDIA Pro -> MiniMax),
-        the chat() already tries Pro after Flash. This method adds heuristic escalation:
-        if Flash response has low confidence, force a retry with pro_model explicitly.
-
-        Args:
-            scoring_fn: callable(text) -> int, computes confidence score.
-                If score <= threshold, escalate.
-
-        Returns:
-            Same as chat() + "escalated" key (bool).
-        """
-        if no_escalation:
-            result = self.chat(
-                system_prompt, user_prompt, fast_model, json_mode, temperature, max_tokens, thinking_disabled
-            )
-            return {**result, "escalated": False}
-
-        fast_resp = self.chat(
-            system_prompt, user_prompt, fast_model, json_mode, temperature, max_tokens, thinking_disabled
-        )
-
-        if scoring_fn is None:
-            return {**fast_resp, "escalated": False}
-
-        try:
-            score = scoring_fn(fast_resp["content"])
-        except Exception as e:
-            logger.warning(f"Scoring function failed: {e}")
-            return {**fast_resp, "escalated": False}
-
-        if score > threshold:
-            return {**fast_resp, "escalated": False, "confidence_score": score}
-
-        logger.info(f"Escalating to {pro_model} (score={score}, threshold={threshold})")
-        pro_resp = self.chat(
-            system_prompt, user_prompt, pro_model, json_mode, temperature, max_tokens, thinking_disabled
-        )
-        return {**pro_resp, "escalated": True, "confidence_score": score, "fast_response": fast_resp}
