@@ -200,6 +200,44 @@ def _extract_group_jid(payload: Dict[str, Any]) -> str:
     return ""
 
 
+def _prefetch_nickname(first_name: str) -> Optional[str]:
+    """G7: Pre-resolve apelido do JSON estatico, sem LLM tool loop."""
+    try:
+        import json as _json
+        data_file = os.path.join(
+            os.path.dirname(__file__), "data", "nicknames.json"
+        )
+        with open(data_file, "r", encoding="utf-8") as f:
+            data = _json.load(f)
+        normalized = first_name.strip().title()
+        nicknames = data.get(normalized, [])
+        if nicknames:
+            return nicknames[0]
+        if not data.get("_comment"):
+            # fallback: gera diminutivo
+            if len(normalized) >= 8:
+                return normalized[:4]
+            elif len(normalized) >= 6:
+                return normalized[:3]
+            elif len(normalized) >= 3:
+                return normalized[:2]
+            else:
+                return normalized
+    except Exception:
+        pass
+    return None
+
+
+def _generate_diminutive(name: str) -> str:
+    """Fallback: gera diminutivo carinhoso do primeiro nome."""
+    if len(name) <= 3:
+        return name + name[-1]
+    elif len(name) <= 6:
+        return name[:2]
+    else:
+        return name[:4]
+
+
 async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Main orchestration entry point.
 
@@ -326,24 +364,21 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
         path.append({"step": 2, "phase": "orchestrator", "agent": orchestrator_id, "reason": "default_route"})
 
         if first_name and not has_nickname(phone):
+            suggested = _prefetch_nickname(first_name)
+            if not suggested:
+                suggested = _generate_diminutive(first_name)
             intimacy_context = (
                 f"\n\n[CONTEXTO DE INTIMIDADE - PRIMEIRO CONTATO]\n"
-                f"Nome completo do usuario: {sender_name}\n"
-                f"Primeiro nome: {first_name}\n"
-                f"Este usuario AINDA NAO tem apelido definido.\n"
+                f"Primeiro nome: {first_name}. Apelido sugerido: {suggested}\n"
                 f"1. Cumprimente usando APENAS o primeiro nome '{first_name}'.\n"
-                f"2. Consulte nickname.lookup('{first_name}') para sugerir um apelido carinhoso.\n"
-                f"3. Pergunte: 'Posso te chamar de [apelido]?' e aguarde confirmacao.\n"
-                f"4. JAMAIS use apelidos depreciativos, ofensivos, ironicos ou de duplo sentido.\n"
-                f"5. Se nao houver apelidos no lookup, crie um diminutivo carinhoso do primeiro nome\n"
-                f"   (ex: Vinicius->Vini, Rafaela->Rafa, Beatriz->Bia).\n"
-                f"6. Se o usuario aceitar, chame nickname.set_consent.\n"
-                f"7. Se ele rejeitar, nao insista."
+                f"2. Pergunte: 'Posso te chamar de {suggested}?' e aguarde confirmacao.\n"
+                f"3. JAMAIS use apelidos depreciativos, ofensivos ou ironicos.\n"
+                f"4. Se o usuario aceitar ('sim', 'pode'), chame nickname.set_consent(phone, nome, apelido, True).\n"
+                f"5. Se ele rejeitar, nao insista."
             )
             orchestrator["system_prompt"] = orchestrator.get("system_prompt", "") + intimacy_context
-            if "nickname.lookup" not in orchestrator.get("tools", []):
+            if "nickname.set_consent" not in orchestrator.get("tools", []):
                 orchestrator["tools"] = list(orchestrator.get("tools", [])) + [
-                    "nickname.lookup",
                     "nickname.set_consent",
                     "nickname.get_preferred_name",
                 ]
