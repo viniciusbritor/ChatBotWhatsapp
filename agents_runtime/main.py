@@ -455,6 +455,7 @@ body{{font-family:Inter,-apple-system,sans-serif;background:#f9fafb;color:#17171
 
 <div class="tabs">
   <div class="tab active" onclick="switchTab('fluxo')">Fluxo de Orquestração</div>
+  <div class="tab" onclick="switchTab('arquitetura')">Arquitetura</div>
   <div class="tab" onclick="switchTab('agentes')">Agentes & Skills</div>
   <div class="tab" onclick="switchTab('gerenciar')">Gerenciar</div>
   <div class="tab" onclick="switchTab('usuarios')">Usuários</div>
@@ -468,6 +469,110 @@ body{{font-family:Inter,-apple-system,sans-serif;background:#f9fafb;color:#17171
     <span><span class="dot gray"></span> Passo intermediário</span>
   </div>
   <div id="fluxo-content" class="loading">Carregando fluxo de orquestração...</div>
+</div>
+
+<div id="tab-arquitetura" class="tab-content">
+  <div class="card"><div class="mermaid-box"><div class="mermaid">
+flowchart TB
+    subgraph WHATSAPP["WhatsApp"]
+        USER["Usuario / Grupos"]
+    end
+    subgraph EVOLUTION["Evolution API"]
+        EVO["evolution.coherenceai.com.br"]
+    end
+    subgraph PROXY["Whatsapp-Agente Thin Proxy"]
+        WEBHOOK["POST /webhook\nG1-G6 guardrails\ndedup + circuit breaker"]
+    end
+    subgraph ORCHESTRATOR["Jennifer Orchestrator\nGemini 2.5 Flash"]
+        INTENT["_detect_intent()\nkeywords + Firestore rules"]
+        ROUTE["_resolve_agent_for_intent()"]
+        PREFETCH["Pre-Fetch Fase B\ncalendar/email/drive\n1 LLM vs 2"]
+        INTIMACY["Intimidade\napelido direto Firestore"]
+        MEMORY["Memoria\ncontexto + historico"]
+        ANTIHALL["Anti-Alucinacao\nnunca inventar dados"]
+    end
+    subgraph MANAGERS["4 Managers"]
+        CAL["Calendar\nlist_events, create, update\ndelete, freebusy\nOAuth per-user"]
+        DRV["Drive\nsearch, upload, list\ncreate_folder, find_atas\nNUNCA 'estou sem acesso'"]
+        EML["Email\nsearch_messages, get_thread\nsend_message"]
+        WEB["Web\nserper_search, fetch_url\ncache 24h"]
+    end
+    subgraph SPECIALISTS["8 Specialists"]
+        INTM["Intimacy\nnickname.lookup/set_consent\nFORBIDDEN_NICKNAMES firewall"]
+        LEARN["Learning\nauto-correcoes"]
+        MORAL["Morality\nconteudo ofensivo\nRAG leis penais"]
+        ATA["ATA Generator\ncalendar + gmail + drive\natas de reuniao"]
+        LOCO["Locomocao\ncalc_route, geocode, places"]
+        YT["YouTube\nsearch_videos"]
+        RAG["RAG Knowledge\nsearch_knowledge"]
+        GRP["Group Resolver\nget_info, search_files"]
+    end
+    subgraph JOBS["Cloud Run Jobs"]
+        PROACTIVE["Proactive Worker\nevents 15min + topics\n8-layer anti-spam"]
+        ATAW["ATA Worker\n10min scan"]
+        WHISPER["Whisper Worker\nGPU L4 audio 3s"]
+    end
+    subgraph LLMS["LLM Cascade"]
+        GEM["1. Gemini 2.5 Flash\nVertex AI ADC\n0.15/0.60 USD - 3-8s"]
+        DS["2. DeepSeek V4 Flash\n0.14/0.28 - 5-15s"]
+        DSP["3. DeepSeek V4 Pro\n0.44/0.87"]
+        NV["4-5. NVIDIA NIM"]
+        MM["6. MiniMax M3"]
+    end
+    subgraph GOOGLE["Google APIs"]
+        GCAL2["Calendar"]
+        GDRV2["Drive"]
+        GMAIL2["Gmail"]
+    end
+    subgraph DATA["Firestore"]
+        USERS2["usuarios/{phone}\nOAuth tokens"]
+        AGENTS2["agents/{id}\n15 agentes"]
+        GROUPS2["grupos/{jid}\nmembros/{phone}.confirmed"]
+        NICK2["apelidos_custom\naccepted"]
+    end
+
+    USER --> EVO --> WEBHOOK --> ORCHESTRATOR
+    ORCHESTRATOR --> INTENT --> ROUTE --> PREFETCH
+    INTIMACY -.-> ORCHESTRATOR
+    MEMORY -.-> ORCHESTRATOR
+    ANTIHALL -.-> ORCHESTRATOR
+    ROUTE -->|calendar| CAL
+    ROUTE -->|drive| DRV
+    ROUTE -->|email| EML
+    ROUTE -->|web| WEB
+    ROUTE -->|intimacy| INTM
+    ROUTE -->|correction| LEARN
+    ROUTE -->|gross| MORAL
+    ROUTE -->|ata| ATA
+    ROUTE -->|locomocao| LOCO
+    ROUTE -->|youtube| YT
+    ROUTE -->|rag| RAG
+    ROUTE -->|group| GRP
+    ROUTE -->|default| ORCHESTRATOR
+    CAL --> GEM
+    DRV --> GEM
+    EML --> GEM
+    WEB --> GEM
+    INTM --> GEM
+    LEARN --> GEM
+    MORAL --> GEM
+    ATA --> GEM
+    GEM -->|fallback| DS -->|fallback| DSP -->|fallback| NV -->|fallback| MM
+    CAL --> GCAL2
+    DRV --> GDRV2
+    EML --> GMAIL2
+    ORCHESTRATOR --> NICK2
+    ORCHESTRATOR --> USERS2
+    GRP --> GROUPS2
+    PROACTIVE --> GEM
+
+    style ORCHESTRATOR fill:#3b82f6,color:#fff
+    style GEM fill:#22c55e,color:#fff
+    style WEBHOOK fill:#f59e0b,color:#fff
+    style PREFETCH fill:#22c55e,color:#fff
+    style ANTIHALL fill:#ef4444,color:#fff
+    style INTIMACY fill:#a855f7,color:#fff
+  </div></div></div>
 </div>
 
 <div id="tab-agentes" class="tab-content">
@@ -542,14 +647,16 @@ const AUTH = '{auth_param}';
 const BASE = '';
 
 async function api(path) {{
-  const url = BASE + path + AUTH;
+  const sep = path.includes('?') ? '&amp;' : '';
+  const url = BASE + path + (AUTH ? sep + AUTH.substring(1) : '');
   const r = await fetch(url);
   if (!r.ok) throw new Error(r.status);
   return r.json();
 }}
 
 async function apiPost(path, body) {{
-  const url = BASE + path + AUTH;
+  const sep = path.includes('?') ? '&amp;' : '';
+  const url = BASE + path + (AUTH ? sep + AUTH.substring(1) : '');
   const r = await fetch(url, {{ method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify(body) }});
   return r.json();
 }}
