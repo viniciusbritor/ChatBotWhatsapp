@@ -345,6 +345,20 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
             "required": ["query"],
         },
     },
+    "rag.search_legal_knowledge": {
+        "function": lambda **kwargs: __import__("asyncio").run(__import__("core.rag").search_legal_knowledge(kwargs.get("phone", ""), kwargs.get("query", ""), kwargs.get("k", 5))),
+        "implementation": "rag",
+        "description": "Busca semantica em legislacao (leis penais, editais) no banco privado do agente.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string", "description": "Telefone do usuario"},
+                "query": {"type": "string", "description": "Termo de busca semantica"},
+                "k": {"type": "integer", "description": "Maximo de resultados"},
+            },
+            "required": ["phone", "query"],
+        },
+    },
 }
 
 

@@ -136,7 +136,7 @@ async def embed_documents(texts: List[str]) -> Optional[List[List[float]]]:
     return results
 
 
-async def index_document(
+async def index_private_document(
     phone: str,
     text_content: str,
     source_title: str,
@@ -144,19 +144,7 @@ async def index_document(
     category: str = "legislacao",
     metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Index a document into the RAG vector store.
-
-    Args:
-        phone: Phone of agent-master (used in collection name)
-        text_content: Document text to embed
-        source_title: Human-readable title
-        source_url: Source URL (optional)
-        category: Category (legislacao, site_info, youtube_transcript)
-        metadata: Additional metadata
-
-    Returns:
-        {"doc_id": str, "phone": str, "chunks": int}
-    """
+    """Index a document into the user's private RAG vector store (agente-knowledge-{phone})."""
     db = _get_firestore()
     if db is None:
         return {"error": "firestore_unavailable"}
@@ -325,8 +313,8 @@ async def search_knowledge(query: str, limit: int = 5) -> List[Dict[str, Any]]:
         return []
 
 
-async def index_document(titulo: str, conteudo: str, categoria: str = "geral", fonte: str = "") -> str:
-    """Index a document in the shared knowledge base with embedding."""
+async def index_shared_document(titulo: str, conteudo: str, categoria: str = "geral", fonte: str = "") -> str:
+    """Index a document in the shared knowledge base (public-Knowledge-Shared)."""
     db = _get_firestore()
     if db is None:
         raise RuntimeError("Firestore not configured")

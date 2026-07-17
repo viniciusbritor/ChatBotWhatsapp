@@ -6,13 +6,23 @@ steps:
       - "-c"
       - "pip install -q -r requirements.txt && pytest -q tests/"
 
-  - name: "gcr.io/kaniko-project/executor:latest"
+  - name: "gcr.io/cloud-builders/docker"
     args:
-      - "--destination=gcr.io/$PROJECT_ID/agents-runtime:$BUILD_ID"
-      - "--destination=gcr.io/$PROJECT_ID/agents-runtime:latest"
-      - "--context=dir://agents_runtime"
-      - "--cache=true"
-      - "--cache-ttl=168h"
+      - "build"
+      - "-t"
+      - "gcr.io/$PROJECT_ID/agents-runtime:$BUILD_ID"
+      - "-t"
+      - "gcr.io/$PROJECT_ID/agents-runtime:latest"
+      - "agents_runtime"
+
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "push"
+      - "gcr.io/$PROJECT_ID/agents-runtime:$BUILD_ID"
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "push"
+      - "gcr.io/$PROJECT_ID/agents-runtime:latest"
 
   - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
     entrypoint: "gcloud"

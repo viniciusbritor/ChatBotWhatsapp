@@ -415,6 +415,52 @@ def _get_conversation_history(phone: str, limit: int = 10) -> str:
         return ""
 
 
+async def _search_memory(phone: str, query: str, limit: int = 5) -> str:
+    """RAG: Busca memorias similares no Firestore Vector (conversation-memory-{phone})."""
+    db = _get_db()
+    if not db:
+        return ""
+    try:
+        from core.rag import embed_query
+        from google.cloud.firestore_v1.vector import Vector
+        embedding = await embed_query(query)
+        results = db.collection(f"conversation-memory-{phone}")\
+            .find_neighbors("vector_embedding", Vector(embedding),
+                            distance_measure="COSINE", limit=limit)
+        docs = []
+        for doc in results:
+            d = doc[0].to_dict() if isinstance(doc, tuple) else doc.to_dict()
+            text = d.get("text", "")[:100]
+            direction = d.get("direction", "in")
+            prefix = "Usuario" if direction == "in" else "Jennifer"
+            docs.append(f"- {prefix}: {text}")
+        return "\n".join(docs) if docs else ""
+    except Exception as e:
+        logger.warning(f"RAG search failed: {e}")
+        return ""
+
+
+async def _index_message(phone: str, text: str, direction: str):
+    """RAG: Indexa mensagem no Firestore Vector para busca futura."""
+    if not text or len(text) < 3:
+        return
+    db = _get_db()
+    if not db:
+        return
+    try:
+        from core.rag import embed_query
+        from google.cloud.firestore_v1.vector import Vector
+        embedding = await embed_query(text)
+        db.collection(f"conversation-memory-{phone}").add({
+            "text": text[:200],
+            "direction": direction,
+            "ts": int(time.time()),
+            "vector_embedding": Vector(embedding),
+        })
+    except Exception as e:
+        logger.debug(f"RAG index skipped: {e}")
+
+
 async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Main orchestration entry point.
 
@@ -645,6 +691,11 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
             if int(time.time()) - _response_cache.get(k, {}).get("ts", 0) > CACHE_TTL_SEC:
                 del _response_cache[k]
 
+    asyncio.create_task(_index_message(phone, masked_text, "in"))
+    reply_text = result.get("reply", "")
+    if reply_text:
+        asyncio.create_task(_index_message(phone, reply_text, "out"))
+
     return result
 
 
@@ -660,15 +711,19 @@ async def _execute_agent(
 
     phone = payload.get("phone", "")
     history = _get_conversation_history(phone, limit=10)
+    mem_rag = await _search_memory(phone, text, limit=5)
     recent = [i for i in _interaction_history[-4:] if i.get("phone") == phone]
     ctx_parts = []
+    if mem_rag:
+        ctx_parts.append(f"[MEMORIA RAG - CONVERSAS RELEVANTES]\n{mem_rag}")
     if recent:
         ctx_parts.append("\n".join(f"- User: {r['text_preview'][:60]}\n- Jennifer: {r['reply_preview'][:60]}"
                                     for r in recent[-2:]))
-    ctx_parts.insert(0, f"[HISTORICO DE CONVERSAS NO FIRESTORE]\n{history}")
+    if history:
+        ctx_parts.insert(0, f"[HISTORICO RECENTE]\n{history}")
     ctx = "\n\n".join(p for p in ctx_parts if p)
     if ctx:
-        system_prompt += f"\n\n[CONTEXTO DA CONVERSA]\n{ctx}\nVoce JA conhece este usuario. Use o historico para personalizar a resposta."
+        system_prompt += f"\n\n[CONTEXTO DA CONVERSA]\n{ctx}\nVoce JA conhece este usuario. Use a memoria para personalizar a resposta."
 
     brt = timezone(timedelta(hours=-3))
     hoje = datetime.now(brt)
