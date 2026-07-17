@@ -10,6 +10,17 @@ logger = logging.getLogger(__name__)
 DATA_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "nicknames.json")
 _builtin_dict: Optional[Dict[str, List[str]]] = None
 
+FORBIDDEN_NICKNAMES = {
+    "burro", "burra", "idiota", "feio", "feia", "gordo", "gorda",
+    "magrelo", "magrela", "bicha", "viado", "puta", "piranha",
+    "vagabundo", "vagabunda", "otario", "otaria", "trouxa", "mane",
+    "bosta", "merda", "caralho", "fdp", "porra", "buceta",
+    "desgracado", "desgracada", "retardado", "retardada", "lerdo", "lerda",
+    "tapado", "anta", "jegue", "corno", "chifrudo", "nojento", "nojenta",
+    "lixo", "escroto", "escrota", "arrombado", "arrombada", "fudido",
+    "fudida", "cuzão", "cuzona",
+}
+
 
 def _load_builtin() -> Dict[str, List[str]]:
     """Load built-in nickname dictionary."""
@@ -93,6 +104,11 @@ async def set_consent(
     Returns:
         {"phone": str, "name": str, "nickname": str, "accepted": bool}
     """
+    nickname_lower = nickname.lower().strip() if nickname else ""
+    if nickname_lower in FORBIDDEN_NICKNAMES:
+        logger.warning(f"FORBIDDEN nickname rejected: '{nickname}' for {phone}")
+        return {"error": "forbidden_nickname", "nickname": nickname, "accepted": False}
+
     record = {
         "phone": phone,
         "name": _normalize_name(name),

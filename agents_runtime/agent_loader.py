@@ -225,18 +225,57 @@ def upsert_tool(tool_id: str, data: Dict[str, Any]) -> bool:
 
 
 def get_user(phone: str) -> Optional[Dict[str, Any]]:
-    """Get user from Firestore usuarios/{phone}."""
+    """Get user from Firestore usuarios/{phone}. Tenta multiplos formatos."""
     db = _get_firestore_client()
     if db is None:
         return None
+    phones_to_try = _normalize_phones(phone)
     try:
-        doc = db.collection("usuarios").document(phone).get()
-        if doc.exists:
-            return doc.to_dict()
+        for p in phones_to_try:
+            doc = db.collection("usuarios").document(p).get()
+            if doc.exists:
+                return doc.to_dict()
         return None
     except Exception as e:
         logger.error(f"Failed to get user '{phone}': {e}")
         return None
+
+
+def _normalize_phones(phone: str) -> List[str]:
+    """Gera variacoes de formato de telefone para busca robusta."""
+    candidates = []
+    clean = phone.strip().lstrip("+")
+    candidates.append(clean)
+    if clean.startswith("55"):
+        candidates.append(clean[2:])
+    else:
+        candidates.append("55" + clean)
+    if not clean.startswith("+"):
+        candidates.append("+" + clean)
+    seen = []
+    result = []
+    for c in candidates:
+        if c not in seen:
+            seen.append(c)
+            result.append(c)
+    return result
+
+
+def has_nickname(phone: str) -> bool:
+    """Verifica se usuario ja tem apelido consentido no Firestore."""
+    import hashlib
+    db = _get_firestore_client()
+    if db is None:
+        return False
+    try:
+        ph = hashlib.sha256(phone.encode()).hexdigest()[:32]
+        doc = db.collection("apelidos_custom").document(ph).get()
+        if doc.exists:
+            data = doc.to_dict()
+            return bool(data.get("accepted", False))
+        return False
+    except Exception:
+        return False
 
 
 def save_user(phone: str, data: Dict[str, Any]) -> bool:

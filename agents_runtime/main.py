@@ -467,7 +467,8 @@ body{{font-family:Inter,-apple-system,sans-serif;background:#f9fafb;color:#17171
   <div class="card">
     <h3>Vincular Conta Google</h3>
     <p style="font-size:13px;color:#6b7280;margin-bottom:12px">Autorize a Jennifer a acessar seu Calendar, Drive e Gmail. Cada pessoa tem seu proprio token.</p>
-    <div class="form-group"><label>Seu telefone (WhatsApp)</label><input id="user-phone" placeholder="+5511999999999"></div>
+    <div class="form-group"><label>Seu telefone com DDI (WhatsApp)</label><input id="user-phone" placeholder="5511999999999"></div>
+    <p style="font-size:11px;color:#9ca3af;margin-top:4px">Formato: DDI + DDD + numero. Ex: 5511966830020 (55 = Brasil)</p>
     <button class="btn btn-primary" onclick="startOAuth()">🔑 Vincular Agenda / Email / Drive</button>
     <div id="oauth-msg" style="margin-top:8px;font-size:12px"></div>
   </div>
@@ -703,6 +704,8 @@ async function saveSkill() {{
 function startOAuth() {{
   const phone = document.getElementById('user-phone').value.trim();
   if (!phone) {{ document.getElementById('oauth-msg').innerHTML = '<span style="color:#dc2626">Informe seu telefone</span>'; return; }}
+  if (!phone.startsWith('55')) {{ document.getElementById('oauth-msg').innerHTML = '<span style="color:#dc2626">Inclua o DDI do Brasil (55). Ex: 55119XXXXXXXX</span>'; return; }}
+  if (phone.length < 10) {{ document.getElementById('oauth-msg').innerHTML = '<span style="color:#dc2626">Numero muito curto. Use DDI + DDD + numero completo</span>'; return; }}
   document.getElementById('oauth-msg').innerHTML = '<span style="color:#3b82f6">Redirecionando para o Google...</span>';
   const state = btoa(phone);
   window.location.href = '/oauth/google?state=' + encodeURIComponent(state);

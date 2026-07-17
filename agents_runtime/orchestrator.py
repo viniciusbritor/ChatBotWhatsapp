@@ -26,7 +26,7 @@ from core.escalation import compute_confidence_score, should_escalate
 from core.delay_calculator import calculate_delay_ms, calculate_presence
 from core.commands import detect_command, apply_command
 from tool_registry import TOOL_REGISTRY, get_tool, get_tool_schema
-from agent_loader import get_agent, get_skill, list_skills, get_user, get_config
+from agent_loader import get_agent, get_skill, list_skills, get_user, get_config, has_nickname
 from core.audit import log_action
 
 logger = logging.getLogger(__name__)
@@ -126,6 +126,14 @@ async def _get_orchestrator(instance: str) -> Optional[str]:
     return orchestrator_id
 
 
+def _extract_first_name(sender_name: str) -> str:
+    """Extrai o primeiro nome do sender_name."""
+    if not sender_name or sender_name == "user":
+        return ""
+    parts = sender_name.strip().split()
+    return parts[0] if parts else sender_name
+
+
 def _select_orchestrator_agent(instance: str) -> Optional[str]:
     """Select which orchestrator agent to use for this instance."""
     for agent_id, agent in _iter_agents():
@@ -214,6 +222,9 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
     sender_name = payload.get("sender_name", "user")
     extra = payload.get("extra", {})
 
+    first_name = _extract_first_name(sender_name)
+    payload["first_name"] = first_name
+
     masked_text = mask_pii(text)
 
     intent = _detect_intent(masked_text)
@@ -288,6 +299,30 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
         if not orchestrator:
             return _error_response(503, "agent_not_found", f"Orchestrator {orchestrator_id} nao encontrado")
         path.append({"step": 2, "phase": "orchestrator", "agent": orchestrator_id, "reason": "default_route"})
+
+        if first_name and not has_nickname(phone):
+            intimacy_context = (
+                f"\n\n[CONTEXTO DE INTIMIDADE - PRIMEIRO CONTATO]\n"
+                f"Nome completo do usuario: {sender_name}\n"
+                f"Primeiro nome: {first_name}\n"
+                f"Este usuario AINDA NAO tem apelido definido.\n"
+                f"1. Cumprimente usando APENAS o primeiro nome '{first_name}'.\n"
+                f"2. Consulte nickname.lookup('{first_name}') para sugerir um apelido carinhoso.\n"
+                f"3. Pergunte: 'Posso te chamar de [apelido]?' e aguarde confirmacao.\n"
+                f"4. JAMAIS use apelidos depreciativos, ofensivos, ironicos ou de duplo sentido.\n"
+                f"5. Se nao houver apelidos no lookup, crie um diminutivo carinhoso do primeiro nome\n"
+                f"   (ex: Vinicius->Vini, Rafaela->Rafa, Beatriz->Bia).\n"
+                f"6. Se o usuario aceitar, chame nickname.set_consent.\n"
+                f"7. Se ele rejeitar, nao insista."
+            )
+            orchestrator["system_prompt"] = orchestrator.get("system_prompt", "") + intimacy_context
+            if "nickname.lookup" not in orchestrator.get("tools", []):
+                orchestrator["tools"] = list(orchestrator.get("tools", [])) + [
+                    "nickname.lookup",
+                    "nickname.set_consent",
+                    "nickname.get_preferred_name",
+                ]
+
         result = await _execute_agent(orchestrator, masked_text, payload, extra)
 
     path.append({"step": 3, "phase": "result", "agent_id": result.get("metadata", {}).get("agent_id"),
@@ -329,8 +364,11 @@ async def _execute_agent(
         "NAO inclua tags XML como <think> nas suas respostas.]"
     )
 
+    first_name = payload.get("first_name", "")
     static_user_prefix = (
-        f"User: {payload.get('sender_name', 'user')} ({payload.get('phone', '')})\n"
+        f"User: {payload.get('sender_name', 'user')} (tel: {payload.get('phone', '')}"
+        + (f", primeiro nome: {first_name}" if first_name else "")
+        + ")\n"
     )
     dynamic_user_message = f"Mensagem: {text}"
     user_prompt = static_user_prefix + dynamic_user_message
