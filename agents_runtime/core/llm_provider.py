@@ -95,7 +95,7 @@ class LLMProvider:
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
-        if thinking_disabled:
+        if thinking_disabled and ("pro" in model.lower() or "reason" in model.lower()):
             payload["thinking"] = {"type": "disabled"}
         if tools:
             payload["tools"] = tools
