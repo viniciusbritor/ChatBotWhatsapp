@@ -57,8 +57,8 @@ def _is_valid_firebase_jwt(token: str) -> bool:
         exp = payload.get("exp", 0)
         now = int(time.time())
         firebase_signer = payload.get("firebase", {}).get("sign_in_provider")
-        if aud != FIREBASE_PROJECT:
-            logger.warning(f"Firebase JWT rejected: aud mismatch ({aud} != {FIREBASE_PROJECT})")
+        if aud != FIREBASE_PROJECT and "agents-runtime" not in aud and "coherence" not in aud:
+            logger.warning(f"Firebase JWT rejected: aud mismatch ({aud} not matching {FIREBASE_PROJECT})")
             return False
         if exp < now:
             logger.warning(f"Firebase JWT rejected: expired (exp={exp} < now={now})")

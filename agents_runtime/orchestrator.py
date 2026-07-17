@@ -388,7 +388,9 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
     path.append({"step": 3, "phase": "result", "agent_id": result.get("metadata", {}).get("agent_id"),
                  "model": result.get("metadata", {}).get("model_used"),
                  "escalated": result.get("metadata", {}).get("escalated"),
-                 "confidence": result.get("metadata", {}).get("confidence_score")})
+                 "confidence": result.get("metadata", {}).get("confidence_score"),
+                 "tool_rounds": result.get("metadata", {}).get("tool_rounds", 0),
+                 "tool_calls": result.get("metadata", {}).get("tool_calls", [])})
 
     _interaction_history.append({
         "timestamp": int(time.time()),

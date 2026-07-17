@@ -584,9 +584,9 @@ async function loadFluxo() {{
     let nid = 0;
     interactions.forEach((ix, idx) => {{
       const text = (ix.text_preview||'').substring(0,30);
-      const reply = (ix.reply_preview||'').substring(0,30);
+      const reply = (ix.reply_preview||'').substring(0,40);
       const path = ix.path || [];
-      mmd_lines.push('',`    subgraph i${{idx+1}}["Msg ${{idx+1}}: ${{text}}"]`,`        direction LR`);
+      mmd_lines.push('',`    subgraph i${{idx+1}}["Msg ${{idx+1}}: ${{text}}\\nReply: ${{reply}}"]`,`        direction LR`);
       let prev = null;
       path.forEach(step => {{
         nid++;
@@ -597,6 +597,8 @@ async function loadFluxo() {{
         if (phase==='result') {{
           label += `\\nmodel: ${{step.model||''}}`;
           if (step.escalated) label += '\\nESCALADO';
+          if (step.tool_rounds) label += `\\ntools: ${{step.tool_rounds}} round`;
+          if (step.confidence!=null) label += `\\nconf: ${{step.confidence}}`;
           style = 'fill:#22c55e,color:#fff';
         }} else if (phase!=='intent_detect') {{
           style = 'fill:#3b82f6,color:#fff';
@@ -859,7 +861,7 @@ async def root_redirect(request: Request):
 
 
 OAUTH_CLIENT_ID = os.getenv("OAUTH_CLIENT_ID", "894828119087-goo6lcl6vgm5bdq5qgafscb8qbr4ueet.apps.googleusercontent.com")
-OAUTH_CLIENT_SECRET = os.getenv("OAUTH_CLIENT_SECRET", "")
+OAUTH_CLIENT_SECRET = (os.getenv("OAUTH_CLIENT_SECRET") or "").lstrip("\ufeff")
 OAUTH_SCOPES = [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/calendar.events",
