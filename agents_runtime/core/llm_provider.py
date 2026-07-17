@@ -213,7 +213,7 @@ class LLMProvider:
             raise LLMError("minimax_empty_response")
         return data["choices"][0]["message"]["content"]
 
-    def _build_cascade_providers(self, model: str):
+    def _build_cascade_providers(self, model: str, skip_gemini: bool = False):
         """Build interleaved cascade list, skipping providers without keys.
 
         Cascade order:
@@ -226,10 +226,10 @@ class LLMProvider:
         """
         providers = []
 
-        if self.gemini_available():
+        if self.gemini_available() and not skip_gemini:
             providers.append(("gemini", "gemini-2.5-flash", "_call_gemini", "gemini-2.5-flash"))
         if self.deepseek_key:
-            providers.append(("deepseek", "deepseek-v4-flash", "_call_deepseek", "deepseek-v4-flash"))
+            providers.append(("deepseek", model, "_call_deepseek", model))
         if self.deepseek_key:
             providers.append(("deepseek-pro", "deepseek-v4-pro", "_call_deepseek", "deepseek-v4-pro"))
         if self.nvidia_key:
@@ -257,7 +257,7 @@ class LLMProvider:
         """Call LLM with cascade fallback. Async."""
         attempts = []
 
-        cascade = self._build_cascade_providers(model)
+        cascade = self._build_cascade_providers(model, skip_gemini=True)
 
         for attempt_idx, (provider_name, provider_model, method_name, call_model) in enumerate(cascade):
             try:

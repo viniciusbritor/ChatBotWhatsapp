@@ -33,6 +33,8 @@ logger = logging.getLogger(__name__)
 
 _interaction_history: List[Dict[str, Any]] = []
 MAX_HISTORY = 20
+_response_cache: Dict[str, Dict[str, Any]] = {}
+CACHE_TTL_SEC = 300
 
 
 def get_recent_interactions(limit: int = 5) -> List[Dict[str, Any]]:
@@ -416,6 +418,14 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
     sender_name = payload.get("sender_name", "user")
     extra = payload.get("extra", {})
 
+    cache_key = f"{phone}:{text[:60]}"
+    if cache_key in _response_cache:
+        cached = _response_cache[cache_key]
+        if int(time.time()) - cached.get("ts", 0) < CACHE_TTL_SEC:
+            logger.info(f"Cache hit for {phone}: {text[:40]}")
+            cached["metadata"]["cached"] = True
+            return cached
+
     first_name = _extract_first_name(sender_name)
     payload["first_name"] = first_name
 
@@ -600,6 +610,12 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
     })
     if len(_interaction_history) > MAX_HISTORY:
         _interaction_history.pop(0)
+
+    if not result.get("metadata", {}).get("error"):
+        _response_cache[cache_key] = {**result, "ts": int(time.time())}
+        for k in list(_response_cache.keys()):
+            if int(time.time()) - _response_cache.get(k, {}).get("ts", 0) > CACHE_TTL_SEC:
+                del _response_cache[k]
 
     return result
 

@@ -455,7 +455,6 @@ body{{font-family:Inter,-apple-system,sans-serif;background:#f9fafb;color:#17171
 
 <div class="tabs">
   <div class="tab active" onclick="switchTab('fluxo')">Fluxo de Orquestração</div>
-  <div class="tab" onclick="switchTab('arquitetura')">Arquitetura</div>
   <div class="tab" onclick="switchTab('agentes')">Agentes & Skills</div>
   <div class="tab" onclick="switchTab('gerenciar')">Gerenciar</div>
   <div class="tab" onclick="switchTab('usuarios')">Usuários</div>
@@ -469,110 +468,6 @@ body{{font-family:Inter,-apple-system,sans-serif;background:#f9fafb;color:#17171
     <span><span class="dot gray"></span> Passo intermediário</span>
   </div>
   <div id="fluxo-content" class="loading">Carregando fluxo de orquestração...</div>
-</div>
-
-<div id="tab-arquitetura" class="tab-content">
-  <div class="card"><div class="mermaid-box"><div class="mermaid">
-flowchart TB
-    subgraph WHATSAPP["WhatsApp"]
-        USER["Usuario / Grupos"]
-    end
-    subgraph EVOLUTION["Evolution API"]
-        EVO["evolution.coherenceai.com.br"]
-    end
-    subgraph PROXY["Whatsapp-Agente Thin Proxy"]
-        WEBHOOK["POST /webhook\nG1-G6 guardrails\ndedup + circuit breaker"]
-    end
-    subgraph ORCHESTRATOR["Jennifer Orchestrator\nGemini 2.5 Flash"]
-        INTENT["_detect_intent()\nkeywords + Firestore rules"]
-        ROUTE["_resolve_agent_for_intent()"]
-        PREFETCH["Pre-Fetch Fase B\ncalendar/email/drive\n1 LLM vs 2"]
-        INTIMACY["Intimidade\napelido direto Firestore"]
-        MEMORY["Memoria\ncontexto + historico"]
-        ANTIHALL["Anti-Alucinacao\nnunca inventar dados"]
-    end
-    subgraph MANAGERS["4 Managers"]
-        CAL["Calendar\nlist_events, create, update\ndelete, freebusy\nOAuth per-user"]
-        DRV["Drive\nsearch, upload, list\ncreate_folder, find_atas\nNUNCA 'estou sem acesso'"]
-        EML["Email\nsearch_messages, get_thread\nsend_message"]
-        WEB["Web\nserper_search, fetch_url\ncache 24h"]
-    end
-    subgraph SPECIALISTS["8 Specialists"]
-        INTM["Intimacy\nnickname.lookup/set_consent\nFORBIDDEN_NICKNAMES firewall"]
-        LEARN["Learning\nauto-correcoes"]
-        MORAL["Morality\nconteudo ofensivo\nRAG leis penais"]
-        ATA["ATA Generator\ncalendar + gmail + drive\natas de reuniao"]
-        LOCO["Locomocao\ncalc_route, geocode, places"]
-        YT["YouTube\nsearch_videos"]
-        RAG["RAG Knowledge\nsearch_knowledge"]
-        GRP["Group Resolver\nget_info, search_files"]
-    end
-    subgraph JOBS["Cloud Run Jobs"]
-        PROACTIVE["Proactive Worker\nevents 15min + topics\n8-layer anti-spam"]
-        ATAW["ATA Worker\n10min scan"]
-        WHISPER["Whisper Worker\nGPU L4 audio 3s"]
-    end
-    subgraph LLMS["LLM Cascade"]
-        GEM["1. Gemini 2.5 Flash\nVertex AI ADC\n0.15/0.60 USD - 3-8s"]
-        DS["2. DeepSeek V4 Flash\n0.14/0.28 - 5-15s"]
-        DSP["3. DeepSeek V4 Pro\n0.44/0.87"]
-        NV["4-5. NVIDIA NIM"]
-        MM["6. MiniMax M3"]
-    end
-    subgraph GOOGLE["Google APIs"]
-        GCAL2["Calendar"]
-        GDRV2["Drive"]
-        GMAIL2["Gmail"]
-    end
-    subgraph DATA["Firestore"]
-        USERS2["usuarios/{phone}\nOAuth tokens"]
-        AGENTS2["agents/{id}\n15 agentes"]
-        GROUPS2["grupos/{jid}\nmembros/{phone}.confirmed"]
-        NICK2["apelidos_custom\naccepted"]
-    end
-
-    USER --> EVO --> WEBHOOK --> ORCHESTRATOR
-    ORCHESTRATOR --> INTENT --> ROUTE --> PREFETCH
-    INTIMACY -.-> ORCHESTRATOR
-    MEMORY -.-> ORCHESTRATOR
-    ANTIHALL -.-> ORCHESTRATOR
-    ROUTE -->|calendar| CAL
-    ROUTE -->|drive| DRV
-    ROUTE -->|email| EML
-    ROUTE -->|web| WEB
-    ROUTE -->|intimacy| INTM
-    ROUTE -->|correction| LEARN
-    ROUTE -->|gross| MORAL
-    ROUTE -->|ata| ATA
-    ROUTE -->|locomocao| LOCO
-    ROUTE -->|youtube| YT
-    ROUTE -->|rag| RAG
-    ROUTE -->|group| GRP
-    ROUTE -->|default| ORCHESTRATOR
-    CAL --> GEM
-    DRV --> GEM
-    EML --> GEM
-    WEB --> GEM
-    INTM --> GEM
-    LEARN --> GEM
-    MORAL --> GEM
-    ATA --> GEM
-    GEM -->|fallback| DS -->|fallback| DSP -->|fallback| NV -->|fallback| MM
-    CAL --> GCAL2
-    DRV --> GDRV2
-    EML --> GMAIL2
-    ORCHESTRATOR --> NICK2
-    ORCHESTRATOR --> USERS2
-    GRP --> GROUPS2
-    PROACTIVE --> GEM
-
-    style ORCHESTRATOR fill:#3b82f6,color:#fff
-    style GEM fill:#22c55e,color:#fff
-    style WEBHOOK fill:#f59e0b,color:#fff
-    style PREFETCH fill:#22c55e,color:#fff
-    style ANTIHALL fill:#ef4444,color:#fff
-    style INTIMACY fill:#a855f7,color:#fff
-  </div></div></div>
 </div>
 
 <div id="tab-agentes" class="tab-content">
@@ -683,43 +578,58 @@ async function loadFluxo() {{
   try {{
     const data = await api('/admin/dashboard/orchestration');
     const interactions = data.interactions || [];
-    if (interactions.length===0) {{
-      document.getElementById('fluxo-content').innerHTML = '<div class="card"><p style="color:#9ca3af">Nenhuma interação registrada. Envie mensagens no WhatsApp para popular.</p></div>';
-      return;
-    }}
-    let mmd_lines = ['flowchart LR'];
-    let nid = 0;
-    interactions.forEach((ix, idx) => {{
-      const text = (ix.text_preview||'').substring(0,30);
-      const reply = (ix.reply_preview||'').substring(0,40);
-      const path = ix.path || [];
-      mmd_lines.push('',`    subgraph i${{idx+1}}["Msg ${{idx+1}}: ${{text}}\\nReply: ${{reply}}"]`,`        direction LR`);
-      let prev = null;
-      path.forEach(step => {{
-        nid++;
-        const phase = step.phase||'';
-        const agent = step.agent||step.agent_id||phase;
-        let label = `${{step.step}}. ${{agent}}`;
-        let style = 'fill:#9ca3af,color:#fff';
-        if (phase==='result') {{
-          label += `\\nmodel: ${{step.model||''}}`;
-          if (step.escalated) label += '\\nESCALADO';
-          if (step.tool_rounds) label += `\\ntools: ${{step.tool_rounds}} round`;
-          if (step.confidence!=null) label += `\\nconf: ${{step.confidence}}`;
-          style = 'fill:#22c55e,color:#fff';
-        }} else if (phase!=='intent_detect') {{
-          style = 'fill:#3b82f6,color:#fff';
-        }}
-        mmd_lines.push(`        n${{nid}}["${{label}}"]`,`        style n${{nid}} ${{style}}`);
-        if (prev) mmd_lines.push(`        n${{prev}} --> n${{nid}}`);
-        prev = nid;
-      }});
-      mmd_lines.push('    end');
-    }});
+    const last = interactions[0] || {{}};
+    const lastPath = last.path || [];
+    const activeNodes = lastPath.map(p => p.agent||p.agent_id||p.phase||'').filter(Boolean);
+    const lastModel = lastPath.slice(-1)[0]?.model || '';
+
+    let arch = `flowchart TB
+subgraph WHATSAPP["WhatsApp"]
+    USER["Usuario / Grupos"]
+end
+subgraph PROXY["Whatsapp-Agente"]
+    WEBHOOK["POST /webhook\\\\nG1-G6 guardrails"]
+end
+subgraph ORCHESTRATOR["Jennifer Orchestrator\\\\ngemini-2.5-flash"]
+    INTENT["detect_intent()"]
+    ROUTE["resolve_agent()"]
+end
+subgraph MANAGERS["4 Managers"]
+    CAL["Calendar\\\\nlist_events, create, update"]
+    DRV["Drive\\\\nsearch, upload, list"]
+    EML["Email\\\\nsearch_messages, send"]
+    WEB["Web\\\\nserper_search"]
+end
+subgraph LLMS["LLM Cascade"]
+    GEM["1. Gemini 2.5 Flash\\\\nVertex AI ADC - 3-8s"]
+    DS["2. DeepSeek V4 Flash\\\\n5-15s"]
+    DSP["3. DeepSeek V4 Pro"]
+    NV["4-5. NVIDIA NIM"]
+    MM["6. MiniMax M3"]
+end
+
+USER --> EVO --> WEBHOOK --> ORCHESTRATOR
+ORCHESTRATOR --> INTENT --> ROUTE
+ROUTE -->|calendar| CAL
+ROUTE -->|drive| DRV
+ROUTE -->|email| EML
+ROUTE -->|web| WEB
+CAL --> GEM
+DRV --> GEM
+EML --> GEM
+WEB --> GEM
+GEM -->|fallback| DS -->|fallback| DSP -->|fallback| NV -->|fallback| MM
+
+style ORCHESTRATOR fill:#3b82f6,color:#fff
+style GEM fill:#22c55e,color:#fff
+style WEBHOOK fill:#f59e0b,color:#fff`;
+
     document.getElementById('fluxo-content').innerHTML = `
-      <div class="card"><div class="mermaid-box"><div class="mermaid">${{mmd_lines.join('\\n')}}</div></div></div>
+      <div class="card">
+        <div class="mermaid-box"><div class="mermaid">${{arch}}</div></div>
+      </div>
       <div class="card"><h3>Últimas Interações</h3>
-        ${{interactions.map((ix,idx) => `
+        ${{interactions.length===0 ? '<p style="color:#9ca3af;font-size:13px">Nenhuma interacao registrada.</p>' : interactions.map((ix,idx) => `
           <div class="interaction-row">
             <span style="color:#9ca3af;min-width:20px">#${{idx+1}}</span>
             <span style="flex:1;font-weight:500">${{ix.text_preview||''}}</span>
@@ -727,9 +637,11 @@ async function loadFluxo() {{
             <span style="color:#9ca3af;font-size:11px">${{(ix.path||[]).slice(-1)[0]?.model||''}}</span>
           </div>`).join('')}}
       </div>`;
-    setTimeout(() => {{ if (window.mermaid) mermaid.initialize({{startOnLoad:true, theme:'neutral'}}); }}, 100);
+    setTimeout(() => {{
+      if (window.mermaid) mermaid.initialize({{startOnLoad:true, theme:'neutral'}});
+    }}, 100);
   }} catch(e) {{
-    document.getElementById('fluxo-content').innerHTML = `<div class="error">Erro ao carregar fluxo: ${{e.message}}</div>`;
+    document.getElementById('fluxo-content').innerHTML = `<div class="error">Erro: ${{e.message}}</div>`;
   }}
 }}
 
