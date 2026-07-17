@@ -20,11 +20,29 @@ SCOPES = [
 ]
 DEFAULT_CALENDAR_ID = "primary"
 
-_calendar_service = None
+_calendar_services: Dict[str, Any] = {}
 
 
-def _get_credentials() -> Credentials:
-    """Load Google OAuth credentials from Secret Manager token."""
+def _get_credentials(phone: Optional[str] = None) -> Credentials:
+    """Load Google OAuth credentials — per-user if phone provided, else global token."""
+    if phone:
+        try:
+            from agent_loader import get_user
+            user = get_user(phone)
+            if user and user.get("google_oauth_token"):
+                token_data = user["google_oauth_token"]
+                if isinstance(token_data.get("token"), str):
+                    return Credentials(
+                        token=token_data["token"],
+                        refresh_token=token_data.get("refresh_token"),
+                        token_uri=token_data.get("token_uri", "https://oauth2.googleapis.com/token"),
+                        client_id=token_data.get("client_id", ""),
+                        client_secret=token_data.get("client_secret", ""),
+                        scopes=SCOPES,
+                    )
+        except Exception as e:
+            logger.warning(f"Per-user credentials failed for {phone}: {e}")
+
     from core.secrets import get_secret
     token_json = get_secret("GOOGLE_OAUTH_TOKEN")
     if not token_json:
@@ -33,13 +51,13 @@ def _get_credentials() -> Credentials:
     return Credentials.from_authorized_user_info(token_data, SCOPES)
 
 
-def _get_service():
-    """Get or build Calendar API service (cached)."""
-    global _calendar_service
-    if _calendar_service is None:
-        creds = _get_credentials()
-        _calendar_service = build("calendar", "v3", credentials=creds, cache_discovery=False)
-    return _calendar_service
+def _get_service(phone: Optional[str] = None):
+    """Get or build Calendar API service (cached per user)."""
+    cache_key = phone or "_global_"
+    if cache_key not in _calendar_services:
+        creds = _get_credentials(phone)
+        _calendar_services[cache_key] = build("calendar", "v3", credentials=creds, cache_discovery=False)
+    return _calendar_services[cache_key]
 
 
 def _format_event(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -61,6 +79,7 @@ async def list_events(
     time_max: str,
     calendar_id: str = DEFAULT_CALENDAR_ID,
     max_results: int = 50,
+    phone: Optional[str] = None,
 ) -> Dict[str, Any]:
     """List calendar events between time_min and time_max.
 
@@ -69,12 +88,13 @@ async def list_events(
         time_max: ISO 8601 datetime
         calendar_id: Calendar to query (default: primary)
         max_results: Max events to return (default: 50)
+        phone: User phone for per-user OAuth token
 
     Returns:
         {"events": [...], "count": int}
     """
     try:
-        service = _get_service()
+        service = _get_service(phone)
         result = (
             service.events()
             .list(
@@ -102,6 +122,7 @@ async def create_event(
     attendees: Optional[List[str]] = None,
     location: Optional[str] = None,
     calendar_id: str = DEFAULT_CALENDAR_ID,
+    phone: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create a new calendar event.
 
@@ -113,12 +134,13 @@ async def create_event(
         attendees: List of email addresses
         location: Event location
         calendar_id: Calendar to add event to
+        phone: User phone for per-user OAuth token
 
     Returns:
         {"event": {...}} on success or {"error": str}
     """
     try:
-        service = _get_service()
+        service = _get_service(phone)
         event_body = {
             "summary": summary,
             "start": {"dateTime": start},
@@ -141,6 +163,7 @@ async def create_event(
 async def update_event(
     event_id: str,
     calendar_id: str = DEFAULT_CALENDAR_ID,
+    phone: Optional[str] = None,
     **kwargs,
 ) -> Dict[str, Any]:
     """Update an existing event.
@@ -148,13 +171,14 @@ async def update_event(
     Args:
         event_id: Event ID to update
         calendar_id: Calendar containing the event
+        phone: User phone for per-user OAuth token
         **kwargs: Fields to update (start, end, summary, description, location, attendees)
 
     Returns:
         {"event": {...}} or {"error": str}
     """
     try:
-        service = _get_service()
+        service = _get_service(phone)
         existing = service.events().get(calendarId=calendar_id, eventId=event_id).execute()
 
         for key, value in kwargs.items():
@@ -175,18 +199,20 @@ async def update_event(
 async def delete_event(
     event_id: str,
     calendar_id: str = DEFAULT_CALENDAR_ID,
+    phone: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Delete a calendar event.
 
     Args:
         event_id: Event ID to delete
         calendar_id: Calendar containing the event
+        phone: User phone for per-user OAuth token
 
     Returns:
         {"deleted": True} or {"error": str}
     """
     try:
-        service = _get_service()
+        service = _get_service(phone)
         service.events().delete(calendarId=calendar_id, eventId=event_id).execute()
         return {"deleted": True, "event_id": event_id}
     except HttpError as e:
@@ -198,6 +224,7 @@ async def freebusy(
     time_min: str,
     time_max: str,
     calendars: Optional[List[str]] = None,
+    phone: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Check free/busy status for calendars.
 
@@ -205,12 +232,13 @@ async def freebusy(
         time_min: ISO 8601 datetime
         time_max: ISO 8601 datetime
         calendars: List of calendar IDs (default: ["primary"])
+        phone: User phone for per-user OAuth token
 
     Returns:
         {"busy": [{"start": ..., "end": ...}, ...], "calendars": [...]}
     """
     try:
-        service = _get_service()
+        service = _get_service(phone)
         if not calendars:
             calendars = [DEFAULT_CALENDAR_ID]
 

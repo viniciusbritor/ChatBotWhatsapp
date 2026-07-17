@@ -20,7 +20,7 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
     "calendar.list_events": {
         "function": google_calendar.list_events,
         "implementation": "google_calendar",
-        "description": "Lista eventos do Google Calendar entre time_min e time_max.",
+        "description": "Lista eventos do Google Calendar entre time_min e time_max. IMPORTANTE: sempre passe o telefone (phone) do usuario.",
         "parameters_schema": {
             "type": "object",
             "properties": {
@@ -28,6 +28,7 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
                 "time_max": {"type": "string", "description": "ISO 8601 datetime fim"},
                 "calendar_id": {"type": "string", "description": "ID do calendario (default: primary)"},
                 "max_results": {"type": "integer", "description": "Maximo de eventos (default: 50)"},
+                "phone": {"type": "string", "description": "Telefone do usuario para usar o token OAuth dele"},
             },
             "required": ["time_min", "time_max"],
         },
@@ -35,7 +36,7 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
     "calendar.create_event": {
         "function": google_calendar.create_event,
         "implementation": "google_calendar",
-        "description": "Cria um novo evento no Google Calendar.",
+        "description": "Cria um novo evento no Google Calendar. Passe o phone do usuario.",
         "parameters_schema": {
             "type": "object",
             "properties": {
@@ -46,6 +47,7 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
                 "attendees": {"type": "array", "items": {"type": "string"}, "description": "Lista de emails"},
                 "location": {"type": "string", "description": "Local do evento"},
                 "calendar_id": {"type": "string"},
+                "phone": {"type": "string", "description": "Telefone do usuario para token OAuth"},
             },
             "required": ["start", "end", "summary"],
         },
@@ -65,6 +67,7 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
                 "location": {"type": "string"},
                 "attendees": {"type": "array", "items": {"type": "string"}},
                 "calendar_id": {"type": "string"},
+                "phone": {"type": "string", "description": "Telefone do usuario para token OAuth"},
             },
             "required": ["event_id"],
         },
@@ -78,6 +81,7 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
             "properties": {
                 "event_id": {"type": "string"},
                 "calendar_id": {"type": "string"},
+                "phone": {"type": "string", "description": "Telefone do usuario para token OAuth"},
             },
             "required": ["event_id"],
         },
@@ -92,6 +96,7 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
                 "time_min": {"type": "string"},
                 "time_max": {"type": "string"},
                 "calendars": {"type": "array", "items": {"type": "string"}},
+                "phone": {"type": "string", "description": "Telefone do usuario para token OAuth"},
             },
             "required": ["time_min", "time_max"],
         },
@@ -99,7 +104,7 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
     "drive.search_files": {
         "function": google_drive.search_files,
         "implementation": "google_drive",
-        "description": "Busca arquivos no Google Drive por nome.",
+        "description": "Busca arquivos no Google Drive por nome. Passe o phone do usuario.",
         "parameters_schema": {
             "type": "object",
             "properties": {
@@ -107,6 +112,7 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
                 "folder_id": {"type": "string"},
                 "mime_type": {"type": "string"},
                 "max_results": {"type": "integer"},
+                "phone": {"type": "string", "description": "Telefone do usuario para token OAuth"},
             },
             "required": ["query"],
         },
@@ -122,6 +128,7 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
                 "filename": {"type": "string"},
                 "content": {"type": "string"},
                 "mime_type": {"type": "string"},
+                "phone": {"type": "string", "description": "Telefone do usuario para token OAuth"},
             },
             "required": ["folder_id", "filename", "content"],
         },
@@ -135,6 +142,7 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
             "properties": {
                 "folder_id": {"type": "string"},
                 "max_results": {"type": "integer"},
+                "phone": {"type": "string", "description": "Telefone do usuario para token OAuth"},
             },
         },
     },
@@ -147,6 +155,7 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
             "properties": {
                 "name": {"type": "string"},
                 "parent_id": {"type": "string"},
+                "phone": {"type": "string", "description": "Telefone do usuario para token OAuth"},
             },
             "required": ["name"],
         },
@@ -154,13 +163,14 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
     "gmail.search_messages": {
         "function": google_gmail.search_messages,
         "implementation": "google_gmail",
-        "description": "Busca mensagens no Gmail por query.",
+        "description": "Busca mensagens no Gmail por query. Passe o phone do usuario.",
         "parameters_schema": {
             "type": "object",
             "properties": {
                 "query": {"type": "string"},
                 "max_results": {"type": "integer"},
                 "label_ids": {"type": "array", "items": {"type": "string"}},
+                "phone": {"type": "string", "description": "Telefone do usuario para token OAuth"},
             },
             "required": ["query"],
         },
@@ -173,6 +183,7 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
             "type": "object",
             "properties": {
                 "thread_id": {"type": "string"},
+                "phone": {"type": "string", "description": "Telefone do usuario para token OAuth"},
             },
             "required": ["thread_id"],
         },
@@ -189,6 +200,7 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
                 "body": {"type": "string"},
                 "thread_id": {"type": "string"},
                 "html": {"type": "boolean"},
+                "phone": {"type": "string", "description": "Telefone do usuario para token OAuth"},
             },
             "required": ["to", "subject", "body"],
         },
@@ -264,7 +276,9 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
         "description": "Encontra a pasta Omnichannel/Atas/ no Drive.",
         "parameters_schema": {
             "type": "object",
-            "properties": {},
+            "properties": {
+                "phone": {"type": "string", "description": "Telefone do usuario para token OAuth"},
+            },
         },
     },
     "locomotion.calc_route": {

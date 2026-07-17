@@ -16,10 +16,29 @@ SCOPES = ["https://www.googleapis.com/auth/drive"]
 _OMNICHANNEL_FOLDER_NAME = "Omnichannel"
 _ATAS_SUBFOLDER = "Atas"
 
-_drive_service = None
+_drive_services: Dict[str, Any] = {}
 
 
-def _get_credentials() -> Credentials:
+def _get_credentials(phone: Optional[str] = None) -> Credentials:
+    """Load Google OAuth credentials — per-user if phone provided, else global token."""
+    if phone:
+        try:
+            from agent_loader import get_user
+            user = get_user(phone)
+            if user and user.get("google_oauth_token"):
+                token_data = user["google_oauth_token"]
+                if isinstance(token_data.get("token"), str):
+                    return Credentials(
+                        token=token_data["token"],
+                        refresh_token=token_data.get("refresh_token"),
+                        token_uri=token_data.get("token_uri", "https://oauth2.googleapis.com/token"),
+                        client_id=token_data.get("client_id", ""),
+                        client_secret=token_data.get("client_secret", ""),
+                        scopes=SCOPES,
+                    )
+        except Exception as e:
+            logger.warning(f"Per-user credentials failed for {phone}: {e}")
+
     from core.secrets import get_secret
     token_json = get_secret("GOOGLE_OAUTH_TOKEN")
     if not token_json:
@@ -28,12 +47,13 @@ def _get_credentials() -> Credentials:
     return Credentials.from_authorized_user_info(token_data, SCOPES)
 
 
-def _get_service():
-    global _drive_service
-    if _drive_service is None:
-        creds = _get_credentials()
-        _drive_service = build("drive", "v3", credentials=creds, cache_discovery=False)
-    return _drive_service
+def _get_service(phone: Optional[str] = None):
+    """Get or build Drive API service (cached per user)."""
+    cache_key = phone or "_global_"
+    if cache_key not in _drive_services:
+        creds = _get_credentials(phone)
+        _drive_services[cache_key] = build("drive", "v3", credentials=creds, cache_discovery=False)
+    return _drive_services[cache_key]
 
 
 def _format_file(file: Dict[str, Any]) -> Dict[str, Any]:
@@ -52,6 +72,7 @@ async def search_files(
     folder_id: Optional[str] = None,
     mime_type: Optional[str] = None,
     max_results: int = 20,
+    phone: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Search for files in Drive.
 
@@ -65,7 +86,7 @@ async def search_files(
         {"files": [...], "count": int}
     """
     try:
-        service = _get_service()
+        service = _get_service(phone)
         q_parts = [f"name contains '{query}'" if query else ""]
         if folder_id:
             q_parts.append(f"'{folder_id}' in parents")
@@ -90,6 +111,7 @@ async def upload_file(
     filename: str,
     content: str,
     mime_type: str = "text/plain",
+    phone: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Upload a file to Drive folder.
 
@@ -103,7 +125,7 @@ async def upload_file(
         {"file": {...}} or {"error": str}
     """
     try:
-        service = _get_service()
+        service = _get_service(phone)
         file_metadata = {
             "name": filename,
             "parents": [folder_id],
@@ -127,6 +149,7 @@ async def upload_file(
 async def list_folder(
     folder_id: str = "root",
     max_results: int = 50,
+    phone: Optional[str] = None,
 ) -> Dict[str, Any]:
     """List contents of a folder.
 
@@ -138,7 +161,7 @@ async def list_folder(
         {"files": [...], "count": int}
     """
     try:
-        service = _get_service()
+        service = _get_service(phone)
         if folder_id == "root":
             query = "'root' in parents"
         else:
@@ -159,6 +182,7 @@ async def list_folder(
 async def create_folder(
     name: str,
     parent_id: Optional[str] = None,
+    phone: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create a folder.
 
@@ -170,7 +194,7 @@ async def create_folder(
         {"folder": {...}} or {"error": str}
     """
     try:
-        service = _get_service()
+        service = _get_service(phone)
         metadata = {
             "name": name,
             "mimeType": "application/vnd.google-apps.folder",
@@ -184,14 +208,14 @@ async def create_folder(
         return {"error": str(e)}
 
 
-async def find_omnichannel_atas_folder() -> Dict[str, Any]:
+async def find_omnichannel_atas_folder(phone: Optional[str] = None) -> Dict[str, Any]:
     """Find the Omnichannel/Atas/ folder, creating if missing.
 
     Returns:
         {"folder_id": "..."} or {"error": str}
     """
     try:
-        service = _get_service()
+        service = _get_service(phone)
         results = service.files().list(
             q=f"name='{_OMNICHANNEL_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder'",
             fields="files(id, name)",

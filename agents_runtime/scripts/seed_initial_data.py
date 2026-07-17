@@ -72,7 +72,9 @@ DEFAULT_AGENTS = [
         "thinking": "disabled",
         "system_prompt": (
             "Voce e o Calendar Manager da Jennifer. Use Google Calendar tools para responder perguntas "
-            "sobre reunioes, criar/atualizar eventos, verificar disponibilidade."
+            "sobre reunioes, criar/atualizar eventos, verificar disponibilidade. "
+            "IMPORTANTE: sempre passe o telefone (phone) do usuario ao chamar qualquer tool do Google Calendar. "
+            "O telefone esta no contexto da conversa (campo 'tel')."
         ),
         "skills": [],
         "delegates_to": [],
@@ -101,7 +103,9 @@ DEFAULT_AGENTS = [
         "thinking": "disabled",
         "system_prompt": (
             "Voce e o Drive Manager da Jennifer. Use Google Drive tools para buscar documentos, "
-            "upload de arquivos, organizacao de pastas. Foco em Omnichannel/Atas/ para atas."
+            "upload de arquivos, organizacao de pastas. Foco em Omnichannel/Atas/ para atas. "
+            "IMPORTANTE: sempre passe o telefone (phone) do usuario ao chamar qualquer tool do Google Drive. "
+            "O telefone esta no contexto da conversa (campo 'tel')."
         ),
         "skills": [],
         "delegates_to": [],
@@ -130,7 +134,9 @@ DEFAULT_AGENTS = [
         "thinking": "disabled",
         "system_prompt": (
             "Voce e o Email Manager da Jennifer. Use Gmail tools para buscar mensagens, "
-            "ler threads, enviar emails (ex: atas)."
+            "ler threads, enviar emails (ex: atas). "
+            "IMPORTANTE: sempre passe o telefone (phone) do usuario ao chamar qualquer tool do Gmail. "
+            "O telefone esta no contexto da conversa (campo 'tel')."
         ),
         "skills": [],
         "delegates_to": [],

@@ -15,10 +15,29 @@ SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.send",
 ]
-_gmail_service = None
+_gmail_services: Dict[str, Any] = {}
 
 
-def _get_credentials() -> Credentials:
+def _get_credentials(phone: Optional[str] = None) -> Credentials:
+    """Load Google OAuth credentials — per-user if phone provided, else global token."""
+    if phone:
+        try:
+            from agent_loader import get_user
+            user = get_user(phone)
+            if user and user.get("google_oauth_token"):
+                token_data = user["google_oauth_token"]
+                if isinstance(token_data.get("token"), str):
+                    return Credentials(
+                        token=token_data["token"],
+                        refresh_token=token_data.get("refresh_token"),
+                        token_uri=token_data.get("token_uri", "https://oauth2.googleapis.com/token"),
+                        client_id=token_data.get("client_id", ""),
+                        client_secret=token_data.get("client_secret", ""),
+                        scopes=SCOPES,
+                    )
+        except Exception as e:
+            logger.warning(f"Per-user credentials failed for {phone}: {e}")
+
     from core.secrets import get_secret
     token_json = get_secret("GOOGLE_OAUTH_TOKEN")
     if not token_json:
@@ -27,12 +46,13 @@ def _get_credentials() -> Credentials:
     return Credentials.from_authorized_user_info(token_data, SCOPES)
 
 
-def _get_service():
-    global _gmail_service
-    if _gmail_service is None:
-        creds = _get_credentials()
-        _gmail_service = build("gmail", "v1", credentials=creds, cache_discovery=False)
-    return _gmail_service
+def _get_service(phone: Optional[str] = None):
+    """Get or build Gmail API service (cached per user)."""
+    cache_key = phone or "_global_"
+    if cache_key not in _gmail_services:
+        creds = _get_credentials(phone)
+        _gmail_services[cache_key] = build("gmail", "v1", credentials=creds, cache_discovery=False)
+    return _gmail_services[cache_key]
 
 
 def _decode_body(data: str) -> str:
@@ -75,6 +95,7 @@ async def search_messages(
     query: str,
     max_results: int = 10,
     label_ids: Optional[List[str]] = None,
+    phone: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Search Gmail messages.
 
@@ -87,7 +108,7 @@ async def search_messages(
         {"messages": [...], "count": int}
     """
     try:
-        service = _get_service()
+        service = _get_service(phone)
         result = service.users().messages().list(
             userId="me",
             q=query,
@@ -111,7 +132,7 @@ async def search_messages(
         return {"messages": [], "count": 0, "error": str(e)}
 
 
-async def get_thread(thread_id: str) -> Dict[str, Any]:
+async def get_thread(thread_id: str, phone: Optional[str] = None) -> Dict[str, Any]:
     """Get all messages in a thread.
 
     Args:
@@ -121,7 +142,7 @@ async def get_thread(thread_id: str) -> Dict[str, Any]:
         {"messages": [...], "count": int}
     """
     try:
-        service = _get_service()
+        service = _get_service(phone)
         thread = service.users().threads().get(userId="me", id=thread_id, format="full").execute()
         messages = [_format_message(m) for m in thread.get("messages", [])]
         return {"messages": messages, "count": len(messages)}
@@ -136,6 +157,7 @@ async def send_message(
     body: str,
     thread_id: Optional[str] = None,
     html: bool = False,
+    phone: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Send an email.
 
@@ -150,7 +172,7 @@ async def send_message(
         {"message": {...}} or {"error": str}
     """
     try:
-        service = _get_service()
+        service = _get_service(phone)
         content_type = "text/html" if html else "text/plain"
         message = f"To: {to}\r\nSubject: {subject}\r\nContent-Type: {content_type}; charset=UTF-8\r\n\r\n{body}"
         raw = base64.urlsafe_b64encode(message.encode("utf-8")).decode("utf-8").rstrip("=")
