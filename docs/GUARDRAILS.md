@@ -135,4 +135,45 @@
 - [ARQUITETURA.md](./ARQUITETURA.md) - Componentes
 - [DIARIO_BORDO.md](./DIARIO_BORDO.md) - Decisoes tecnicas
 - `Coherence_Portal/docs/GUARDRAILS.md` - Guardrails globais do Portal
+
+## Guardrails Operacionais (17/07/2026)
+
+### G1-G6: WhatsappAgente (anti-spam e resiliência)
+
+| Guardrail | Regra | Onde | Penalidade |
+|---|---|---|---|
+| **G1** | Webhook NUNCA bloqueia. Responde 200 em <1s. Processamento async. | `whatsapp-agente/agente/main.py` /webhook | Timeout >1s = Evolution retry = spam |
+| **G2** | Idempotência por content hash (phone+texto). Mesma msg não processada 2x em 120s. | `_is_duplicate()` + `_content_hash()` | Duplicata gera fallback em cascata |
+| **G3** | Máximo 1 fallback por telefone a cada 120s. | `_can_send_fallback()` | Usuário recebe N mensagens "Demorou mais" |
+| **G4** | Máximo 5 mensagens enviadas por telefone por minuto. Excedeu → bloqueia. | `_check_outbound_rate()` | Spam para o usuário |
+| **G5** | Circuit breaker: 3 falhas seguidas no agents-runtime → pausa 60s. | `_circuit_breaker_allowed()` | Degradação controlada, não cascata |
+| **G6** | MESSAGES_UPDATE e fromMe=true NUNCA processam webhook. Só MESSAGES_UPSERT de usuário. | `extract_message()` | Loop infinito: Jennifer responde → Evolution notifica → webhook processa → timeout → fallback → repete |
+
+### G7: Orchestrator (eficiência)
+
+| Guardrail | Regra | Onde | Penalidade |
+|---|---|---|---|
+| **G7** | Saudações NUNCA usam tool loop. Apelido é pré-resolvido do JSON estático. 1 chamada LLM. | `orchestrator.py` `_prefetch_nickname()` | 2 chamadas LLM (10-30s) vs 1 chamada (5-10s) |
+
+### G8: Instância mínima
+
+| Guardrail | Regra | Onde |
+|---|---|---|
+| **G8** | `min-instances=1`. Nunca 0. Cold-start quebra WhatsApp. | `cloudbuild-test.yaml` |
+
+### G9: OAuth Per-User
+
+| Guardrail | Regra | Onde |
+|---|---|---|
+| **G9** | Tools Google (Calendar/Drive/Gmail) sempre usam token do usuário (phone). Fallback para token global se não existir. | `tools/google_*.py` `_get_credentials(phone)` |
+
+### Monitoramento
+
+| Métrica | O que observar | Alerta |
+|---|---|---|
+| Webhook latency | `POST /webhook` duração | >1s = ALERTA |
+| Duplicate webhooks | `skip: duplicate` no log | >3/min = investigar |
+| Circuit breaker | `CIRCUIT BREAKER OPEN` no log | Imediato |
+| Fallback rate | `Fallback throttled` no log | >1/hora = agents-runtime lento |
+| Outbound rate limit | `RATE LIMIT HIT` no log | >0 = anomalia |
 - Skill `lgpd_compliance` - Implementacao de LGPD
