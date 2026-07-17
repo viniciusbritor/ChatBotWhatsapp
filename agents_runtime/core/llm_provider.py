@@ -19,17 +19,6 @@ from core.secrets import get_secret
 
 logger = logging.getLogger(__name__)
 
-# G8: HTTP connection pooling — reuse TCP+TLS, evitando handshake a cada chamada
-_http_session: Optional[requests.Session] = None
-
-
-def _get_session() -> requests.Session:
-    global _http_session
-    if _http_session is None:
-        _http_session = requests.Session()
-        _http_session.headers.update({"Content-Type": "application/json"})
-    return _http_session
-
 
 class LLMError(Exception):
     """Raised when all providers fail."""
@@ -121,7 +110,7 @@ class LLMProvider:
             model, sp, user_prompt, json_mode, temperature, max_tokens, thinking_disabled
         )
 
-        resp = _get_session().post(url, headers=headers, json=payload, timeout=120)
+        resp = requests.post(url, headers=headers, json=payload, timeout=120)
         if resp.status_code == 429:
             raise LLMError("deepseek_quota_exceeded")
         if resp.status_code == 401:
@@ -165,7 +154,7 @@ class LLMProvider:
             model, sp, user_prompt, json_mode, temperature, max_tokens, thinking_disabled
         )
 
-        resp = _get_session().post(url, headers=headers, json=payload, timeout=120)
+        resp = requests.post(url, headers=headers, json=payload, timeout=120)
         if resp.status_code == 429:
             raise LLMError("nvidia_quota_exceeded")
         if resp.status_code == 401:
@@ -199,7 +188,7 @@ class LLMProvider:
             self.minimax_model, sp, user_prompt, json_mode, temperature, max_tokens, True
         )
 
-        resp = _get_session().post(url, headers=headers, json=payload, timeout=120)
+        resp = requests.post(url, headers=headers, json=payload, timeout=120)
         if resp.status_code == 429:
             raise LLMError("minimax_quota_exceeded")
         resp.raise_for_status()
@@ -439,7 +428,7 @@ class LLMProvider:
         url = f"{self.deepseek_base}/chat/completions"
         headers = {"Authorization": f"Bearer {self.deepseek_key}", "Content-Type": "application/json"}
         payload["model"] = model
-        resp = _get_session().post(url, headers=headers, json=payload, timeout=120)
+        resp = requests.post(url, headers=headers, json=payload, timeout=120)
         if resp.status_code == 429:
             raise LLMError("deepseek_quota_exceeded")
         if resp.status_code == 401:
@@ -456,7 +445,7 @@ class LLMProvider:
         url = f"{self.nvidia_base}/chat/completions"
         headers = {"Authorization": f"Bearer {self.nvidia_key}", "Content-Type": "application/json"}
         payload["model"] = model
-        resp = _get_session().post(url, headers=headers, json=payload, timeout=120)
+        resp = requests.post(url, headers=headers, json=payload, timeout=120)
         if resp.status_code == 429:
             raise LLMError("nvidia_quota_exceeded")
         resp.raise_for_status()
@@ -472,7 +461,7 @@ class LLMProvider:
         headers = {"Authorization": f"Bearer {self.minimax_key}", "Content-Type": "application/json"}
         payload["model"] = self.minimax_model
         payload.pop("thinking", None)
-        resp = _get_session().post(url, headers=headers, json=payload, timeout=120)
+        resp = requests.post(url, headers=headers, json=payload, timeout=120)
         if resp.status_code == 429:
             raise LLMError("minimax_quota_exceeded")
         resp.raise_for_status()
