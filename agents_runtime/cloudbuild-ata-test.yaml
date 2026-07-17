@@ -1,28 +1,39 @@
 steps:
-  - name: "python:test"
-    image: "python:3.12-slim"
+  - name: "python:3.12-slim"
     entrypoint: "bash"
+    dir: "agents_runtime"
     args:
       - "-c"
       - "pip install -q -r requirements.txt && python -m py_compile ata_worker/main.py && echo OK"
 
-  - name: "docker:build"
-    image: "gcr.io/cloud-builders/docker"
-    args: ["build", "-t", "gcr.io/$PROJECT_ID/ata-worker:$COMMIT_SHA", "-f", "ata_worker/Dockerfile", "."]
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "build"
+      - "-t"
+      - "gcr.io/$PROJECT_ID/ata-worker:$BUILD_ID"
+      - "-t"
+      - "gcr.io/$PROJECT_ID/ata-worker:latest"
+      - "-f"
+      - "agents_runtime/ata_worker/Dockerfile"
+      - "agents_runtime"
 
-  - name: "docker:push"
-    image: "gcr.io/cloud-builders/docker"
-    args: ["push", "gcr.io/$PROJECT_ID/ata-worker:$COMMIT_SHA"]
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "push"
+      - "gcr.io/$PROJECT_ID/ata-worker:$BUILD_ID"
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "push"
+      - "gcr.io/$PROJECT_ID/ata-worker:latest"
 
-  - name: "gcloud:run"
-    image: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
     entrypoint: "gcloud"
     args:
       - "run"
       - "jobs"
       - "deploy"
       - "ata-worker-test"
-      - "--image=gcr.io/$PROJECT_ID/ata-worker:$COMMIT_SHA"
+      - "--image=gcr.io/$PROJECT_ID/ata-worker:$BUILD_ID"
       - "--region=us-central1"
       - "--cpu=2"
       - "--memory=2Gi"
@@ -30,10 +41,11 @@ steps:
       - "--parallelism=1"
       - "--task-timeout=600"
       - "--set-env-vars=ENVIRONMENT=test,LOG_LEVEL=INFO,GCP_PROJECT=coherence-ominichannel-fs"
-      - "--set-secrets=DEEPSEEK_API_KEY=deepseek-api-key:latest,GOOGLE_OAUTH_TOKEN=google-oauth-token:latest"
+      - "--set-secrets=DEEPSEEK_API_KEY=DEEPSEEK_API_KEY:latest,GOOGLE_OAUTH_TOKEN=google-oauth-token:latest"
 
 images:
-  - "gcr.io/$PROJECT_ID/ata-worker:$COMMIT_SHA"
+  - "gcr.io/$PROJECT_ID/ata-worker:$BUILD_ID"
+  - "gcr.io/$PROJECT_ID/ata-worker:latest"
 
 options:
   logging: CLOUD_LOGGING_ONLY
