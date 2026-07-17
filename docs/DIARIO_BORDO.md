@@ -382,3 +382,75 @@ Novas funcoes em `tools/group.py`:
 - `"Rafaela Silva Oliveira"` → "Oi, Rafaela! ... Posso te chamar de Rafa?"
 - `"Vinicius Rocha"` → "Oi, Vinicius! ... posso te chamar de Vini?"
 - 152 testes passando (pytest -q)
+
+---
+
+## 17/07/2026 12:00 BRT — Fases A, B, C: Async LLM + Pré-Fetch + Resiliência + Anti-Alucinação
+
+### Fase A: LLM Provider Async
+
+- `core/llm_provider.py`: `_call_deepseek/nvidia/minimax_raw` → `async def` + `httpx.AsyncClient`
+- `core/llm_provider.py`: `_call_provider` → `async def`, `chat()` → async via `asyncio.to_thread`
+- `core/llm_provider.py`: `chat_escalating()` → async, removido código duplicado
+- `core/llm_provider.py`: `chat_with_tools()` → `await _call_provider()`
+- `orchestrator.py`, `proactive_worker/main.py`, `ata_worker/main.py`: `await llm.chat/escalating()`
+- **Impacto**: Event loop nunca bloqueia. 2+ usuários processam em paralelo real.
+
+### Fase B: Pré-Fetch (Leitura)
+
+| Função | O que faz |
+|---|---|
+| `_prefetch_calendar(phone)` | Busca eventos do dia ANTES do LLM |
+| `_prefetch_email(phone)` | Busca últimos 10 emails ANTES do LLM |
+| `_prefetch_drive(phone, query)` | Busca arquivos ANTES do LLM |
+| `_prefetch_drive_multi(phone, text)` | 2 queries paralelas, usa a com mais resultados |
+| `_is_read_query(text)` | Detecta leitura vs escrita por keywords |
+| `_extract_search_terms(text)` | Remove stopwords, extrai termos relevantes |
+| `_has_real_data(text)` | Valida se pré-fetch trouxe dados reais (anti-alucinação) |
+| `asyncio.wait_for(..., timeout=8)` | Timeout protege Google API lenta |
+| `agent_copy = dict(agent)` | Não muta cache do agent_loader |
+
+**Resultado**: Queries de leitura (email, calendário, drive) = 1 LLM (~17s) em vez de 2 LLM (~32s).
+**Fallback**: Se pré-fetch falhar/timeout → mantém tools → tool loop normal (2 LLM). Nunca quebra.
+
+### Fase C: Resiliência (WhatsappAgente)
+
+| Guardrail | O que faz |
+|---|---|
+| G1 | Webhook responde 200 em <1s (async) |
+| G2 | Idempotência por content hash (phone+texto) |
+| G3 | Máx 1 fallback a cada 120s |
+| G4 | Máx 5 msgs/min por telefone |
+| G5 | Circuit breaker (3 falhas = pausa 60s) |
+| G6 | Só processa MESSAGES_UPSERT |
+| G7 | Apelido pré-resolvido (1 LLM, não 2) |
+| G8 | min-instances=1 |
+| G9 | OAuth per-user |
+
+### C1: Auto-Save Nickname Consent
+
+- `orchestrator.py`: detecta "sim"/"pode"/"ok"/"claro" e chama `nickname.set_consent` diretamente (sem depender do LLM)
+- **Impacto**: Nunca mais pergunta "posso te chamar de Vini?" repetidamente
+
+### B1: System Prompts Calorosos
+
+- `manager-calendar`, `manager-drive`, `manager-email`: prompts reescritos com tom humano, emojis, frases naturais
+- Instrução explícita: "NUNCA invente dados"
+
+### A1-A3: Anti-Alucinação
+
+- `_has_real_data()`: detecta strings vazias/erro no pré-fetch
+- Prefetch functions retornam `None` (não string de erro) quando vazio
+- Condição: `if prefetch_data and _has_real_data(prefetch_data)` → só limpa tools com dados reais
+
+### Timeouts e Config
+
+- `cloudbuild-test.yaml`: `timeout=120→300`, `min-instances=0→1`
+- `whatsapp-agente`: `httpx timeout 120→300`
+- `llm_provider`: `httpx timeout=300`
+
+### Branches
+
+- `test-agentes` (ChatBotWhatsapp): 13 commits ahead of `main`
+- `test` (EvolutionWhatsapp): 3 commits ahead
+- `main` branch: desatualizada (não recebeu nenhum fix)

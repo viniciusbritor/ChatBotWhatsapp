@@ -277,7 +277,7 @@ async def _prefetch_calendar(phone: str) -> Optional[str]:
             max_results=50, phone=phone)
         events = result.get("events", [])
         if not events:
-            return "Nenhum compromisso na agenda hoje."
+            return None
         return json.dumps(events, ensure_ascii=False, indent=2)
     except Exception as e:
         logger.warning(f"Prefetch calendar failed: {e}")
@@ -291,7 +291,7 @@ async def _prefetch_email(phone: str) -> Optional[str]:
         result = await search_messages("in:inbox newer_than:30d", max_results=10, phone=phone)
         messages = result.get("messages", [])
         if not messages:
-            return "Nenhum email recente na caixa de entrada."
+            return None
         return json.dumps(messages, ensure_ascii=False, indent=2)
     except Exception as e:
         logger.warning(f"Prefetch email failed: {e}")
@@ -305,11 +305,43 @@ async def _prefetch_drive(phone: str, query_text: str = "") -> Optional[str]:
         result = await search_files(query_text or "", max_results=20, phone=phone)
         files = result.get("files", [])
         if not files:
-            return "Nenhum arquivo encontrado no Drive."
+            return None
         return json.dumps(files, ensure_ascii=False, indent=2)
     except Exception as e:
         logger.warning(f"Prefetch drive failed: {e}")
         return None
+
+
+async def _prefetch_drive_multi(phone: str, text: str) -> Optional[str]:
+    """D1: 2 queries paralelas no Drive, usa a com mais resultados."""
+    query1 = _extract_search_terms(text)
+    query2 = " ".join(w for w in text.lower().split()
+                      if len(w.strip(",.!?;:")) > 3)[:5]
+    results = await asyncio.gather(
+        _prefetch_drive(phone, query1),
+        _prefetch_drive(phone, query2),
+        return_exceptions=True,
+    )
+    best, best_count = None, 0
+    for r in results:
+        if isinstance(r, str):
+            try:
+                data = json.loads(r)
+                if isinstance(data, list) and len(data) > best_count:
+                    best, best_count = r, len(data)
+            except Exception:
+                pass
+    return best
+
+
+def _has_real_data(prefetch_text: str) -> bool:
+    """A1: Retorna True so se prefetch trouxe dados reais (nao mensagens de vazio)."""
+    empty_signals = {"nenhum", "não encontrou", "nao encontrou", "sem resultados",
+                     "0 resultados", "error", "failed"}
+    text_lower = prefetch_text.lower()
+    return not any(m in text_lower for m in empty_signals)
+
+ACCEPTANCE_KEYWORDS = {"sim", "pode", "ok", "claro", "aceito", "perfeito", "otimo", "pode sim"}
 
 
 async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -429,9 +461,8 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
                         prefetch_data = await asyncio.wait_for(
                             _prefetch_email(phone), timeout=8)
                     elif intent["is_drive"]:
-                        query = _extract_search_terms(masked_text)
                         prefetch_data = await asyncio.wait_for(
-                            _prefetch_drive(phone, query), timeout=8)
+                            _prefetch_drive_multi(phone, masked_text), timeout=8)
                 except asyncio.TimeoutError:
                     logger.warning(f"Prefetch timeout for {specialist_id}")
                     prefetch_data = None
@@ -439,7 +470,7 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
                     logger.warning(f"Prefetch failed for {specialist_id}: {e}")
                     prefetch_data = None
 
-            if prefetch_data:
+            if prefetch_data and _has_real_data(prefetch_data):
                 data_label = "CALENDARIO" if intent["is_calendar"] else \
                              "EMAILS" if intent["is_email"] else "DRIVE"
                 agent_copy["system_prompt"] += (
@@ -470,6 +501,17 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
         if not orchestrator:
             return _error_response(503, "agent_not_found", f"Orchestrator {orchestrator_id} nao encontrado")
         path.append({"step": 2, "phase": "orchestrator", "agent": orchestrator_id, "reason": "default_route"})
+
+        if first_name and not has_nickname(phone):
+            text_lower = masked_text.lower().strip()
+            if any(term in text_lower for term in ACCEPTANCE_KEYWORDS):
+                suggested = _prefetch_nickname(first_name) or _generate_diminutive(first_name)
+                try:
+                    from tools.nickname import set_consent
+                    await set_consent(phone, first_name, suggested, True)
+                    logger.info(f"Nickname auto-saved: {phone} -> {suggested}")
+                except Exception as e:
+                    logger.warning(f"Nickname auto-save failed: {e}")
 
         if first_name and not has_nickname(phone):
             suggested = _prefetch_nickname(first_name)
