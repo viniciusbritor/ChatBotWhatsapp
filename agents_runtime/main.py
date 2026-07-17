@@ -861,7 +861,7 @@ async def root_redirect(request: Request):
 
 
 OAUTH_CLIENT_ID = os.getenv("OAUTH_CLIENT_ID", "894828119087-goo6lcl6vgm5bdq5qgafscb8qbr4ueet.apps.googleusercontent.com")
-OAUTH_CLIENT_SECRET = (os.getenv("OAUTH_CLIENT_SECRET") or "").lstrip("\ufeff")
+OAUTH_CLIENT_SECRET = (os.getenv("OAUTH_CLIENT_SECRET") or "").strip()
 OAUTH_SCOPES = [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/calendar.events",
