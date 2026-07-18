@@ -12,6 +12,7 @@ import json
 import time
 import random
 import asyncio
+import base64
 import logging
 from typing import Optional, Dict, Any, List
 
@@ -216,16 +217,19 @@ class LLMProvider:
     def _build_cascade_providers(self, model: str, skip_gemini: bool = False):
         """Build interleaved cascade list, skipping providers without keys.
 
-        Cascade order:
-        1. MiniMax M3 (primary, Plus plan $20/mes)
-        2. Gemini 2.5 Flash (Vertex AI, fallback)
-        3. DeepSeek V4 Flash
-        4. DeepSeek V4 Pro
-        5. NVIDIA NIM V4 Flash
-        6. NVIDIA NIM V4 Pro
+        Cascade order (texto: highspeed → M3 → Gemini):
+        1. MiniMax M2.7-highspeed (primario texto, ~100tps)
+        2. MiniMax M3 (fallback texto + primario audio)
+        3. Gemini 2.5 Flash (fallback texto + audio)
+        4. DeepSeek V4 Flash
+        5. DeepSeek V4 Pro
+        6. NVIDIA NIM V4 Flash
+        7. NVIDIA NIM V4 Pro
         """
         providers = []
 
+        if self.minimax_key:
+            providers.append(("minimax-hs", "MiniMax-M2.7-highspeed", "_call_minimax", "MiniMax-M2.7-highspeed"))
         if self.minimax_key:
             providers.append(("minimax", self.minimax_model, "_call_minimax", self.minimax_model))
         if self.gemini_available() and not skip_gemini:
@@ -433,6 +437,88 @@ class LLMProvider:
             except Exception as e:
                 continue
         raise LLMError(f"all_providers_failed")
+
+    async def transcribe_audio(self, audio_url: str, mimetype: str = "audio/ogg") -> str:
+        """STT: download audio from CDN → MiniMax M3 → Gemini fallback."""
+        import httpx as _httpx
+        audio_bytes = b""
+        try:
+            async with _httpx.AsyncClient(timeout=30) as client:
+                resp = await client.get(audio_url)
+                resp.raise_for_status()
+                audio_bytes = resp.content
+        except Exception as e:
+            logger.warning(f"Audio download failed: {e}")
+            return "[audio]"
+
+        if not audio_bytes:
+            return "[audio]"
+
+        audio_b64 = base64.b64encode(audio_bytes).decode()
+
+        if self.minimax_key:
+            try:
+                return await self._stt_minimax(audio_b64, mimetype)
+            except Exception as e:
+                logger.warning(f"MiniMax STT failed: {e}")
+
+        if self.gemini_available():
+            try:
+                return await self._stt_gemini(audio_b64, mimetype)
+            except Exception as e:
+                logger.warning(f"Gemini STT failed: {e}")
+
+        return "[audio]"
+
+    async def _stt_minimax(self, audio_b64: str, mimetype: str) -> str:
+        """MiniMax M3 audio STT via multimodal chat."""
+        url = f"{self.minimax_base}/chat/completions"
+        headers = {"Authorization": f"Bearer {self.minimax_key}", "Content-Type": "application/json"}
+        payload = {
+            "model": "MiniMax-M3",
+            "messages": [{"role": "user", "content": [
+                {"type": "text", "text": "Transcreva este audio em portugues brasileiro. Responda APENAS com a transcricao, sem mais nada."},
+            ]}],
+            "max_tokens": 500,
+            "temperature": 0.1,
+        }
+        async with httpx.AsyncClient(timeout=120) as client:
+            resp = await client.post(url, headers=headers, json=payload)
+        data = resp.json()
+        content = ""
+        if data.get("choices"):
+            content = data["choices"][0].get("message", {}).get("content", "")
+        return content.strip() or "[audio]"
+
+    async def _stt_gemini(self, audio_b64: str, mimetype: str) -> str:
+        """Gemini Flash STT via multimodal (inline_data)."""
+        import google.auth
+        import google.auth.transport.requests
+        creds, project = google.auth.default()
+        project = project or self.gemini_project
+        creds.refresh(google.auth.transport.requests.Request())
+
+        url = (
+            f"https://{self.gemini_location}-aiplatform.googleapis.com/v1/"
+            f"projects/{project}/locations/{self.gemini_location}/"
+            "publishers/google/models/gemini-2.5-flash:generateContent"
+        )
+        headers = {"Authorization": f"Bearer {creds.token}", "Content-Type": "application/json"}
+        payload = {
+            "contents": [{"role": "user", "parts": [
+                {"text": "Transcreva este audio em portugues brasileiro. Responda APENAS com a transcricao."},
+                {"inline_data": {"mime_type": mimetype or "audio/ogg", "data": audio_b64}},
+            ]}],
+        }
+        async with httpx.AsyncClient(timeout=120) as client:
+            resp = await client.post(url, headers=headers, json=payload)
+        data = resp.json()
+        candidates = data.get("candidates", [])
+        if candidates:
+            parts = candidates[0].get("content", {}).get("parts", [])
+            text = "".join(p.get("text", "") for p in parts)
+            return text.strip() or "[audio]"
+        return "[audio]"
 
     async def _call_gemini_raw(self, model: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Call Gemini 2.5 Flash via Vertex AI (ADC, sem API key)."""

@@ -126,12 +126,18 @@ async def chat(request: Request):
         raise HTTPException(status_code=422, detail="phone and text required")
 
     extra = body.get("extra", {})
-    if extra.get("has_audio") and extra.get("audio_key"):
+    if extra.get("has_audio") and extra.get("audio_url"):
         try:
-            body["text"] = "[audio]"
-            body["_audio_mode"] = True
+            from core.llm_provider import LLMProvider
+            llm = LLMProvider()
+            text = await llm.transcribe_audio(
+                audio_url=extra["audio_url"],
+                mimetype=extra.get("audio_mimetype", "audio/ogg"),
+            )
+            body["text"] = text or "[audio]"
+            logger.info(f"Audio transcribed: {body['text'][:80]}")
         except Exception as e:
-            logger.warning(f"Audio flag set: {e}")
+            logger.warning(f"Audio transcription failed: {e}")
 
     result = await orchestrate(body)
 
