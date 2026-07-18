@@ -438,6 +438,16 @@ class LLMProvider:
                 continue
         raise LLMError(f"all_providers_failed")
 
+    async def transcribe_audio_base64(self, audio_b64: str, mimetype: str = "audio/ogg") -> str:
+        """STT: audio base64 direto → Gemini Flash (inline_data). Zero download."""
+        if not audio_b64 or not self.gemini_available():
+            return "[audio]"
+        try:
+            return await self._stt_gemini(audio_b64, mimetype)
+        except Exception as e:
+            logger.warning(f"Gemini STT failed: {e}")
+            return "[audio]"
+
     async def transcribe_audio(self, audio_url: str, mimetype: str = "audio/ogg") -> str:
         """STT: download audio from CDN → Gemini Flash (único com inline_data audio)."""
         import httpx as _httpx
