@@ -67,3 +67,22 @@ class TestToolRegistry:
     def test_total_tools_count(self):
         from tool_registry import TOOL_REGISTRY
         assert len(TOOL_REGISTRY) >= 17
+
+    def test_group_info_tool_registered(self):
+        from tool_registry import get_tool
+
+        assert callable(get_tool("group.get_info"))
+
+    def test_default_agent_tools_are_executable(self):
+        from scripts.seed_initial_data import DEFAULT_AGENTS
+        from tool_registry import list_tool_ids
+
+        registered = set(list_tool_ids())
+        missing = {
+            tool
+            for agent in DEFAULT_AGENTS
+            if agent.get("enabled", True)
+            for tool in agent.get("tools", [])
+            if tool not in registered
+        }
+        assert missing == set()

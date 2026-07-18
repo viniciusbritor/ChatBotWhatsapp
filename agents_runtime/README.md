@@ -1,6 +1,6 @@
 # 🟢 Jennifer — Modulo `omnichannel-agentes` no Coherence Portal
 
-**Status:** ✅ Pronto para deploy | **166 testes passando** | **~170 arquivos**
+**Status:** Fases corretivas 3, 4 e 5 validadas localmente na branch `test` | **212 testes passando, 9 ignorados**
 
 Plataforma multi-agente WhatsApp com Jennifer como assistente corporativa.
 
@@ -20,11 +20,12 @@ Plataforma multi-agente WhatsApp com Jennifer como assistente corporativa.
 
 - ✅ Responde mensagens WhatsApp (texto + áudio com Whisper)
 - ✅ Delega para 4 managers (calendar, drive, email, web) + 4 specialists (intimacy, learning, morality, ata-generator)
-- ✅ Cascata LLM: DeepSeek V4 Flash → escalação automática → Pro → fallback NVIDIA NIM → MiniMax M3
-- ✅ RAG jurídico (MiniMax embo-01 1536d + Firestore Vector)
+- ✅ Cascata LLM: MiniMax M2.7 Highspeed → MiniMax M3 → DeepSeek V4 Flash, sem Gemini
+- ✅ RAG jurídico v2: MiniMax embo-01 1536d + Firestore Vector nativo
+- ✅ Inventário operacional determinístico e identidade externa Jennifer
 - ✅ Proatividade calibrada (2/dia, 5 global, 8 camadas anti-spam, 7 comandos)
-- ✅ LGPD: masker PII, TTL 90d, opt-out, audit log
-- ✅ Memória por contato (subcollection `historico/`)
+- ✅ LGPD: masker PII, TTL 90d incluindo memória vetorial, exportação e exclusão
+- ✅ Memória vetorial por owner hash, conversa, mensagem, turno e agente
 - ✅ Apelidos com consentimento (built-in + aprendizado)
 
 ---
@@ -43,26 +44,18 @@ Plataforma multi-agente WhatsApp com Jennifer como assistente corporativa.
 
 ---
 
-## ⚡ Quick Start (Deploy GCP Test)
+## ⚡ Quick Start Local na Branch Test
 
-**ATENÇÃO:** Não há teste local. Todos os testes rodam no ambiente GCP test (`agents-runtime-test` Cloud Run).
+Os testes unitários e de integração simulada rodam localmente. Firestore Vector real, reindexação e WhatsApp exigem o ambiente GCP de teste.
 
 ```bash
 cd ChatBotWhatsapp/agents_runtime
-
-# 1. Instalar deps (apenas para IDE/linter)
 pip install -r requirements.txt
-
-# 2. Deploy direto para GCP test (Cloud Build)
-git push origin test
-# → Cloud Build dispara automaticamente → deploy em agents-runtime-test
-
-# 3. Smoke test contra URL real do GCP
-curl https://agents-runtime-test-XXX-uc.a.run.app/healthz \
-  -H "Authorization: Bearer $SA_TOKEN"
+pytest -q tests/
+python scripts/migrate_rag_v2.py --dry-run
 ```
 
-## 🧪 Como Testar (GCP Test Environment)
+## 🧪 Como Testar no GCP Test Environment
 
 1. Push para branch `test` dispara Cloud Build
 2. Cloud Build faz deploy em `agents-runtime-test` (Cloud Run)
@@ -76,7 +69,7 @@ Para logs detalhados, use `gcloud logs read` ou Cloud Console.
 
 ---
 
-## 🚀 Deploy Produção (GCP)
+## 🚀 Deploy no Ambiente GCP Test
 
 ### Pré-requisitos
 - `gcloud` CLI autenticado
@@ -143,20 +136,22 @@ Ver checklist completo: `scripts/DEPLOY_CHECKLIST.md`
 
 ---
 
-## 🧪 Testes (executados no CI/CD do GCP)
+## 🧪 Testes
 
 ```bash
-# Os testes rodam automaticamente no Cloud Build durante o deploy
-# Configuração em cloudbuild.yaml: "pip install + pytest -q tests/"
-
-# Para rodar localmente (apenas para desenvolvimento):
 cd ChatBotWhatsapp/agents_runtime
-pytest tests/ -q           # 152 passed, 9 skipped
-
-cd ../../WhatsappAgente
-pytest tests/ -q           # 14 passed
-# TOTAL: 166 passed
+pytest -q tests/
 ```
+
+Resultado local em 18/07/2026: **212 passed, 9 skipped**.
+
+Gates por fase:
+
+- Fase 3 RAG: 16 testes específicos.
+- Fase 4 inventário e orquestração: 41 testes específicos.
+- Fase 5 áudio e provider: 30 testes específicos.
+
+O Cloud Build repete `pytest -q tests/` antes do build e deploy.
 
 ---
 
@@ -185,11 +180,14 @@ cd ../ChatBotWhatsapp/agents_runtime
 
 ## 📚 Documentação
 
-- [PLAN_OMNICHANNEL_AGENTES.md](docs/PLAN_OMNICHANNEL_AGENTES.md) — plano completo 16 seções
-- [ARQUITETURA.md](docs/ARQUITETURA.md) — diagrama + componentes
-- [HARNESS.md](docs/HARNESS.md) — setup + secrets + scheduler
-- [GUARDRAILS.md](docs/GUARDRAILS.md) — regras inegociáveis
-- [DIARIO_BORDO.md](docs/DIARIO_BORDO.md) — histórico de decisões
+- [PLAN_OMNICHANNEL_AGENTES.md](../docs/PLAN_OMNICHANNEL_AGENTES.md) — plano completo e fases corretivas
+- [ARQUITETURA.md](../docs/ARQUITETURA.md) — arquitetura global
+- [HARNESS.md](../docs/HARNESS.md) — operação global
+- [GUARDRAILS.md](../docs/GUARDRAILS.md) — regras inegociáveis
+- [DIARIO_BORDO.md](../docs/DIARIO_BORDO.md) — histórico consolidado
+- [docs/ARQUITETURA.md](docs/ARQUITETURA.md) — arquitetura do runtime
+- [docs/HARNESS.md](docs/HARNESS.md) — harness do runtime
+- [docs/DIARIO_BORDO.md](docs/DIARIO_BORDO.md) — diário do runtime
 - [MODULE_INTEGRATION_AGENTES.md](../Coherence_Portal/docs/MODULE_INTEGRATION_AGENTES.md) — contrato Portal ↔ agents_runtime
 - [scripts/DEPLOY_CHECKLIST.md](scripts/DEPLOY_CHECKLIST.md) — checklist final deploy
 - [scripts/deploy_cloud_run.md](scripts/deploy_cloud_run.md) — comandos Cloud Scheduler

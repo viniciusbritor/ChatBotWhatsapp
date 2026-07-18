@@ -2,12 +2,13 @@
 import os
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
 DATA_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "nicknames.json")
+BRT = timezone(timedelta(hours=-3))
 _builtin_dict: Optional[Dict[str, List[str]]] = None
 
 FORBIDDEN_NICKNAMES = {
@@ -114,7 +115,7 @@ async def set_consent(
         "name": _normalize_name(name),
         "nickname": nickname,
         "accepted": accepted,
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(BRT).isoformat(),
     }
 
     try:

@@ -28,7 +28,7 @@ from core.escalation import compute_confidence_score
 from agent_loader import start_loader, stop_loader, list_agents, list_skills, list_tools, get_agent
 from agent_loader import force_reload, upsert_agent, delete_agent, upsert_skill, upsert_tool
 from agent_loader import get_user, save_user, list_users
-from orchestrator import orchestrate, get_recent_interactions
+from orchestrator import orchestrate, get_recent_interactions, drain_indexing_tasks
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
@@ -55,6 +55,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    await drain_indexing_tasks()
     stop_loader()
     logger.info("agents_runtime shutting down")
 
@@ -104,9 +105,9 @@ async def chat(request: Request):
         {
             "instance": "jennifer",
             "phone": "+5511966830020",
-            "text": "Oi",
+            "text": "Oi ou ausente quando houver audio",
             "sender_name": "Vinicius",
-            "extra": {"has_audio": false, "audio_url": null, ...}
+            "extra": {"has_audio": false, "audio_base64": null, "audio_url": null, ...}
         }
 
     Response:
@@ -122,22 +123,65 @@ async def chat(request: Request):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"invalid_json: {e}")
 
-    if not body.get("phone") or not body.get("text"):
-        raise HTTPException(status_code=422, detail="phone and text required")
-
     extra = body.get("extra", {})
-    if extra.get("has_audio") and extra.get("audio_base64"):
+    has_audio = bool(extra.get("has_audio"))
+    if not body.get("phone"):
+        raise HTTPException(status_code=422, detail="phone required")
+    if not body.get("text") and not has_audio:
+        raise HTTPException(status_code=422, detail="text or audio required")
+
+    if has_audio:
         try:
-            from core.llm_provider import LLMProvider
-            llm = LLMProvider()
-            text = await llm.transcribe_audio_base64(
-                extra["audio_base64"],
-                extra.get("audio_mimetype", "audio/ogg"),
+            from tools.audio_transcribe import (
+                AudioProcessingError,
+                AudioValidationError,
+                transcribe_base64,
+                transcribe_url,
             )
-            body["text"] = text or "[audio]"
-            logger.info(f"Audio transcribed: {body['text'][:80]}")
+
+            mimetype = extra.get("audio_mimetype", "audio/ogg")
+            if extra.get("audio_base64"):
+                transcript = await transcribe_base64(extra["audio_base64"], mimetype)
+                source = "base64"
+            elif extra.get("audio_url"):
+                transcript = await transcribe_url(extra["audio_url"], mimetype)
+                source = "url"
+            else:
+                raise AudioValidationError("audio_payload_missing")
+            body["text"] = mask_pii(transcript)
+            extra["audio_transcribed"] = True
+            extra["audio_source"] = source
+            body["extra"] = extra
+            logger.info("Audio transcribed locally: source=%s chars=%s", source, len(body["text"]))
+        except (AudioValidationError, AudioProcessingError) as e:
+            logger.warning("Audio transcription rejected: code=%s", str(e))
+            if not body.get("text"):
+                reply = "Nao consegui processar esse audio com seguranca. Pode reenviar ou mandar a mensagem em texto?"
+                return JSONResponse(content={
+                    "reply": reply,
+                    "delay_ms": calculate_delay_ms(reply),
+                    "presence": "paused",
+                    "metadata": {
+                        "agent_id": "audio-transcriber",
+                        "response_identity": "Jennifer",
+                        "error": "audio_transcription_failed",
+                        "reason": str(e),
+                    },
+                })
         except Exception as e:
-            logger.warning(f"Audio transcription failed: {e}")
+            logger.error("Audio transcription failed: error_type=%s", type(e).__name__)
+            if not body.get("text"):
+                reply = "Nao consegui transcrever esse audio agora. Pode tentar novamente ou enviar em texto?"
+                return JSONResponse(content={
+                    "reply": reply,
+                    "delay_ms": calculate_delay_ms(reply),
+                    "presence": "paused",
+                    "metadata": {
+                        "agent_id": "audio-transcriber",
+                        "response_identity": "Jennifer",
+                        "error": "audio_transcription_unavailable",
+                    },
+                })
 
     result = await orchestrate(body)
 
@@ -198,6 +242,28 @@ async def admin_agents_post(request: Request):
 async def admin_agents_list():
     """List all agents (Portal proxy)."""
     return JSONResponse(content={"agents": list_agents()})
+
+
+@app.get("/admin/agents/status")
+async def admin_agents_status(request: Request):
+    from core.agent_status import build_agent_inventory
+
+    instance = request.query_params.get("instance", "jennifer")
+    phone = request.query_params.get("phone")
+    return JSONResponse(content=build_agent_inventory(instance=instance, phone=phone))
+
+
+@app.get("/admin/agents/{agent_id}/status")
+async def admin_agent_status(agent_id: str, request: Request):
+    from core.agent_status import build_agent_inventory
+
+    instance = request.query_params.get("instance", "jennifer")
+    phone = request.query_params.get("phone")
+    inventory = build_agent_inventory(instance=instance, phone=phone)
+    agent = next((item for item in inventory["agents"] if item["agent_id"] == agent_id), None)
+    if not agent:
+        raise HTTPException(status_code=404, detail="agent_not_found")
+    return JSONResponse(content={"generated_at": inventory["generated_at"], "agent": agent})
 
 
 @app.get("/admin/agents/{agent_id}")
@@ -348,14 +414,16 @@ async def admin_knowledge_post(request: Request):
         raise HTTPException(status_code=422, detail="titulo and conteudo required")
 
     try:
-        from core.rag import index_shared_document, embed_query
-        emb_test = await embed_query(titulo + " " + conteudo[:500])
+        from core.rag import EMBEDDING_DIM, SCHEMA_VERSION, index_shared_document
         doc_id = await index_shared_document(titulo, conteudo, categoria)
         return JSONResponse(content={
             "status": "ok",
             "doc_id": doc_id,
-            "embedding_dim": len(emb_test) if emb_test else 0,
+            "embedding_dim": EMBEDDING_DIM,
+            "schema_version": SCHEMA_VERSION,
         })
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -587,40 +655,39 @@ subgraph WHATSAPP["WhatsApp"]
     USER["Usuario / Grupos"]
 end
 subgraph PROXY["Whatsapp-Agente"]
-    WEBHOOK["POST /webhook\\\\nG1-G6 guardrails"]
+    EVO["Evolution API"]
+    WEBHOOK["POST /webhook\\nG1-G6 guardrails"]
 end
-subgraph ORCHESTRATOR["Jennifer Orchestrator\\\\ngemini-2.5-flash"]
-    INTENT["detect_intent()"]
-    ROUTE["resolve_agent()"]
+subgraph ORCHESTRATOR["Jennifer Orchestrator\\nMiniMax M3"]
+    INTENT["detect_intent"]
+    ROUTE["resolve_agent"]
 end
-subgraph MANAGERS["4 Managers"]
-    CAL["Calendar\\\\nlist_events, create, update"]
-    DRV["Drive\\\\nsearch, upload, list"]
-    EML["Email\\\\nsearch_messages, send"]
-    WEB["Web\\\\nserper_search"]
+subgraph MANAGERS["4 Managers internos"]
+    CAL["Calendar\\nlist, create, update"]
+    DRV["Drive\\nsearch, upload, list"]
+    EML["Email\\nsearch, send"]
+    WEB["Web\\nSerper search"]
 end
-subgraph LLMS["LLM Cascade"]
-    GEM["1. Gemini 2.5 Flash\\\\nVertex AI ADC - 3-8s"]
-    DS["2. DeepSeek V4 Flash\\\\n5-15s"]
-    DSP["3. DeepSeek V4 Pro"]
-    NV["4-5. NVIDIA NIM"]
-    MM["6. MiniMax M3"]
+subgraph LLMS["LLM Cascade sem Gemini"]
+    MMHS["1. MiniMax M2.7 Highspeed"]
+    MM["2. MiniMax M3"]
+    DS["3. DeepSeek V4 Flash"]
 end
 
 USER --> EVO --> WEBHOOK --> ORCHESTRATOR
 ORCHESTRATOR --> INTENT --> ROUTE
-ROUTE -->|calendar| CAL
-ROUTE -->|drive| DRV
-ROUTE -->|email| EML
-ROUTE -->|web| WEB
-CAL --> GEM
-DRV --> GEM
-EML --> GEM
-WEB --> GEM
-GEM -->|fallback| DS -->|fallback| DSP -->|fallback| NV -->|fallback| MM
+ROUTE -->|"calendar"| CAL
+ROUTE -->|"drive"| DRV
+ROUTE -->|"email"| EML
+ROUTE -->|"web"| WEB
+CAL --> MMHS
+DRV --> MMHS
+EML --> MMHS
+WEB --> MMHS
+MMHS -->|"fallback"| MM -->|"fallback"| DS
 
 style ORCHESTRATOR fill:#3b82f6,color:#fff
-style GEM fill:#22c55e,color:#fff
+style MMHS fill:#22c55e,color:#fff
 style WEBHOOK fill:#f59e0b,color:#fff`;
 
     document.getElementById('fluxo-content').innerHTML = `

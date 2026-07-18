@@ -12,7 +12,6 @@ import json
 import time
 import random
 import asyncio
-import base64
 import logging
 from typing import Optional, Dict, Any, List
 
@@ -36,8 +35,6 @@ class LLMProvider:
         self.nvidia_key = get_secret("NVIDIA_API_KEY")
         self.minimax_key = get_secret("MINIMAX_API_KEY")
 
-        self.gemini_project = os.getenv("GCP_PROJECT") or os.getenv("GCLOUD_PROJECT", "coherence-ominichannel-fs")
-        self.gemini_location = os.getenv("GEMINI_LOCATION", "us-central1")
         self.deepseek_base = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
         self.nvidia_base = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
         self.minimax_base = os.getenv(
@@ -47,18 +44,10 @@ class LLMProvider:
 
     def is_available(self) -> bool:
         """Check if at least one provider is configured."""
-        return bool(self.gemini_available() or self.deepseek_key or self.nvidia_key or self.minimax_key)
+        return bool(self.deepseek_key or self.nvidia_key or self.minimax_key)
 
     def gemini_available(self) -> bool:
-        """Vertex AI usa ADC — disponivel se GCP_PROJECT ou ADC configurado."""
-        if self.gemini_project and self.gemini_project not in ("", "demo-project"):
-            return True
-        try:
-            import google.auth
-            creds, project = google.auth.default()
-            return bool(project)
-        except Exception:
-            return False
+        return False
 
     def _backoff_sleep(self, attempt: int, base: float = 1.0, cap: float = 30.0):
         """Exponential backoff with jitter."""
@@ -217,11 +206,10 @@ class LLMProvider:
     def _build_cascade_providers(self, model: str, skip_gemini: bool = False):
         """Build interleaved cascade list, skipping providers without keys.
 
-        Cascade order (4 provedores essenciais):
-        1. MiniMax M2.7-highspeed (primario texto, ~100tps)
-        2. MiniMax M3 (fallback texto + audio STT)
-        3. Gemini 2.5 Flash (fallback texto + audio)
-        4. DeepSeek V4 Flash (ultimo recurso)
+        Cascade order:
+        1. MiniMax M2.7-highspeed
+        2. MiniMax M3
+        3. DeepSeek V4 Flash
         """
         providers = []
 
@@ -229,8 +217,6 @@ class LLMProvider:
             providers.append(("minimax-hs", "MiniMax-M2.7-highspeed", "_call_minimax", "MiniMax-M2.7-highspeed"))
         if self.minimax_key:
             providers.append(("minimax", self.minimax_model, "_call_minimax", self.minimax_model))
-        if self.gemini_available() and not skip_gemini:
-            providers.append(("gemini", "gemini-2.5-flash", "_call_gemini", "gemini-2.5-flash"))
         if self.deepseek_key:
             providers.append(("deepseek", "deepseek-v4-flash", "_call_deepseek", "deepseek-v4-flash"))
 
@@ -411,9 +397,7 @@ class LLMProvider:
 
         for attempt_idx, (pname, pmodel, method_name, call_model) in enumerate(cascade):
             try:
-                if method_name == "_call_gemini":
-                    data = await self._call_gemini_raw(call_model, payload)
-                elif method_name == "_call_deepseek":
+                if method_name == "_call_deepseek":
                     data = await self._call_deepseek_raw(call_model, payload)
                 elif method_name == "_call_nvidia":
                     data = await self._call_nvidia_raw(call_model, payload)
@@ -430,172 +414,28 @@ class LLMProvider:
         raise LLMError(f"all_providers_failed")
 
     async def transcribe_audio_base64(self, audio_b64: str, mimetype: str = "audio/ogg") -> str:
-        """STT: audio base64 direto → Gemini Flash (inline_data). Zero download."""
-        if not audio_b64 or not self.gemini_available():
-            return "[audio]"
+        from tools.audio_transcribe import transcribe_base64
+
         try:
-            return await self._stt_gemini(audio_b64, mimetype)
-        except Exception as e:
-            logger.warning(f"Gemini STT failed: {e}")
+            return await transcribe_base64(audio_b64, mimetype)
+        except Exception as exc:
+            logger.warning("Local Whisper STT failed: %s", type(exc).__name__)
             return "[audio]"
 
     async def transcribe_audio(self, audio_url: str, mimetype: str = "audio/ogg") -> str:
-        """STT: download audio from CDN → Gemini Flash (único com inline_data audio)."""
-        import httpx as _httpx
-        audio_bytes = b""
+        from tools.audio_transcribe import transcribe_url
+
         try:
-            async with _httpx.AsyncClient(timeout=30) as client:
-                resp = await client.get(audio_url)
-                resp.raise_for_status()
-                audio_bytes = resp.content
-        except Exception as e:
-            logger.warning(f"Audio download failed: {e}")
+            return await transcribe_url(audio_url, mimetype)
+        except Exception as exc:
+            logger.warning("Local Whisper URL STT failed: %s", type(exc).__name__)
             return "[audio]"
-
-        if not audio_bytes:
-            return "[audio]"
-
-        audio_b64 = base64.b64encode(audio_bytes).decode()
-
-        if self.gemini_available():
-            try:
-                return await self._stt_gemini(audio_b64, mimetype)
-            except Exception as e:
-                logger.warning(f"Gemini STT failed: {e}")
-
-        return "[audio]"
 
     async def _stt_gemini(self, audio_b64: str, mimetype: str) -> str:
-        """Gemini Flash STT via multimodal (inline_data)."""
-        import google.auth
-        import google.auth.transport.requests
-        creds, project = google.auth.default()
-        project = project or self.gemini_project
-        creds.refresh(google.auth.transport.requests.Request())
-
-        url = (
-            f"https://{self.gemini_location}-aiplatform.googleapis.com/v1/"
-            f"projects/{project}/locations/{self.gemini_location}/"
-            "publishers/google/models/gemini-2.5-flash:generateContent"
-        )
-        headers = {"Authorization": f"Bearer {creds.token}", "Content-Type": "application/json"}
-        payload = {
-            "contents": [{"role": "user", "parts": [
-                {"text": "Transcreva este audio em portugues brasileiro. Responda APENAS com a transcricao."},
-                {"inline_data": {"mime_type": mimetype or "audio/ogg", "data": audio_b64}},
-            ]}],
-        }
-        async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(url, headers=headers, json=payload)
-        data = resp.json()
-        candidates = data.get("candidates", [])
-        if candidates:
-            parts = candidates[0].get("content", {}).get("parts", [])
-            text = "".join(p.get("text", "") for p in parts)
-            return text.strip() or "[audio]"
-        return "[audio]"
+        raise LLMError("gemini_disabled_by_guardrail")
 
     async def _call_gemini_raw(self, model: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Call Gemini 2.5 Flash via Vertex AI (ADC, sem API key)."""
-        import google.auth
-        import google.auth.transport.requests
-
-        creds, project = google.auth.default()
-        project = project or self.gemini_project
-        creds.refresh(google.auth.transport.requests.Request())
-
-        url = (
-            f"https://{self.gemini_location}-aiplatform.googleapis.com/v1/"
-            f"projects/{project}/locations/{self.gemini_location}/"
-            f"publishers/google/models/{model}:generateContent"
-        )
-        headers = {
-            "Authorization": f"Bearer {creds.token}",
-            "Content-Type": "application/json",
-        }
-        gemini_payload = self._to_gemini_format(payload)
-        async with httpx.AsyncClient(timeout=300) as client:
-            resp = await client.post(url, headers=headers, json=gemini_payload)
-        if resp.status_code == 429:
-            raise LLMError("gemini_quota_exceeded")
-        if resp.status_code >= 400:
-            raise LLMError(f"gemini_error_{resp.status_code}")
-        data = resp.json()
-        return self._from_gemini_response(data)
-
-    def _to_gemini_format(self, openai_payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Converte payload OpenAI → Gemini format."""
-        gemini = {}
-        messages = openai_payload.get("messages", [])
-        system_content = ""
-        contents = []
-        for msg in messages:
-            role = msg.get("role", "")
-            content = msg.get("content", "")
-            if role == "system":
-                system_content = content
-            elif role == "user":
-                contents.append({"role": "user", "parts": [{"text": content}]})
-            elif role == "assistant":
-                parts = []
-                if content:
-                    parts.append({"text": content})
-                for tc in msg.get("tool_calls", []):
-                    fn = tc.get("function", {})
-                    parts.append({"functionCall": {"name": fn.get("name", ""), "args": json.loads(fn.get("arguments", "{}")) if isinstance(fn.get("arguments", ""), str) else fn.get("arguments", {})}})
-                contents.append({"role": "model", "parts": parts})
-            elif role == "tool":
-                name = msg.get("name", "")
-                contents.append({"role": "function", "parts": [{"functionResponse": {"name": name, "response": {"content": str(content)}}}]})
-        if system_content:
-            gemini["systemInstruction"] = {"parts": [{"text": system_content}]}
-        gemini["contents"] = contents
-
-        tools = openai_payload.get("tools", [])
-        if tools:
-            gemini_tools = []
-            for t in tools:
-                fn = t.get("function", {})
-                gemini_tools.append({"functionDeclarations": [{
-                    "name": fn.get("name", ""),
-                    "description": fn.get("description", ""),
-                    "parameters": fn.get("parameters", {}),
-                }]})
-            gemini["tools"] = gemini_tools
-
-        gen_config = {}
-        if openai_payload.get("temperature"):
-            gen_config["temperature"] = openai_payload["temperature"]
-        if openai_payload.get("max_tokens"):
-            gen_config["maxOutputTokens"] = openai_payload["max_tokens"]
-        if gen_config:
-            gemini["generationConfig"] = gen_config
-
-        return gemini
-
-    def _from_gemini_response(self, gemini_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Converte resposta Gemini → formato OpenAI-compatible."""
-        candidates = gemini_data.get("candidates", [])
-        if not candidates:
-            raise LLMError("gemini_empty_response")
-        candidate = candidates[0]
-        content_obj = candidate.get("content", {})
-        parts = content_obj.get("parts", [])
-        text = ""
-        tool_calls = []
-        for part in parts:
-            if "text" in part:
-                text += part["text"]
-            if "functionCall" in part:
-                fc = part["functionCall"]
-                tool_calls.append({
-                    "id": fc.get("name", "call_0"),
-                    "type": "function",
-                    "function": {"name": fc["name"], "arguments": json.dumps(fc.get("args", {}))},
-                })
-        return {
-            "choices": [{"message": {"content": text, "tool_calls": tool_calls if tool_calls else None}}]
-        }
+        raise LLMError("gemini_disabled_by_guardrail")
 
     async def _call_deepseek_raw(self, model: str, payload: Dict[str, Any]) -> str:
         if not self.deepseek_key:

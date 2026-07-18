@@ -5,7 +5,9 @@ os.environ["GCP_PROJECT"] = "coherence-ominichannel-fs"
 
 from google.cloud import firestore
 db = firestore.Client(project="coherence-ominichannel-fs")
-now = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
+datetime_module = __import__("datetime")
+BRT = datetime_module.timezone(datetime_module.timedelta(hours=-3))
+now = datetime_module.datetime.now(BRT).isoformat()
 
 # === CONFIG/ROUTING ===
 routing_rules = [
@@ -15,7 +17,7 @@ routing_rules = [
     {"agent_id": "manager-calendar", "priority": 4, "enabled": True, "keywords": ["agenda", "reuniao", "evento", "compromisso", "lembrete", "calendario", "disponivel", "semana que vem", "proxima semana"]},
     {"agent_id": "manager-drive", "priority": 5, "enabled": True, "keywords": ["drive", "documento", "arquivo", "pasta", "upload", "omnichannel", "baixar", "encontrar arquivo"]},
     {"agent_id": "manager-email", "priority": 6, "enabled": True, "keywords": ["email", "e-mail", "caixa de entrada", "gmail", "ler email", "enviar email", "ultimos emails"]},
-    {"agent_id": "manager-web", "priority": 7, "enabled": True, "keywords": ["pesquisar", "buscar na internet", "procure por", "o que e", "quem e", "noticia", "significa"]},
+    {"agent_id": "manager-web", "priority": 7, "enabled": True, "keywords": ["pesquisar", "buscar na internet", "busque na internet", "procure na web", "pesquise na web", "noticia atual", "noticias atuais"]},
     {"agent_id": "agent-youtube", "priority": 8, "enabled": True, "keywords": ["youtube", "vídeo", "video", "tutorial", "aula"]},
     {"agent_id": "agent-locomocao", "priority": 9, "enabled": True, "keywords": ["uber", "rota", "tempo", "distância", "distancia", "chegar", "trânsito", "transito", "endereço", "endereco", "onde fica", "perto de", "restaurante", "farmácia", "farmacia", "posto"]},
 ]

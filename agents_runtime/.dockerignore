@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.git/
+.gitignore
+.env
+.env.*
+secret_*.txt
+*token*.json
+*credentials*.json
+logs/
+tests/
+whisper_models/

@@ -10,11 +10,28 @@ import logging
 from typing import Dict, Any, Callable, Awaitable
 
 from tools import google_calendar, google_drive, google_gmail, web_search, nickname
-from tools import locomotion, youtube
+from tools import locomotion, youtube, group
 
 logger = logging.getLogger(__name__)
 
 ToolFn = Callable[..., Awaitable[Dict[str, Any]]]
+
+
+async def _rag_search_knowledge(**kwargs):
+    from core.rag import search_knowledge
+
+    return await search_knowledge(kwargs.get("query", ""), kwargs.get("limit", 5))
+
+
+async def _rag_search_legal_knowledge(**kwargs):
+    from core.rag import search_legal_knowledge
+
+    return await search_legal_knowledge(
+        kwargs.get("phone", ""),
+        kwargs.get("query", ""),
+        kwargs.get("k", 5),
+    )
+
 
 TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
     "calendar.list_events": {
@@ -332,8 +349,20 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
             "required": ["query"],
         },
     },
+    "group.get_info": {
+        "function": group.get_group_info,
+        "implementation": "group",
+        "description": "Retorna dados do grupo e contagem de membros confirmados.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "group_jid": {"type": "string", "description": "JID do grupo WhatsApp"},
+            },
+            "required": ["group_jid"],
+        },
+    },
     "rag.search_knowledge": {
-        "function": lambda **kwargs: __import__("asyncio").run(__import__("core.rag").search_knowledge(kwargs.get("query", ""), kwargs.get("limit", 5))),
+        "function": _rag_search_knowledge,
         "implementation": "rag",
         "description": "Busca semantica na base de conhecimento publica (leis, editais, livros).",
         "parameters_schema": {
@@ -346,7 +375,7 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
         },
     },
     "rag.search_legal_knowledge": {
-        "function": lambda **kwargs: __import__("asyncio").run(__import__("core.rag").search_legal_knowledge(kwargs.get("phone", ""), kwargs.get("query", ""), kwargs.get("k", 5))),
+        "function": _rag_search_legal_knowledge,
         "implementation": "rag",
         "description": "Busca semantica em legislacao (leis penais, editais) no banco privado do agente.",
         "parameters_schema": {

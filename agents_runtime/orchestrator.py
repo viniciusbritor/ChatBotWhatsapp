@@ -14,9 +14,11 @@ This is a simplified orchestrator (not full Agno Team) for clarity and testabili
 import os
 import re
 import json
+import copy
 import logging
 import time
 import asyncio
+import unicodedata
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, List
 
@@ -26,7 +28,7 @@ from core.escalation import compute_confidence_score, should_escalate
 from core.delay_calculator import calculate_delay_ms, calculate_presence
 from core.commands import detect_command, apply_command
 from tool_registry import TOOL_REGISTRY, get_tool, get_tool_schema
-from agent_loader import get_agent, get_skill, list_skills, get_user, get_config, has_nickname
+from agent_loader import get_agent, get_skill, list_agents, list_skills, get_user, get_config, has_nickname
 from core.audit import log_action
 
 logger = logging.getLogger(__name__)
@@ -34,7 +36,126 @@ logger = logging.getLogger(__name__)
 _interaction_history: List[Dict[str, Any]] = []
 MAX_HISTORY = 20
 _response_cache: Dict[str, Dict[str, Any]] = {}
-CACHE_TTL_SEC = 300
+CACHE_TTL_SEC = int(os.getenv("RESPONSE_IDEMPOTENCY_TTL_SEC", "86400"))
+_indexing_tasks: set = set()
+
+
+def _finish_indexing_task(task: asyncio.Task) -> None:
+    _indexing_tasks.discard(task)
+    if task.cancelled():
+        logger.warning("RAG indexing task cancelled")
+        return
+    exception = task.exception()
+    if exception:
+        logger.error("RAG indexing task failed: %s", exception)
+
+
+def _schedule_indexing(coroutine: Any) -> asyncio.Task:
+    task = asyncio.create_task(coroutine)
+    _indexing_tasks.add(task)
+    task.add_done_callback(_finish_indexing_task)
+    return task
+
+
+async def drain_indexing_tasks(timeout: float = 15.0) -> None:
+    pending = list(_indexing_tasks)
+    if not pending:
+        return
+    _, unfinished = await asyncio.wait(pending, timeout=timeout)
+    if unfinished:
+        logger.warning("RAG indexing drain timed out: pending=%s", len(unfinished))
+
+
+def _message_id(payload: Dict[str, Any]) -> Optional[str]:
+    extra = payload.get("extra", {})
+    return (
+        payload.get("message_id")
+        or extra.get("message_id")
+        or extra.get("messageId")
+        or (extra.get("key") or {}).get("id")
+    )
+
+
+def _conversation_id(payload: Dict[str, Any]) -> str:
+    extra = payload.get("extra", {})
+    return str(extra.get("remote_jid") or extra.get("conversation_id") or payload.get("phone", ""))
+
+
+def _idempotency_key(payload: Dict[str, Any]) -> Optional[str]:
+    message_id = _message_id(payload)
+    if not message_id:
+        return None
+    raw = f"{payload.get('instance', 'jennifer')}:{_conversation_id(payload)}:{message_id}"
+    return __import__("hashlib").sha256(raw.encode("utf-8")).hexdigest()
+
+
+async def _finalize_orchestration(
+    payload: Dict[str, Any],
+    masked_text: str,
+    sender_name: str,
+    result: Dict[str, Any],
+    path: List[Dict[str, Any]],
+    cache_key: Optional[str],
+) -> Dict[str, Any]:
+    metadata = result.setdefault("metadata", {})
+    metadata.setdefault("response_identity", "Jennifer")
+    path.append({
+        "step": 3,
+        "phase": "result",
+        "agent_id": metadata.get("agent_id"),
+        "model": metadata.get("model_used"),
+        "escalated": metadata.get("escalated"),
+        "confidence": metadata.get("confidence_score"),
+        "tool_rounds": metadata.get("tool_rounds", 0),
+        "tool_calls": metadata.get("tool_calls", []),
+        "response_identity": metadata.get("response_identity"),
+    })
+    phone = payload.get("phone", "")
+    _interaction_history.append({
+        "timestamp": datetime.now(timezone(timedelta(hours=-3))).isoformat(),
+        "phone": phone,
+        "text_preview": masked_text[:80],
+        "sender": mask_pii(sender_name),
+        "path": path,
+        "reply_preview": mask_pii(result.get("reply", ""))[:80],
+    })
+    if len(_interaction_history) > MAX_HISTORY:
+        _interaction_history.pop(0)
+
+    if cache_key and not metadata.get("error"):
+        cached_result = copy.deepcopy(result)
+        cached_result["ts"] = int(time.time())
+        _response_cache[cache_key] = cached_result
+        for key in list(_response_cache.keys()):
+            if int(time.time()) - _response_cache.get(key, {}).get("ts", 0) > CACHE_TTL_SEC:
+                del _response_cache[key]
+
+    message_id = _message_id(payload)
+    conversation_id = _conversation_id(payload)
+    agent_id = metadata.get("agent_id", "jennifier")
+    _schedule_indexing(_index_message(
+        phone,
+        masked_text,
+        "in",
+        message_id=message_id,
+        conversation_id=conversation_id,
+        turn_id=message_id,
+        agent_id="user",
+        response_identity="Usuario",
+    ))
+    reply_text = result.get("reply", "")
+    if reply_text:
+        _schedule_indexing(_index_message(
+            phone,
+            reply_text,
+            "out",
+            message_id=f"{message_id}:reply" if message_id else None,
+            conversation_id=conversation_id,
+            turn_id=message_id,
+            agent_id=agent_id,
+            response_identity="Jennifer",
+        ))
+    return result
 
 
 def get_recent_interactions(limit: int = 5) -> List[Dict[str, Any]]:
@@ -70,42 +191,69 @@ EMAIL_KEYWORDS = [
     "ler email", "enviar email", "ultimos emails",
 ]
 WEB_KEYWORDS = [
-    "pesquisar", "buscar na internet", "procure por",
-    "o que e", "quem e", "noticia", "significa",
-    "busca pra mim", "pesquisa sobre",
+    "pesquisar", "buscar na internet", "busque na internet", "procure na web",
+    "pesquise na web", "noticia atual", "noticias atuais", "pesquisa sobre",
 ]
+RUNTIME_STATUS_KEYWORDS = [
+    "quantos agentes", "quais agentes", "agentes funcionando", "agentes ativos",
+    "agentes rodando", "status dos agentes", "o que esta rodando", "o que está rodando",
+    "listar agentes", "liste os agentes",
+]
+AMBIGUOUS_WEB_KEYWORDS = {"o que e", "quem e", "significa"}
 INTIMACY_KEYWORDS = [
     "me chame de", "pode me chamar de", "meu apelido",
     "meu nome e", "meu nome é", "como devo te chamar",
 ]
 
 
+def _normalize_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", str(text or ""))
+    without_accents = "".join(character for character in normalized if not unicodedata.combining(character))
+    return re.sub(r"\s+", " ", without_accents.lower()).strip()
+
+
+def _matches_keyword(text: str, keyword: str) -> bool:
+    normalized_keyword = _normalize_text(keyword)
+    if not normalized_keyword:
+        return False
+    pattern = rf"(?<!\w){re.escape(normalized_keyword)}(?!\w)"
+    return re.search(pattern, text) is not None
+
+
 def _get_routing_rules() -> List[Dict[str, Any]]:
-    """Load routing rules from Firestore config/routing."""
     config = get_config("routing")
-    if config and config.get("rules"):
-        return [r for r in config["rules"] if r.get("enabled", True)]
-    return []
+    rules = []
+    for source in (config or {}).get("rules", []):
+        if not source.get("enabled", True):
+            continue
+        rule = dict(source)
+        if rule.get("agent_id") == "manager-web":
+            rule["keywords"] = [
+                keyword for keyword in rule.get("keywords", [])
+                if _normalize_text(keyword) not in AMBIGUOUS_WEB_KEYWORDS
+            ]
+        rules.append(rule)
+    return rules
 
 
 def _detect_intent(text: str) -> Dict[str, Any]:
-    """Detect special intents using hardcoded + Firestore keywords."""
-    text_lower = text.lower()
+    normalized = _normalize_text(text)
+    explicit_url = re.search(r"https?://\S+", str(text or ""), flags=re.IGNORECASE) is not None
     intent = {
-        "is_gross": any(kw in text_lower for kw in GROSS_KEYWORDS),
-        "is_assault_related": any(kw in text_lower for kw in ASSAULT_KEYWORDS),
-        "is_correction": any(kw in text_lower for kw in CORRECTION_KEYWORDS),
-        "is_calendar": any(kw in text_lower for kw in CALENDAR_KEYWORDS),
-        "is_drive": any(kw in text_lower for kw in DRIVE_KEYWORDS),
-        "is_email": any(kw in text_lower for kw in EMAIL_KEYWORDS),
-        "is_web_search": any(kw in text_lower for kw in WEB_KEYWORDS),
-        "is_intimacy": any(kw in text_lower for kw in INTIMACY_KEYWORDS),
+        "is_runtime_status": any(_matches_keyword(normalized, keyword) for keyword in RUNTIME_STATUS_KEYWORDS),
+        "is_gross": any(_matches_keyword(normalized, keyword) for keyword in GROSS_KEYWORDS),
+        "is_assault_related": any(_matches_keyword(normalized, keyword) for keyword in ASSAULT_KEYWORDS),
+        "is_correction": any(_matches_keyword(normalized, keyword) for keyword in CORRECTION_KEYWORDS),
+        "is_calendar": any(_matches_keyword(normalized, keyword) for keyword in CALENDAR_KEYWORDS),
+        "is_drive": any(_matches_keyword(normalized, keyword) for keyword in DRIVE_KEYWORDS),
+        "is_email": any(_matches_keyword(normalized, keyword) for keyword in EMAIL_KEYWORDS),
+        "is_web_search": explicit_url or any(_matches_keyword(normalized, keyword) for keyword in WEB_KEYWORDS),
+        "is_intimacy": any(_matches_keyword(normalized, keyword) for keyword in INTIMACY_KEYWORDS),
     }
-    rules = _get_routing_rules()
-    for rule in rules:
+    for rule in _get_routing_rules():
         agent_id = rule.get("agent_id", "")
         keywords = rule.get("keywords", [])
-        if any(kw in text_lower for kw in keywords):
+        if any(_matches_keyword(normalized, keyword) for keyword in keywords):
             intent[f"matched_{agent_id}"] = True
     return intent
 
@@ -149,14 +297,14 @@ def _select_orchestrator_agent(instance: str) -> Optional[str]:
 
 
 def _iter_agents():
-    """Helper to iterate over agents cache (avoids circular import)."""
-    from agent_loader import _agents_cache
-    for agent_id, agent in _agents_cache.items():
-        yield agent_id, agent
+    for agent in list_agents():
+        yield agent.get("id", ""), agent
 
 
 def _resolve_agent_for_intent(intent: Dict[str, Any], instance: str) -> Optional[str]:
     """Resolve which agent should handle this intent (hardcoded + dynamic from Firestore)."""
+    if intent.get("is_runtime_status"):
+        return "runtime-status"
     if intent["is_gross"] or intent["is_assault_related"]:
         return "agent-morality"
     if intent["is_correction"]:
@@ -372,6 +520,16 @@ def _has_real_data(prefetch_text: str) -> bool:
     return not any(m in text_lower for m in empty_signals)
 
 ACCEPTANCE_KEYWORDS = {"sim", "pode", "ok", "claro", "aceito", "perfeito", "otimo", "pode sim"}
+REJECTION_KEYWORDS = {"nao", "não", "prefiro nao", "prefiro não", "recuso", "deixa"}
+
+
+def _short_confirmation(text: str) -> Optional[bool]:
+    normalized = _normalize_text(text).strip(" .,!?:;")
+    if normalized in {_normalize_text(value) for value in ACCEPTANCE_KEYWORDS}:
+        return True
+    if normalized in {_normalize_text(value) for value in REJECTION_KEYWORDS}:
+        return False
+    return None
 
 
 def _get_db():
@@ -416,52 +574,44 @@ def _get_conversation_history(phone: str, limit: int = 10) -> str:
 
 
 async def _search_memory(phone: str, query: str, limit: int = 5) -> str:
-    """RAG: Busca memorias similares no Firestore Vector (conversation-memory-{phone})."""
-    db = _get_db()
-    if not db:
-        return ""
     try:
-        from core.rag import embed_query
-        from google.cloud.firestore_v1.vector import Vector
-        embedding = await embed_query(query)
-        try:
-            results = db.collection(f"conversation-memory-{phone}")\
-                .find_neighbors("vector_embedding", Vector(embedding),
-                                distance_measure="COSINE", limit=limit)
-            docs = []
-            for doc in results:
-                d = doc[0].to_dict() if isinstance(doc, tuple) else doc.to_dict()
-                text = d.get("text", "")[:100]
-                direction = d.get("direction", "in")
-                prefix = "Usuario" if direction == "in" else "Jennifer"
-                docs.append(f"- {prefix}: {text}")
-            return "\n".join(docs) if docs else ""
-        except AttributeError:
-            return ""
-    except Exception as e:
-        logger.warning(f"RAG search failed: {e}")
+        from core.rag import search_conversation_memory
+
+        results = await search_conversation_memory(phone, query, limit)
+        memories = []
+        for result in results:
+            text = result.get("text", "")[:300]
+            direction = result.get("direction", "in")
+            identity = "Usuario" if direction == "in" else result.get("response_identity", "Jennifer")
+            memories.append(f"- {identity}: {text}")
+        return "\n".join(memories)
+    except Exception as exc:
+        logger.warning("RAG search failed: %s", exc)
         return ""
 
 
-async def _index_message(phone: str, text: str, direction: str):
-    """RAG: Indexa mensagem no Firestore Vector para busca futura."""
-    if not text or len(text) < 3:
-        return
-    db = _get_db()
-    if not db:
-        return
+async def _index_message(phone: str, text: str, direction: str, **metadata: Any) -> Dict[str, Any]:
     try:
-        from core.rag import embed_query
-        from google.cloud.firestore_v1.vector import Vector
-        embedding = await embed_query(text)
-        db.collection(f"conversation-memory-{phone}").add({
-            "text": text[:200],
-            "direction": direction,
-            "ts": int(time.time()),
-            "vector_embedding": Vector(embedding),
-        })
-    except Exception as e:
-        logger.debug(f"RAG index skipped: {e}")
+        from core.rag import index_conversation_message
+
+        result = await index_conversation_message(
+            phone=phone,
+            text=text,
+            direction=direction,
+            message_id=metadata.get("message_id"),
+            conversation_id=metadata.get("conversation_id"),
+            turn_id=metadata.get("turn_id"),
+            agent_id=metadata.get("agent_id"),
+            response_identity=metadata.get("response_identity", "Jennifer"),
+        )
+        if result.get("status") == "indexed":
+            logger.info("RAG message indexed: direction=%s doc_id=%s", direction, result.get("doc_id"))
+        else:
+            logger.warning("RAG message not indexed: direction=%s reason=%s", direction, result.get("reason"))
+        return result
+    except Exception as exc:
+        logger.error("RAG message indexing failed: %s", exc)
+        return {"status": "error", "reason": str(exc)}
 
 
 async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -495,42 +645,81 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
     sender_name = payload.get("sender_name", "user")
     extra = payload.get("extra", {})
 
-    cache_key = f"{phone}:{text[:60]}"
-    if cache_key in _response_cache:
+    cache_key = _idempotency_key(payload)
+    if cache_key and cache_key in _response_cache:
         cached = _response_cache[cache_key]
         if int(time.time()) - cached.get("ts", 0) < CACHE_TTL_SEC:
-            logger.info(f"Cache hit for {phone}: {text[:40]}")
-            cached["metadata"]["cached"] = True
-            return cached
+            response = copy.deepcopy(cached)
+            response.pop("ts", None)
+            response.setdefault("metadata", {})["cached"] = True
+            logger.info("Idempotent response cache hit")
+            return response
 
     first_name = _extract_first_name(sender_name)
     payload["first_name"] = first_name
-
     masked_text = mask_pii(text)
+    confirmation = _short_confirmation(masked_text)
 
-    if first_name:
-        text_lower = masked_text.lower().strip()
-        if any(term in text_lower[:20] for term in ACCEPTANCE_KEYWORDS):
-            suggested = _prefetch_nickname(first_name) or _generate_diminutive(first_name)
-            try:
-                import hashlib
-                db = _get_db()
-                if db:
-                    ph = hashlib.sha256(phone.encode()).hexdigest()[:32]
-                    db.collection("apelidos_custom").document(ph).set({
-                        "phone": phone, "accepted": True,
-                        "offered_nickname": suggested, "detected_name": first_name,
-                        "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                    })
-                    logger.info(f"Nickname direct-saved to Firestore: {phone} -> {suggested}")
-            except Exception as e:
-                logger.warning(f"Nickname save failed: {e}")
+    if confirmation is not None:
+        from core.pending_actions import consume_pending_action, get_pending_action
+
+        pending_action = await get_pending_action(phone)
+        if pending_action and pending_action.get("action_type") == "nickname_consent":
+            await consume_pending_action(phone, "nickname_consent")
+            action_payload = pending_action.get("payload", {})
+            name = action_payload.get("first_name") or first_name
+            nickname = action_payload.get("nickname", "")
+            from tools.nickname import set_consent
+
+            consent = await set_consent(phone, name, nickname, confirmation)
+            reply = (
+                f"Combinado, {nickname}! Vou usar esse apelido daqui pra frente."
+                if confirmation
+                else f"Tudo certo, {name}. Vou continuar usando seu primeiro nome."
+            )
+            result = {
+                "reply": reply,
+                "delay_ms": calculate_delay_ms(reply),
+                "presence": calculate_presence(),
+                "metadata": {
+                    "agent_id": "agent-intimacy",
+                    "response_identity": "Jennifer",
+                    "pending_action": "nickname_consent",
+                    "accepted": confirmation,
+                    "consent_recorded": "error" not in consent,
+                },
+            }
+            path = [{"step": 1, "phase": "pending_action", "action": "nickname_consent"}]
+            return await _finalize_orchestration(
+                payload, masked_text, sender_name, result, path, cache_key
+            )
 
     intent = _detect_intent(masked_text)
-    specialist_id = _resolve_agent_for_intent(intent, instance)
+    path = [{"step": 1, "phase": "intent_detect", "details": {key: value for key, value in intent.items() if value}}]
 
-    path = []
-    path.append({"step": 1, "phase": "intent_detect", "details": {k: v for k, v in intent.items() if v}})
+    if intent.get("is_runtime_status"):
+        from core.agent_status import build_agent_inventory, format_inventory_reply
+
+        inventory = build_agent_inventory(instance=instance, phone=phone)
+        reply = format_inventory_reply(inventory)
+        result = {
+            "reply": reply,
+            "delay_ms": calculate_delay_ms(reply),
+            "presence": calculate_presence(),
+            "metadata": {
+                "agent_id": "runtime-status",
+                "route": "deterministic",
+                "response_identity": "Jennifer",
+                "counts": inventory["counts"],
+                "generated_at": inventory["generated_at"],
+            },
+        }
+        path.append({"step": 2, "phase": "runtime_status", "agent": "runtime-status"})
+        return await _finalize_orchestration(
+            payload, masked_text, sender_name, result, path, cache_key
+        )
+
+    specialist_id = _resolve_agent_for_intent(intent, instance)
 
     if _is_personal_intent(intent) and _is_group_message(payload):
         group_jid = extra.get("remote_jid", "") or _extract_group_jid(payload)
@@ -648,6 +837,7 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
             return _error_response(503, "agent_not_found", f"Orchestrator {orchestrator_id} nao encontrado")
         path.append({"step": 2, "phase": "orchestrator", "agent": orchestrator_id, "reason": "default_route"})
 
+        orchestrator = copy.deepcopy(orchestrator)
         if first_name and not has_nickname(phone):
             suggested = _prefetch_nickname(first_name)
             if not suggested:
@@ -658,48 +848,42 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
                 f"1. Cumprimente usando APENAS o primeiro nome '{first_name}'.\n"
                 f"2. Pergunte: 'Posso te chamar de {suggested}?' e aguarde confirmacao.\n"
                 f"3. JAMAIS use apelidos depreciativos, ofensivos ou ironicos.\n"
-                f"4. Se o usuario aceitar ('sim', 'pode'), chame nickname.set_consent(phone, nome, apelido, True).\n"
+                f"4. Nao interprete a resposta futura sem consultar pending_action.\n"
                 f"5. Se ele rejeitar, nao insista."
             )
             orchestrator["system_prompt"] = orchestrator.get("system_prompt", "") + intimacy_context
-            if "nickname.set_consent" not in orchestrator.get("tools", []):
+            if "nickname.get_preferred_name" not in orchestrator.get("tools", []):
                 orchestrator["tools"] = list(orchestrator.get("tools", [])) + [
-                    "nickname.set_consent",
                     "nickname.get_preferred_name",
                 ]
+            from core.pending_actions import set_pending_action
+
+            await set_pending_action(
+                phone,
+                "nickname_consent",
+                {"first_name": first_name, "nickname": suggested},
+            )
 
         result = await _execute_agent(orchestrator, masked_text, payload, extra)
 
-    path.append({"step": 3, "phase": "result", "agent_id": result.get("metadata", {}).get("agent_id"),
-                 "model": result.get("metadata", {}).get("model_used"),
-                 "escalated": result.get("metadata", {}).get("escalated"),
-                 "confidence": result.get("metadata", {}).get("confidence_score"),
-                 "tool_rounds": result.get("metadata", {}).get("tool_rounds", 0),
-                 "tool_calls": result.get("metadata", {}).get("tool_calls", [])})
+    return await _finalize_orchestration(
+        payload, masked_text, sender_name, result, path, cache_key
+    )
 
-    _interaction_history.append({
-        "timestamp": int(time.time()),
-        "phone": phone,
-        "text_preview": masked_text[:80],
-        "sender": sender_name,
-        "path": path,
-        "reply_preview": result.get("reply", "")[:80],
-    })
-    if len(_interaction_history) > MAX_HISTORY:
-        _interaction_history.pop(0)
 
-    if not result.get("metadata", {}).get("error"):
-        _response_cache[cache_key] = {**result, "ts": int(time.time())}
-        for k in list(_response_cache.keys()):
-            if int(time.time()) - _response_cache.get(k, {}).get("ts", 0) > CACHE_TTL_SEC:
-                del _response_cache[k]
-
-    asyncio.create_task(_index_message(phone, masked_text, "in"))
-    reply_text = result.get("reply", "")
-    if reply_text:
-        asyncio.create_task(_index_message(phone, reply_text, "out"))
-
-    return result
+def _normalize_response_identity(text: str) -> str:
+    normalized = str(text or "")
+    replacements = [
+        (r"(?i)\bsou\s+(?:o|a)\s+(?:web|calendar|drive|email)\s+manager\b", "sou a Jennifer"),
+        (r"(?i)\baqui\s+e\s+(?:o|a)\s+(?:web|calendar|drive|email)\s+manager\b", "aqui e a Jennifer"),
+        (r"(?i)\b(?:sua|seu)\s+(?:web|calendar|drive|email)\s+manager\b", "Jennifer"),
+        (r"(?i)\b(?:web|calendar|drive|email)\s+manager\b", "Jennifer"),
+        (r"(?i)\bmanager-(?:web|calendar|drive|email)\b", "Jennifer"),
+        (r"(?i)\bagent-(?:intimacy|learning|morality|rag)\b", "Jennifer"),
+    ]
+    for pattern, replacement in replacements:
+        normalized = re.sub(pattern, replacement, normalized)
+    return normalized
 
 
 async def _execute_agent(
@@ -709,8 +893,18 @@ async def _execute_agent(
     extra: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Execute a specific agent with tool calling loop."""
+    agent_id = agent.get("id", "unknown-agent")
+    from core.agent_status import record_agent_failure, record_agent_success, start_agent_execution
+
+    execution_started = start_agent_execution(agent_id)
     skills_section = _build_skills_section(agent.get("skills", []))
     system_prompt = agent.get("system_prompt", "") + skills_section
+    if agent.get("role") != "orchestrator":
+        system_prompt += (
+            "\n\n[IDENTIDADE EXTERNA OBRIGATORIA]\n"
+            "Voce e um componente interno da Jennifer. Nunca revele nome, ID, role ou arquitetura interna. "
+            "Responda ao usuario sempre na voz da Jennifer e nunca se apresente como Manager ou Specialist."
+        )
 
     phone = payload.get("phone", "")
     history = _get_conversation_history(phone, limit=10)
@@ -751,6 +945,7 @@ async def _execute_agent(
 
     llm = LLMProvider()
     if not llm.is_available():
+        record_agent_failure(agent_id, execution_started, "llm_unavailable")
         return _error_response(503, "llm_unavailable", "Nenhum provedor LLM configurado")
 
     threshold = agent.get("escalation_threshold", -2)
@@ -806,29 +1001,37 @@ async def _execute_agent(
 
         reply_text = result["content"]
         reply_text = re.sub(r'\s*<think>.*?</think>\s*', '', reply_text, flags=re.DOTALL).strip()
+        reply_text = _normalize_response_identity(reply_text)
         delay_ms = calculate_delay_ms(reply_text)
         presence = calculate_presence()
 
         tool_calls_made = _extract_tool_calls(reply_text, available_tools)
+        model_used = result.get("model_used", fast_model)
+        provider = result.get("provider", "")
+        record_agent_success(agent_id, execution_started, model_used, provider)
 
         return {
             "reply": reply_text,
             "delay_ms": delay_ms,
             "presence": presence,
             "metadata": {
-                "agent_id": agent.get("id"),
-                "model_used": result.get("model_used", fast_model),
-                "provider": result.get("provider", ""),
+                "agent_id": agent_id,
+                "executed_agent_id": agent_id,
+                "response_identity": "Jennifer",
+                "model_used": model_used,
+                "provider": provider,
                 "tool_rounds": result.get("tool_rounds", 0),
                 "tool_calls": tool_calls_made,
                 "has_audio": extra.get("has_audio", False),
             },
         }
     except LLMError as e:
-        logger.error(f"LLM cascade failed for agent {agent.get('id')}: {e}")
+        record_agent_failure(agent_id, execution_started, str(e))
+        logger.error(f"LLM cascade failed for agent {agent_id}: {e}")
         return _error_response(503, "llm_unavailable", "Todos provedores LLM falharam.")
     except Exception as e:
-        logger.exception(f"Unexpected error in _execute_agent")
+        record_agent_failure(agent_id, execution_started, str(e))
+        logger.exception("Unexpected error in _execute_agent")
         return _error_response(500, "internal_error", str(e))
 
 
@@ -874,5 +1077,6 @@ def _error_response(status_code: int, error: str, message: str) -> Dict[str, Any
         "metadata": {
             "error": error,
             "status_code": status_code,
+            "response_identity": "Jennifer",
         },
     }

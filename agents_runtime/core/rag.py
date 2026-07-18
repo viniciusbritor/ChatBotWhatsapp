@@ -1,139 +1,282 @@
-"""RAG core - MiniMax embeddings + Firestore Vector search."""
-import os
 import asyncio
 import hashlib
 import logging
-from typing import Optional, Dict, Any, List
+import os
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from core.masker import mask_pii
 from core.secrets import get_secret
 
 logger = logging.getLogger(__name__)
 
+BRT = timezone(timedelta(hours=-3))
 EMBEDDING_MODEL = os.getenv("RAG_EMBEDDING_MODEL", "embo-01")
 EMBEDDING_DIM = int(os.getenv("RAG_EMBEDDING_DIM", "1536"))
-COLLECTION_PREFIX = os.getenv("RAG_COLLECTION_PREFIX", "agente-knowledge-")
+SCHEMA_VERSION = int(os.getenv("RAG_SCHEMA_VERSION", "2"))
+MEMORY_COLLECTION = os.getenv("RAG_MEMORY_COLLECTION", "conversation-memory-v2")
+PRIVATE_COLLECTION = os.getenv("RAG_PRIVATE_COLLECTION", "agent-knowledge-v2")
+SHARED_COLLECTION = os.getenv("RAG_SHARED_COLLECTION", "public-knowledge-v2")
+RETENTION_DAYS = int(os.getenv("RAG_RETENTION_DAYS", "90"))
+EMBEDDING_CONCURRENCY = int(os.getenv("RAG_EMBEDDING_CONCURRENCY", "4"))
+
+
+def _now_brt() -> datetime:
+    return datetime.now(BRT)
+
+
+def _owner_hash(phone: str) -> str:
+    normalized = "".join(char for char in str(phone) if char.isdigit())
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:32]
+
+
+def _validate_embedding(embedding: Optional[Sequence[float]]) -> Optional[List[float]]:
+    if embedding is None:
+        return None
+    vector = list(embedding)
+    if len(vector) != EMBEDDING_DIM:
+        logger.error(
+            "Embedding rejected: model=%s expected_dim=%s actual_dim=%s",
+            EMBEDDING_MODEL,
+            EMBEDDING_DIM,
+            len(vector),
+        )
+        return None
+    return vector
 
 
 def _embed_direct(text: str) -> Optional[List[float]]:
-    """Embed text directly via MiniMax API (bypass LangChain)."""
     import requests
+
     api_key = os.getenv("MINIMAX_API_KEY") or get_secret("MINIMAX_API_KEY")
     group_id = os.getenv("MINIMAX_GROUP_ID") or get_secret("MINIMAX_GROUP_ID")
     if not api_key or not group_id:
-        logger.error(f"MiniMax embed: api_key={'SET' if api_key else 'MISSING'} group_id={'SET' if group_id else 'MISSING'}")
+        logger.error(
+            "MiniMax embedding unavailable: api_key=%s group_id=%s",
+            "set" if api_key else "missing",
+            "set" if group_id else "missing",
+        )
         return None
     api_key = api_key.strip().lstrip("\ufeff")
     group_id = group_id.strip().lstrip("\ufeff")
     try:
-        resp = requests.post(
+        response = requests.post(
             "https://api.minimax.io/v1/embeddings",
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
                 "GroupId": group_id,
             },
-            json={"model": "embo-01", "texts": [text], "type": "db"},
+            json={"model": EMBEDDING_MODEL, "texts": [text], "type": "db"},
             timeout=30,
         )
-        data = resp.json()
-        if data.get("base_resp", {}).get("status_code", 0) != 0:
-            sc = data["base_resp"]["status_code"]
-            if sc == 1002:
-                logger.warning("MiniMax embed rate limited (1002)")
-            else:
-                logger.error(f"MiniMax embed error: {data.get('base_resp')}")
+        data = response.json()
+        status = data.get("base_resp", {}).get("status_code", 0)
+        if response.status_code >= 400 or status != 0:
+            logger.error(
+                "MiniMax embedding failed: http_status=%s provider_status=%s",
+                response.status_code,
+                status,
+            )
             return None
-        emb = data.get("data", [{}])[0].get("embedding")
-        logger.info(f"MiniMax embed success: {len(emb) if emb else 0}d")
-        return emb
-    except Exception as e:
-        logger.error(f"MiniMax embed direct failed: {e}")
-        return None
-
-
-def _embed_nvidia(text: str) -> Optional[List[float]]:
-    """Embed text using NVIDIA NIM (free, OpenAI-compatible)."""
-    import requests
-    api_key = os.getenv("NVIDIA_API_KEY") or get_secret("NVIDIA_API_KEY")
-    if not api_key:
-        logger.error("NVIDIA_API_KEY not configured")
-        return None
-    api_key = api_key.strip().lstrip("\ufeff")
-    try:
-        resp = requests.post(
-            "https://integrate.api.nvidia.com/v1/embeddings",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "input": [text],
-                "model": "nvidia/nv-embedqa-e5-v5",
-                "input_type": "passage",
-                "encoding_format": "float",
-            },
-            timeout=30,
-        )
-        data = resp.json()
-        if "data" not in data or not data["data"]:
-            logger.error(f"NVIDIA embed error: {data}")
-            return None
-        emb = data["data"][0]["embedding"]
-        logger.info(f"NVIDIA embed success: {len(emb)}d")
-        return emb
-    except Exception as e:
-        logger.error(f"NVIDIA embed failed: {e}")
+        embedding = data.get("data", [{}])[0].get("embedding")
+        validated = _validate_embedding(embedding)
+        if validated is not None:
+            logger.info("MiniMax embedding generated: model=%s dim=%s", EMBEDDING_MODEL, len(validated))
+        return validated
+    except Exception as exc:
+        logger.error("MiniMax embedding request failed: %s", exc)
         return None
 
 
 def embed_best(text: str) -> Optional[List[float]]:
-    """Try MiniMax first, fallback to NVIDIA."""
-    emb = _embed_direct(text)
-    if emb:
-        return emb
-    logger.warning("MiniMax embed failed, trying NVIDIA fallback...")
-    return _embed_nvidia(text)
+    return _embed_direct(text)
 
 
 def _get_firestore():
-    """Get Firestore client."""
     try:
         from google.cloud import firestore
+
         project = os.getenv("GCP_PROJECT") or os.getenv("GCLOUD_PROJECT")
         if not project or os.getenv("FIRESTORE_EMULATOR_HOST"):
             return None
         return firestore.Client(project=project)
-    except Exception as e:
-        logger.warning(f"Firestore unavailable: {e}")
+    except Exception as exc:
+        logger.warning("Firestore unavailable: %s", exc)
         return None
 
 
-def _collection_name(phone: str) -> str:
-    """Build collection name for a phone."""
-    phone_clean = phone.replace("+", "").replace("-", "").replace(" ", "")
-    return f"{COLLECTION_PREFIX}{phone_clean}"
-
-
 async def embed_query(text: str) -> Optional[List[float]]:
-    """Embed a query string using MiniMax (direct API call)."""
+    clean_text = mask_pii(str(text or "")).strip()
+    if not clean_text:
+        return None
     try:
-        loop = asyncio.get_running_loop()
-        vec = await loop.run_in_executor(None, embed_best, text)
-        return vec
-    except Exception as e:
-        logger.error(f"Embedding failed: {e}")
+        return await asyncio.to_thread(embed_best, clean_text)
+    except Exception as exc:
+        logger.error("Embedding failed: %s", exc)
         return None
 
 
 async def embed_documents(texts: List[str]) -> Optional[List[List[float]]]:
-    """Embed multiple documents using MiniMax (direct API)."""
-    results = []
-    for text in texts:
-        vec = await embed_query(text)
-        if vec is None:
-            return None
-        results.append(vec)
-    return results
+    semaphore = asyncio.Semaphore(max(1, EMBEDDING_CONCURRENCY))
+
+    async def embed_one(text: str) -> Optional[List[float]]:
+        async with semaphore:
+            return await embed_query(text)
+
+    vectors = await asyncio.gather(*(embed_one(text) for text in texts))
+    if any(vector is None for vector in vectors):
+        return None
+    return [vector for vector in vectors if vector is not None]
+
+
+def _chunk_text(text: str, max_chars: int = 1200, overlap: int = 180) -> List[str]:
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = min(start + max_chars, len(text))
+        if end < len(text):
+            for separator in ["\n\n", "\n", ". ", "? ", "! "]:
+                last_separator = text.rfind(separator, start, end)
+                if last_separator > start + max_chars // 2:
+                    end = last_separator + len(separator)
+                    break
+        chunks.append(text[start:end].strip())
+        start = end - overlap if end < len(text) else end
+    return [chunk for chunk in chunks if chunk]
+
+
+def _vector_filters(owner_hash: Optional[str] = None) -> List[Tuple[str, str, Any]]:
+    filters: List[Tuple[str, str, Any]] = [
+        ("embedding_model", "==", EMBEDDING_MODEL),
+        ("embedding_dim", "==", EMBEDDING_DIM),
+        ("schema_version", "==", SCHEMA_VERSION),
+    ]
+    if owner_hash:
+        filters.insert(0, ("owner_hash", "==", owner_hash))
+    return filters
+
+
+async def _find_nearest(
+    db: Any,
+    collection_name: str,
+    query_vector: List[float],
+    limit: int,
+    filters: Optional[List[Tuple[str, str, Any]]] = None,
+) -> List[Any]:
+    from google.cloud.firestore_v1.base_query import FieldFilter
+    from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
+    from google.cloud.firestore_v1.vector import Vector
+
+    def execute() -> List[Any]:
+        query = db.collection(collection_name)
+        for field, operator, value in filters or []:
+            query = query.where(filter=FieldFilter(field, operator, value))
+        vector_query = query.find_nearest(
+            vector_field="vector_embedding",
+            query_vector=Vector(query_vector),
+            limit=max(1, min(int(limit), 50)),
+            distance_measure=DistanceMeasure.COSINE,
+            distance_result_field="vector_distance",
+        )
+        return list(vector_query.get())
+
+    return await asyncio.to_thread(execute)
+
+
+def _score_document(document: Any, data: Dict[str, Any]) -> float:
+    distance = data.get("vector_distance")
+    if distance is None:
+        distance = getattr(document, "distance", None)
+    if distance is None:
+        return 0.0
+    return max(-1.0, min(1.0, 1.0 - float(distance)))
+
+
+async def index_conversation_message(
+    phone: str,
+    text: str,
+    direction: str,
+    message_id: Optional[str] = None,
+    conversation_id: Optional[str] = None,
+    turn_id: Optional[str] = None,
+    agent_id: Optional[str] = None,
+    response_identity: str = "Jennifer",
+) -> Dict[str, Any]:
+    clean_text = mask_pii(str(text or "")).strip()
+    if len(clean_text) < 3:
+        return {"status": "skipped", "reason": "empty_text"}
+    embedding = await embed_query(clean_text)
+    if embedding is None:
+        logger.warning("Conversation indexing skipped: embedding unavailable")
+        return {"status": "skipped", "reason": "embedding_unavailable"}
+    db = _get_firestore()
+    if db is None:
+        return {"status": "skipped", "reason": "firestore_unavailable"}
+    owner_hash = _owner_hash(phone)
+    stable_key = message_id or f"{time_ns()}:{direction}:{clean_text}"
+    document_id = hashlib.sha256(f"{owner_hash}:{stable_key}".encode("utf-8")).hexdigest()[:32]
+    now = _now_brt()
+    from google.cloud.firestore_v1.vector import Vector
+
+    data = {
+        "owner_hash": owner_hash,
+        "conversation_id": conversation_id or owner_hash,
+        "message_id": message_id or document_id,
+        "turn_id": turn_id or document_id,
+        "direction": direction,
+        "agent_id": agent_id or "jennifier",
+        "response_identity": response_identity,
+        "text_masked": clean_text[:2000],
+        "vector_embedding": Vector(embedding),
+        "embedding_model": EMBEDDING_MODEL,
+        "embedding_dim": EMBEDDING_DIM,
+        "schema_version": SCHEMA_VERSION,
+        "created_at": now.isoformat(),
+        "expires_at": (now + timedelta(days=RETENTION_DAYS)).isoformat(),
+    }
+    await asyncio.to_thread(db.collection(MEMORY_COLLECTION).document(document_id).set, data)
+    logger.info("Conversation memory indexed: doc_id=%s direction=%s", document_id, direction)
+    return {"status": "indexed", "doc_id": document_id, "collection": MEMORY_COLLECTION}
+
+
+def time_ns() -> int:
+    import time
+
+    return time.time_ns()
+
+
+async def search_conversation_memory(phone: str, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+    query_vector = await embed_query(query)
+    if query_vector is None:
+        return []
+    db = _get_firestore()
+    if db is None:
+        return []
+    try:
+        documents = await _find_nearest(
+            db,
+            MEMORY_COLLECTION,
+            query_vector,
+            limit,
+            _vector_filters(_owner_hash(phone)),
+        )
+        results = []
+        for document in documents:
+            data = document.to_dict()
+            results.append(
+                {
+                    "text": data.get("text_masked", ""),
+                    "direction": data.get("direction", "in"),
+                    "agent_id": data.get("agent_id", "jennifier"),
+                    "response_identity": data.get("response_identity", "Jennifer"),
+                    "score": _score_document(document, data),
+                }
+            )
+        return results
+    except Exception as exc:
+        logger.warning("Conversation memory search failed: %s", exc)
+        return []
 
 
 async def index_private_document(
@@ -144,51 +287,59 @@ async def index_private_document(
     category: str = "legislacao",
     metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Index a document into the user's private RAG vector store (agente-knowledge-{phone})."""
     db = _get_firestore()
     if db is None:
         return {"error": "firestore_unavailable"}
-
-    chunks = _chunk_text(text_content)
+    clean_content = mask_pii(text_content)
+    chunks = _chunk_text(clean_content)
     if not chunks:
         return {"error": "empty_content"}
-
     vectors = await embed_documents(chunks)
     if vectors is None or len(vectors) != len(chunks):
         return {"error": "embedding_failed"}
-
     from google.cloud.firestore_v1.vector import Vector
 
-    collection = _collection_name(phone)
-    doc_ids = []
-
+    owner_hash = _owner_hash(phone)
+    now = _now_brt().isoformat()
     batch = db.batch()
-    for i, (chunk, vec) in enumerate(zip(chunks, vectors)):
-        doc_id = hashlib.sha256(f"{source_title}_{i}_{chunk[:50]}".encode()).hexdigest()[:32]
-        ref = db.collection(collection).document(doc_id)
-        doc_data = {
+    document_ids = []
+    protected_fields = {
+        "owner_hash",
+        "text_content",
+        "vector_embedding",
+        "embedding_model",
+        "embedding_dim",
+        "schema_version",
+    }
+    safe_metadata = {key: value for key, value in (metadata or {}).items() if key not in protected_fields}
+    for index, (chunk, vector) in enumerate(zip(chunks, vectors)):
+        document_id = hashlib.sha256(
+            f"{owner_hash}:{source_title}:{index}:{chunk[:100]}".encode("utf-8")
+        ).hexdigest()[:32]
+        reference = db.collection(PRIVATE_COLLECTION).document(document_id)
+        data = {
+            **safe_metadata,
+            "owner_hash": owner_hash,
             "text_content": chunk,
-            "vector_embedding": Vector(vec),
+            "vector_embedding": Vector(vector),
             "embedding_model": EMBEDDING_MODEL,
             "embedding_dim": EMBEDDING_DIM,
-            "source_title": source_title,
+            "schema_version": SCHEMA_VERSION,
+            "source_title": mask_pii(source_title),
             "source_url": source_url,
             "category": category,
-            "chunk_index": i,
-            "language": "pt",
-            "fetched_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+            "chunk_index": index,
+            "language": "pt-BR",
+            "created_at": now,
         }
-        if metadata:
-            doc_data.update(metadata)
-        batch.set(ref, doc_data)
-        doc_ids.append(doc_id)
-    batch.commit()
-
+        batch.set(reference, data)
+        document_ids.append(document_id)
+    await asyncio.to_thread(batch.commit)
     return {
-        "doc_ids": doc_ids,
-        "phone": phone,
+        "doc_ids": document_ids,
+        "owner_hash": owner_hash,
         "chunks": len(chunks),
-        "source_title": source_title,
+        "source_title": mask_pii(source_title),
     }
 
 
@@ -198,137 +349,105 @@ async def search_legal_knowledge(
     k: int = 5,
     min_score: float = 0.5,
 ) -> Dict[str, Any]:
-    """Search RAG for relevant legal documents.
-
-    Args:
-        phone: Phone of agent-master
-        query: User query
-        k: Number of results to return
-        min_score: Minimum similarity score (0-1)
-
-    Returns:
-        {"results": [{"text": ..., "score": ..., "source": ...}], "query": str}
-    """
     db = _get_firestore()
     if db is None:
         return {"results": [], "error": "firestore_unavailable"}
-
-    query_vec = await embed_query(query)
-    if query_vec is None:
+    query_vector = await embed_query(query)
+    if query_vector is None:
         return {"results": [], "error": "embedding_failed"}
-
     try:
-        from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
-
-        collection = _collection_name(phone)
-        results = db.collection(collection).find_neighbors(
-            vector_field="vector_embedding",
-            query_vector=db.vector(query_vec),
-            distance_measure=DistanceMeasure.COSINE,
-            limit=k,
-        ).get()
-
+        documents = await _find_nearest(
+            db,
+            PRIVATE_COLLECTION,
+            query_vector,
+            k,
+            _vector_filters(_owner_hash(phone)),
+        )
         chunks = []
-        for doc in results:
-            score = 1.0 - (doc.distance / 2.0)
+        for document in documents:
+            data = document.to_dict()
+            score = _score_document(document, data)
             if score < min_score:
                 continue
-            data = doc.to_dict()
-            chunks.append({
-                "text": data.get("text_content", ""),
-                "score": score,
-                "source": data.get("source_title", ""),
-                "source_url": data.get("source_url", ""),
-                "category": data.get("category", ""),
-            })
-
-        return {"results": chunks, "query": query, "phone": phone}
-    except Exception as e:
-        logger.error(f"Vector search failed: {e}")
-        return {"results": [], "error": str(e)}
-
-
-def _chunk_text(text: str, max_chars: int = 1200, overlap: int = 180) -> List[str]:
-    """Split text into overlapping chunks."""
-    chunks = []
-    start = 0
-    while start < len(text):
-        end = min(start + max_chars, len(text))
-        if end < len(text):
-            for sep in ["\n\n", "\n", ". ", "? ", "! "]:
-                last_sep = text.rfind(sep, start, end)
-                if last_sep > start + max_chars // 2:
-                    end = last_sep + len(sep)
-                    break
-        chunks.append(text[start:end].strip())
-        start = end - overlap if end < len(text) else end
-    return [c for c in chunks if c]
-
-
-SHARED_COLLECTION = "public-Knowledge-Shared"
-
-
-def _cosine_similarity(a: List[float], b: List[float]) -> float:
-    """Compute cosine similarity between two vectors."""
-    import math
-    if not a or not b or len(a) != len(b):
-        return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
-    norm_a = math.sqrt(sum(x * x for x in a))
-    norm_b = math.sqrt(sum(y * y for y in b))
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    return dot / (norm_a * norm_b)
+            chunks.append(
+                {
+                    "text": data.get("text_content", ""),
+                    "score": score,
+                    "source": data.get("source_title", ""),
+                    "source_url": data.get("source_url", ""),
+                    "category": data.get("category", ""),
+                }
+            )
+        return {"results": chunks, "query": mask_pii(query), "owner_hash": _owner_hash(phone)}
+    except Exception as exc:
+        logger.error("Private vector search failed: %s", exc)
+        return {"results": [], "error": str(exc)}
 
 
 async def search_knowledge(query: str, limit: int = 5) -> List[Dict[str, Any]]:
-    """Semantic search in the shared knowledge base (public data)."""
+    db = _get_firestore()
+    if db is None:
+        return []
+    query_vector = await embed_query(query)
+    if query_vector is None:
+        return []
     try:
-        embedding = await embed_query(query)
-        if not embedding:
-            return []
-        db = _get_firestore()
-        if db is None:
-            return []
+        documents = await _find_nearest(
+            db,
+            SHARED_COLLECTION,
+            query_vector,
+            limit,
+            _vector_filters(),
+        )
         results = []
-        docs = db.collection(SHARED_COLLECTION).stream()
-        for doc in docs:
-            data = doc.to_dict()
-            stored_embedding = data.get("embedding", [])
-            if stored_embedding:
-                sim = _cosine_similarity(embedding, stored_embedding)
-                if sim > 0.5:
-                    results.append({
-                        "doc_id": doc.id,
-                        "titulo": data.get("titulo", ""),
-                        "conteudo": data.get("conteudo", "")[:500],
-                        "categoria": data.get("categoria", ""),
-                        "fonte": data.get("fonte", ""),
-                        "similarity": round(sim, 3),
-                    })
-        results.sort(key=lambda r: r["similarity"], reverse=True)
-        return results[:limit]
-    except Exception as e:
-        logger.error(f"Knowledge search failed: {e}")
+        for document in documents:
+            data = document.to_dict()
+            results.append(
+                {
+                    "doc_id": document.id,
+                    "titulo": data.get("titulo", ""),
+                    "conteudo": data.get("conteudo", "")[:500],
+                    "categoria": data.get("categoria", ""),
+                    "fonte": data.get("fonte", ""),
+                    "similarity": round(_score_document(document, data), 3),
+                }
+            )
+        return results
+    except Exception as exc:
+        logger.error("Shared vector search failed: %s", exc)
         return []
 
 
-async def index_shared_document(titulo: str, conteudo: str, categoria: str = "geral", fonte: str = "") -> str:
-    """Index a document in the shared knowledge base (public-Knowledge-Shared)."""
+async def index_shared_document(
+    titulo: str,
+    conteudo: str,
+    categoria: str = "geral",
+    fonte: str = "",
+) -> str:
     db = _get_firestore()
     if db is None:
         raise RuntimeError("Firestore not configured")
-    import uuid
-    doc_id = f"{categoria}-{uuid.uuid4().hex[:8]}"
-    embedding = await embed_query(f"{titulo}\n{conteudo[:2000]}")
+    clean_title = mask_pii(titulo).strip()
+    clean_content = mask_pii(conteudo).strip()
+    embedding = await embed_query(f"{clean_title}\n{clean_content[:2000]}")
+    if embedding is None:
+        raise ValueError("embedding_failed")
+    from google.cloud.firestore_v1.vector import Vector
+
+    document_id = hashlib.sha256(
+        f"{categoria}:{clean_title}:{clean_content}".encode("utf-8")
+    ).hexdigest()[:32]
     data = {
-        "titulo": titulo,
-        "conteudo": conteudo,
+        "titulo": clean_title,
+        "conteudo": clean_content,
         "categoria": categoria,
         "fonte": fonte,
-        "embedding": embedding or [],
-        "created_at": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+        "vector_embedding": Vector(embedding),
+        "embedding_model": EMBEDDING_MODEL,
+        "embedding_dim": EMBEDDING_DIM,
+        "schema_version": SCHEMA_VERSION,
+        "created_at": _now_brt().isoformat(),
     }
-    db.collection(SHARED_COLLECTION).document(doc_id).set(data)
-    logger.info(f"Document indexed: {doc_id} ({titulo})")
-    return doc_id
+    await asyncio.to_thread(db.collection(SHARED_COLLECTION).document(document_id).set, data)
+    logger.info("Shared document indexed: doc_id=%s", document_id)
+    return document_id

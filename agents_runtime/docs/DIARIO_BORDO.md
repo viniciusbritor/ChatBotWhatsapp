@@ -208,3 +208,91 @@ Todos presentes e com nomes corretos: `DEEPSEEK_API_KEY`, `NVIDIA_API_KEY`, `MIN
 ## Historico de fases anteriores
 
 (Conteudo das fases 0-6.5 preservado abaixo)
+
+---
+
+## 18/07/2026 BRT — Fase 3 Corretiva: Firestore Vector v2
+
+### Baseline
+
+- Branch `test`.
+- 152 testes passaram e 9 foram ignorados antes das alteracoes.
+
+### Contrato implementado
+
+- MiniMax `embo-01` 1536d como provider unico de embedding.
+- Collections fixas `conversation-memory-v2`, `agent-knowledge-v2` e `public-knowledge-v2`.
+- Isolamento privado por `owner_hash`.
+- `vector_embedding` tipado como Firestore `Vector`.
+- Schema versionado e timestamps com retencao.
+- Busca nativa `find_nearest`.
+- Memoria de conversa mascarada e elegivel a exclusao LGPD.
+
+### Resultado
+
+- 16 testes especificos de RAG passaram.
+- Suite completa: 168 passed, 9 skipped.
+- Compilacao Python concluida sem erro.
+- Dry-run do reindexador: 143 paginas e 192 chunks.
+
+### Gate
+
+Fase 3 aprovada em ambiente local da branch `test`. Fase 4 liberada.
+
+---
+
+## 18/07/2026 BRT — Fase 4 Corretiva: Inventario e Orquestracao
+
+### Implementacao autorizada
+
+- Fonte unica de status operacional.
+- Consulta deterministica no WhatsApp e API administrativa.
+- Routing web explicito e status prioritario.
+- Managers internos com identidade Jennifer.
+- Pending actions para confirmacoes.
+- Idempotencia por mensagem.
+- Reload atomico.
+
+### Resultado
+
+- 41 testes especificos passaram sem warnings.
+- Suite completa: 193 passed, 9 skipped.
+- Compilacao Python concluida sem erro.
+- Smoke deterministico confirmou distincao entre roteavel, saudavel e nao verificado.
+
+### Gate
+
+Fase 4 aprovada na branch `test`. Fase 5 liberada.
+
+---
+
+## 18/07/2026 BRT — Fase 5 Corretiva: Audio Local
+
+### Implementacao autorizada
+
+- Whisper local com warm-up.
+- Mensagem somente de audio aceita.
+- Base64 prioritario e URL controlada.
+- Validacao de MIME, bytes, duracao, HTTPS, host e DNS.
+- Masker antes da orquestracao.
+- Remocao de Gemini do fluxo de audio e cascade textual.
+
+### Resultado
+
+- 30 testes especificos de audio e provider passaram.
+- Suite completa: 212 passed, 9 skipped.
+- Compilacao Python concluida sem erro.
+- `ffprobe` 8.1 e faster-whisper disponiveis localmente.
+
+### Gate
+
+Fase 5 aprovada na branch `test`. Revisao integrada final liberada.
+
+### Revisao integrada final
+
+- 212 passed, 9 skipped.
+- Compilacao e parse YAML aprovados.
+- Dry-run RAG aprovado.
+- Rotas administrativas e chat registradas.
+- `.gitignore` e `.dockerignore` impedem novos bytecodes e arquivos sensiveis na imagem.
+- Nenhum deploy ou escrita GCP realizado.

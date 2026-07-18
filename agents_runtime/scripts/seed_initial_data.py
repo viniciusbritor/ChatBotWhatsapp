@@ -2,11 +2,13 @@
 
 Used by agent_loader.seed_default_data() on first startup.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+
+BRT = timezone(timedelta(hours=-3))
 
 
 def _now_iso():
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(BRT).isoformat()
 
 
 DEFAULT_AGENTS = [
@@ -54,7 +56,7 @@ DEFAULT_AGENTS = [
         "name": "Calendar Manager",
         "role": "manager",
         "parent_id": "jennifier",
-        "model": "gemini-2.5-flash",
+        "model": "MiniMax-M3",
         "model_escalation": None,
         "escalation_threshold": -2,
         "no_escalation": False,
@@ -87,7 +89,7 @@ DEFAULT_AGENTS = [
         "name": "Drive Manager",
         "role": "manager",
         "parent_id": "jennifier",
-        "model": "gemini-2.5-flash",
+        "model": "MiniMax-M3",
         "model_escalation": None,
         "escalation_threshold": -2,
         "no_escalation": False,
@@ -122,7 +124,7 @@ DEFAULT_AGENTS = [
         "name": "Email Manager",
         "role": "manager",
         "parent_id": "jennifier",
-        "model": "gemini-2.5-flash",
+        "model": "MiniMax-M3",
         "model_escalation": None,
         "escalation_threshold": -2,
         "no_escalation": False,
@@ -153,14 +155,15 @@ DEFAULT_AGENTS = [
         "name": "Web Manager",
         "role": "manager",
         "parent_id": "jennifier",
-        "model": "gemini-2.5-flash",
+        "model": "MiniMax-M3",
         "model_escalation": None,
         "escalation_threshold": -2,
         "no_escalation": False,
         "thinking": "disabled",
         "system_prompt": (
-            "Voce e o Web Manager da Jennifer. Use Serper.dev para buscas web e httpx para "
-            "fetch de URLs. Cache 24h evita chamadas repetidas."
+            "Voce e um componente interno de pesquisa da Jennifer. Use Serper.dev para buscas web e httpx para "
+            "fetch de URLs. Cache 24h evita chamadas repetidas. Nunca se identifique como Web Manager, "
+            "nunca exponha IDs internos e responda sempre na voz da Jennifer."
         ),
         "skills": [],
         "delegates_to": [],
@@ -179,7 +182,7 @@ DEFAULT_AGENTS = [
         "name": "Intimacy Agent",
         "role": "specialist",
         "parent_id": "jennifier",
-        "model": "gemini-2.5-flash",
+        "model": "MiniMax-M3",
         "model_escalation": None,
         "escalation_threshold": -2,
         "no_escalation": False,
@@ -243,7 +246,7 @@ DEFAULT_AGENTS = [
         "name": "Morality Agent",
         "role": "specialist",
         "parent_id": "jennifier",
-        "model": "gemini-2.5-flash",
+        "model": "MiniMax-M3",
         "model_escalation": None,
         "escalation_threshold": -2,
         "no_escalation": False,
@@ -253,7 +256,7 @@ DEFAULT_AGENTS = [
             "contiver linguagem grosseira, assedio ou conteudo de baixo calao: "
             "(1) NAO reproduza o conteudo. "
             "(2) Responda de forma educada e breve: 'Sou uma assistente corporativa, nao abordo esse tipo de conteudo.' "
-            "(3) Use rag.search_legal_knowledge na collection agente-knowledge-{phone} para buscar legislacao "
+            "(3) Use rag.search_legal_knowledge na collection agent-knowledge-v2 para buscar legislacao "
             "aplicavel (ex: Lei Maria da Penha, Codigo Penal Art. 146-A assedio moral). "
             "(4) Apresente a legislacao de forma respeitosa e informativa. "
             "(5) Ofereca ajuda em assuntos profissionais."

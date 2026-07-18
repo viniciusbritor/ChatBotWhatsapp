@@ -47,8 +47,11 @@ PROACTIVE_QUIET_HOURS_START: "21"
 PROACTIVE_QUIET_HOURS_END: "9"
 PROACTIVE_MIN_RELEVANCE: "0.75"
 
-# Hot-reload
+# Hot-reload e status operacional
 AGENT_RELOAD_INTERVAL_SEC: "120"
+AGENT_HEALTH_WINDOW_SEC: "86400"
+PENDING_ACTION_TTL_SEC: "300"
+RESPONSE_IDEMPOTENCY_TTL_SEC: "86400"
 
 # Firestore
 GCP_PROJECT: "coherence-ominichannel-fs"
@@ -61,16 +64,24 @@ TYPING_DELAY_MS_CAP: "15000"
 ESCALATION_THRESHOLD_DEFAULT: "-2"
 ESCALATION_MAX_PROBABILITY: "0.20"
 
-# Whisper
+# Whisper local e seguranca de audio
 WHISPER_MODEL: "base"
 WHISPER_DEVICE: "cpu"
 WHISPER_COMPUTE_TYPE: "int8"
 WHISPER_DOWNLOAD_ROOT: "/app/whisper_models"
+AUDIO_MAX_BYTES: "26214400"
+AUDIO_MAX_DURATION_SEC: "300"
+AUDIO_DOWNLOAD_TIMEOUT_SEC: "30"
+AUDIO_URL_ALLOWED_HOSTS: "evolution.coherenceai.com.br"
 
-# RAG
+# RAG Firestore Vector v2
 RAG_EMBEDDING_MODEL: "embo-01"
 RAG_EMBEDDING_DIM: "1536"
-RAG_COLLECTION_PREFIX: "agente-knowledge-"
+RAG_SCHEMA_VERSION: "2"
+RAG_MEMORY_COLLECTION: "conversation-memory-v2"
+RAG_PRIVATE_COLLECTION: "agent-knowledge-v2"
+RAG_SHARED_COLLECTION: "public-knowledge-v2"
+RAG_RETENTION_DAYS: "90"
 
 # Observabilidade
 LOG_LEVEL: "INFO"
@@ -146,7 +157,7 @@ chmod +x scripts/upload_secrets.sh
 | `ping-whatsapp-agente` | `*/5 * * * *` | GET `/healthz` em whatsapp-agente-test |
 | `group-sync-trigger` | `0 */6 * * *` | Sincroniza membros dos grupos via Evolution API |
 | `proactive-weekly-eval` | `0 20 * * 0` | Auto-avaliacao semanal (domingo 20h BRT) |
-| `history-cleanup` | `0 3 * * *` | Limpa `contatos/{phone}/historico` > 90 dias |
+| `history-cleanup` | `0 3 * * *` | Limpa historico e `conversation-memory-v2` expirados ha mais de 90 dias |
 
 ## Estrutura de Diretorios
 
@@ -230,6 +241,24 @@ AGENTS_RUNTIME_SA_TOKEN_SECRET=local-dev-token
 uvicorn main:app --reload
 ```
 
+### Testes de inventario e orquestracao
+
+```bash
+pytest -q tests/test_agent_status.py tests/test_dialog_runtime_status.py tests/test_pending_actions.py tests/test_agent_loader.py tests/test_tool_registry.py
+pytest -q tests/
+```
+
+Resultado local da Fase 4 em 18/07/2026: 41 testes especificos e 193 testes totais passaram; 9 foram ignorados.
+
+### Testes de audio
+
+```bash
+pytest -q tests/test_audio_transcribe.py tests/test_main_audio.py tests/test_llm_provider.py
+pytest -q tests/
+```
+
+Resultado local da Fase 5 em 18/07/2026: 30 testes especificos e 212 testes totais passaram; 9 foram ignorados. O teste integrado com audio real do WhatsApp permanece como smoke test do ambiente implantado.
+
 ### Deploy Cloud Run (TEST)
 
 ```bash
@@ -288,6 +317,21 @@ trigger: push em `test`
 ```
 
 ## Scripts Auxiliares
+
+### Firestore Vector v2
+
+Antes do smoke test integrado:
+
+1. Confirmar que `RAG_EMBEDDING_MODEL=embo-01` e `RAG_EMBEDDING_DIM=1536`.
+2. Criar indices vetoriais para `conversation-memory-v2`, `agent-knowledge-v2` e `public-knowledge-v2` no projeto de teste.
+3. Para collections privadas, incluir o filtro `owner_hash` no indice requerido pelo Firestore.
+4. Executar a reindexacao idempotente do corpus publico.
+5. Validar que todos os documentos possuem `embedding_model`, `embedding_dim`, `schema_version` e `vector_embedding`.
+6. Executar `pytest tests/test_rag.py -v` antes da suite completa.
+7. Validar o corpus sem escrita com `python scripts/migrate_rag_v2.py --dry-run`.
+8. Reindexar no projeto de teste somente apos os indices estarem ativos com `python scripts/migrate_rag_v2.py`.
+
+O Firestore Emulator nao oferece validacao equivalente para consultas vetoriais. Testes locais usam mocks; o smoke test vetorial utiliza exclusivamente o projeto GCP de teste.
 
 ### `scripts/seed_legal_knowledge.py`
 

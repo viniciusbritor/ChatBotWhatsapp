@@ -843,3 +843,48 @@ Quando voce disser "inicie Fase 1" (ou similar), executarei:
 1. (Recomendado) Implementar Fase 4 Portal UI quando quiser UI de gestao
 2. (Recomendado) git init + push + deploy via Cloud Build para ambiente real
 3. (Opcional) Fase 7 validacoes extras de LGPD
+
+---
+
+## 18. Plano Corretivo Priorizado (18/07/2026)
+
+O usuario autorizou execucao sequencial na branch `test`, com bloqueio entre fases: nenhuma fase seguinte inicia antes de documentacao e testes verdes da fase atual.
+
+| Ordem | Fase corretiva | Escopo | Gate |
+|---|---|---|---|
+| 1 | Fase 3 — Firestore Vector v2 | MiniMax 1536d canonico, collections fixas, `Vector`, `find_nearest`, retencao e reindexacao | Testes RAG + suite completa |
+| 2 | Fase 4 — Inventario e orquestracao | Status deterministico, routing seguro, managers internos, identidade Jennifer e estado conversacional | Testes de dialogo + suite completa |
+| 3 | Fase 5 — Audio | Audio sem texto, base64 primario, URL controlada e Whisper local | Testes STT + suite completa |
+
+Decisoes vinculantes:
+
+- Nao usar Gemini para inferencia ou transcricao.
+- Nao misturar embeddings de providers ou dimensoes diferentes.
+- Persistir somente memoria mascarada e aplicar retencao de 90 dias.
+- Consultas de status nao chamam todos os LLMs.
+- Managers nunca assumem a identidade externa da Jennifer.
+- Toda data operacional usa `America/Sao_Paulo`.
+
+### Resultado local na branch test
+
+| Fase | Teste especifico | Suite completa | Status |
+|---|---:|---:|---|
+| Fase 3 | 16 passed | 168 passed, 9 skipped | Aprovada |
+| Fase 4 | 41 passed | 193 passed, 9 skipped | Aprovada |
+| Fase 5 | 30 passed | 212 passed, 9 skipped | Aprovada |
+
+Validacoes adicionais concluídas:
+
+- Compilacao Python sem erro.
+- YAMLs de env e Cloud Build validos.
+- Dry-run RAG: 143 paginas e 192 chunks.
+- `ffprobe` e faster-whisper disponiveis localmente.
+- Endpoints de status registrados.
+
+Pendencias externas, nao executadas nesta sessao:
+
+1. Criar indices Firestore Vector v2 no projeto GCP de teste.
+2. Executar reindexacao real do corpus no ambiente de teste.
+3. Buildar a imagem com o modelo Whisper prebaixado.
+4. Implantar a branch `test`.
+5. Executar smoke tests com audio real, WhatsApp e dashboard.

@@ -454,3 +454,168 @@ Novas funcoes em `tools/group.py`:
 - `test-agentes` (ChatBotWhatsapp): 13 commits ahead of `main`
 - `test` (EvolutionWhatsapp): 3 commits ahead
 - `main` branch: desatualizada (não recebeu nenhum fix)
+
+---
+
+## 18/07/2026 BRT — Fase 3 Corretiva: Firestore Vector v2
+
+### Autorizacao e gate
+
+O usuario priorizou as fases corretivas 3, 4 e 5 na branch `test`. A Fase 4 somente pode iniciar depois de a Fase 3 estar documentada, implementada e com testes verdes.
+
+### Baseline
+
+- Branch: `test`, acompanhando `origin/test`.
+- Suite antes das alteracoes: 152 passed, 9 skipped.
+- Nenhuma alteracao de deploy, commit ou push autorizada.
+
+### Problemas confirmados
+
+- `_index_message` aceitava embedding ausente e executava escrita Firestore sincronamente no event loop.
+- Falhas de indexacao eram registradas apenas em debug.
+- Indexacao era disparada sem supervisao por `asyncio.create_task`.
+- MiniMax 1536d e NVIDIA 1024d podiam coexistir por fallback.
+- `public-Knowledge-Shared` armazenava lista comum e fazia full scan em Python.
+- Collections por telefone exigiriam indices separados e expunham identificador no nome.
+- Memoria vetorial nao participava da retencao e exclusao LGPD.
+
+### Decisoes
+
+- Provider unico: MiniMax `embo-01`, 1536 dimensoes.
+- Schema v2 com collections fixas e isolamento por `owner_hash`.
+- Campo tipado `Vector` e busca nativa `find_nearest`.
+- Texto mascarado antes de embedding e persistencia.
+- Retencao de 90 dias para memoria privada.
+- Reindexacao obrigatoria em mudanca de modelo, dimensao ou schema.
+
+### Resultado da implementacao
+
+- `core/rag.py`: provider MiniMax unico, validacao 1536d, schema v2, `Vector`, `find_nearest`, collections fixas e timestamps BRT.
+- `orchestrator.py`: busca v2, indexacao com tratamento de falha e tarefas supervisionadas.
+- `core/lgpd.py`: limpeza, exportacao e exclusao cobrem memoria e conhecimento vetorial privado.
+- `tool_registry.py`: tools RAG agora sao async nativas, sem `asyncio.run` dentro do event loop.
+- `scripts/migrate_rag_v2.py`: reindexador idempotente do Codigo Penal; seeds antigos delegam para ele.
+- Configuracoes Cloud Build e env atualizadas para o schema v2.
+
+### Testes executados
+
+- `pytest -q tests/test_rag.py`: 16 passed.
+- `pytest -q tests/`: 168 passed, 9 skipped.
+- `python -m compileall`: sucesso.
+- `python scripts/migrate_rag_v2.py --dry-run`: 143 paginas, 192 chunks, zero escrita e zero falha.
+
+### Gate
+
+Fase 3 aprovada. Fase 4 liberada para inicio.
+
+---
+
+## 18/07/2026 BRT — Fase 4 Corretiva: Inventario e Orquestracao
+
+### Gate de entrada
+
+Fase 3 aprovada com 16 testes especificos e suite completa verde.
+
+### Problemas confirmados
+
+- Jennifer nao possuia inventario ou health dos agentes.
+- `delegates_to` prometia fan-out inexistente.
+- Managers respondiam diretamente e podiam assumir identidade interna.
+- Routing web por substring generica classificava frases como "o que eles fazem".
+- "Sim" era tratado globalmente como consentimento de apelido.
+- Cache por telefone e texto podia reutilizar resposta fora do turno correto.
+- Reload incremental mantinha agentes removidos e aceitava estado parcial.
+
+### Contrato da fase
+
+- Inventario deterministico com estados operacionais e telemetria local.
+- Intent `runtime-status` prioritario, sem chamadas externas.
+- Managers internos com identidade externa Jennifer.
+- `pending_action` tipada e expirada.
+- Idempotencia por `message_id`, instancia e conversa.
+- Reload atomico com ultimo snapshot valido.
+
+### Resultado da implementacao
+
+- `core/agent_status.py`: inventario, classificacao, telemetria de sucesso, falha, latencia e execucoes em andamento.
+- `core/pending_actions.py`: estado tipado com TTL, Firestore e fallback local.
+- `agent_loader.py`: reload atomico, remocao de itens apagados, geracao de config e seed parcial.
+- `orchestrator.py`: intent `runtime-status`, routing normalizado, web explicita, idempotencia por `message_id`, pending actions e identidade Jennifer.
+- `tool_registry.py`: `group.get_info` registrado e validacao de tools habilitada.
+- `main.py`: endpoints `/admin/agents/status` e `/admin/agents/{id}/status`.
+- Seeds removem Gemini, tornam Web Manager interno e eliminam keywords web ambiguas.
+
+### Testes executados
+
+- Testes especificos de inventario, dialogo, pending actions, loader e tools: 41 passed.
+- Suite completa: 193 passed, 9 skipped.
+- Compilacao Python: sucesso.
+- Smoke deterministico local: 9 agentes padrao, 8 roteaveis, zero saudaveis e 7 nao verificados; nenhum LLM chamado.
+
+### Gate
+
+Fase 4 aprovada. Fase 5 liberada para inicio.
+
+---
+
+## 18/07/2026 BRT — Fase 5 Corretiva: Audio Local
+
+### Gate de entrada
+
+Fase 4 aprovada com 41 testes especificos e suite completa verde.
+
+### Problemas confirmados
+
+- `/chat` exigia `text` antes de processar audio e rejeitava mensagem somente de voz.
+- O fluxo aceitava apenas `audio_base64`, apesar de existir metodo de URL separado.
+- STT utilizava Gemini via Vertex AI, contrariando guardrail de custo.
+- `tools.audio_transcribe` era importado no startup, mas o arquivo nao existia.
+- URL de audio nao possuia allowlist, protecao SSRF ou limite de bytes.
+
+### Contrato da fase
+
+- faster-whisper local, modelo base CPU int8.
+- Base64 prioritario e URL como fallback restrito.
+- Limites de 25 MiB e 5 minutos.
+- MIME allowlist, HTTPS, host allowlist e bloqueio de rede privada.
+- Transcricao mascarada antes do orchestrator.
+- Resposta amigavel em falha, sem Gemini.
+
+### Resultado da implementacao
+
+- `tools/audio_transcribe.py`: Whisper local, warm-up, base64, URL segura, MIME, bytes, duracao, HTTPS, allowlist e bloqueio SSRF.
+- `main.py`: aceita audio sem texto, prioriza base64, mascara transcricao e retorna falha controlada.
+- `core/llm_provider.py`: cascade textual sem Gemini e wrappers STT delegando ao Whisper local.
+- `Dockerfile`: ffmpeg, tzdata, modelo Whisper prebaixado e timezone `America/Sao_Paulo`.
+- Env e Cloud Build atualizados com limites de audio.
+- Diagrama operacional atualizado para o cascade MiniMax e DeepSeek sem Gemini.
+
+### Testes executados
+
+- Testes especificos de audio, rota `/chat` e LLM provider: 30 passed.
+- Suite completa: 212 passed, 9 skipped.
+- Compilacao Python: sucesso.
+- `ffprobe`: disponivel, versao 8.1.
+- `faster-whisper`: importado com sucesso no ambiente local.
+
+### Gate
+
+Fase 5 aprovada. Fases corretivas 3, 4 e 5 concluidas na branch `test`.
+
+### Revisao integrada final
+
+- Suite: 212 passed, 9 skipped.
+- Compilacao: sucesso.
+- YAMLs: validos.
+- Dry-run RAG: 143 paginas, 192 chunks, zero falha.
+- Rotas `/chat`, `/admin/agents/status` e `/admin/agents/{agent_id}/status`: registradas.
+- `.gitignore` e `.dockerignore` adicionados para excluir bytecode, ambientes, logs e arquivos de credenciais.
+- Nenhum commit, push, deploy, indice GCP ou reindexacao real executado.
+
+### Pendencias do ambiente test
+
+1. Criar indices Firestore Vector v2.
+2. Rodar `python scripts/migrate_rag_v2.py` com credenciais de test.
+3. Buildar e implantar `agents-runtime-test`.
+4. Testar audio real via WhatsApp.
+5. Validar dashboard e inventario contra os 15 agentes do Firestore.

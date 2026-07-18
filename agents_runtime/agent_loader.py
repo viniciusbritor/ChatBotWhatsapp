@@ -4,6 +4,7 @@ import time
 import asyncio
 import logging
 import threading
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, List
 
 logger = logging.getLogger(__name__)
@@ -15,8 +16,17 @@ _skills_cache: Dict[str, Dict[str, Any]] = {}
 _tools_cache: Dict[str, Dict[str, Any]] = {}
 
 _last_loaded_at: float = 0
+_last_reload_attempt_at: float = 0
+_last_reload_error: Optional[str] = None
+_config_generation: int = 0
 _loader_thread: Optional[threading.Thread] = None
 _stop_event = threading.Event()
+_cache_lock = threading.RLock()
+BRT = timezone(timedelta(hours=-3))
+
+
+def _now_iso() -> str:
+    return datetime.now(BRT).isoformat()
 
 
 def _get_firestore_client():
@@ -31,74 +41,82 @@ def _get_firestore_client():
     return firestore.Client(project=project)
 
 
-def _load_agents_from_firestore() -> int:
-    """Load all agents from Firestore."""
+def _read_collection(collection_name: str) -> Optional[Dict[str, Dict[str, Any]]]:
     db = _get_firestore_client()
     if db is None:
-        logger.debug("Firestore not configured, skipping agents load")
-        return 0
+        return None
     try:
-        docs = db.collection("agents").stream()
-        count = 0
-        for doc in docs:
-            data = doc.to_dict()
-            data["id"] = doc.id
-            _agents_cache[doc.id] = data
-            count += 1
-        logger.info(f"Loaded {count} agents from Firestore")
-        return count
-    except Exception as e:
-        logger.warning(f"Failed to load agents: {e}")
+        snapshot = {}
+        for document in db.collection(collection_name).stream():
+            data = document.to_dict()
+            data["id"] = document.id
+            snapshot[document.id] = data
+        return snapshot
+    except Exception as exc:
+        logger.warning("Failed to load %s: %s", collection_name, exc)
+        return None
+
+
+def _replace_cache(target: Dict[str, Dict[str, Any]], snapshot: Dict[str, Dict[str, Any]]) -> None:
+    with _cache_lock:
+        target.clear()
+        target.update(snapshot)
+
+
+def _load_agents_from_firestore() -> int:
+    snapshot = _read_collection("agents")
+    if snapshot is None:
         return 0
+    _replace_cache(_agents_cache, snapshot)
+    logger.info("Loaded %s agents from Firestore", len(snapshot))
+    return len(snapshot)
 
 
 def _load_skills_from_firestore() -> int:
-    """Load all skills from Firestore."""
-    db = _get_firestore_client()
-    if db is None:
+    snapshot = _read_collection("skills")
+    if snapshot is None:
         return 0
-    try:
-        docs = db.collection("skills").stream()
-        count = 0
-        for doc in docs:
-            data = doc.to_dict()
-            data["id"] = doc.id
-            _skills_cache[doc.id] = data
-            count += 1
-        logger.info(f"Loaded {count} skills from Firestore")
-        return count
-    except Exception as e:
-        logger.warning(f"Failed to load skills: {e}")
-        return 0
+    _replace_cache(_skills_cache, snapshot)
+    logger.info("Loaded %s skills from Firestore", len(snapshot))
+    return len(snapshot)
 
 
 def _load_tools_from_firestore() -> int:
-    """Load all tools from Firestore."""
-    db = _get_firestore_client()
-    if db is None:
+    snapshot = _read_collection("tools")
+    if snapshot is None:
         return 0
-    try:
-        docs = db.collection("tools").stream()
-        count = 0
-        for doc in docs:
-            data = doc.to_dict()
-            data["id"] = doc.id
-            _tools_cache[doc.id] = data
-            count += 1
-        logger.info(f"Loaded {count} tools from Firestore")
-        return count
-    except Exception as e:
-        logger.warning(f"Failed to load tools: {e}")
-        return 0
+    _replace_cache(_tools_cache, snapshot)
+    logger.info("Loaded %s tools from Firestore", len(snapshot))
+    return len(snapshot)
 
 
-def _load_all():
-    """Load all collections from Firestore."""
-    global _last_loaded_at
-    _load_agents_from_firestore()
-    _load_skills_from_firestore()
-    _load_tools_from_firestore()
-    _last_loaded_at = time.time()
+def _load_all() -> bool:
+    global _last_loaded_at, _last_reload_attempt_at, _last_reload_error, _config_generation
+    _last_reload_attempt_at = time.time()
+    agents = _read_collection("agents")
+    skills = _read_collection("skills")
+    tools = _read_collection("tools")
+    if agents is None or skills is None or tools is None:
+        _last_reload_error = "firestore_unavailable_or_partial_reload"
+        return False
+    with _cache_lock:
+        _agents_cache.clear()
+        _agents_cache.update(agents)
+        _skills_cache.clear()
+        _skills_cache.update(skills)
+        _tools_cache.clear()
+        _tools_cache.update(tools)
+        _last_loaded_at = time.time()
+        _last_reload_error = None
+        _config_generation += 1
+    logger.info(
+        "Atomic config reload complete: agents=%s skills=%s tools=%s generation=%s",
+        len(agents),
+        len(skills),
+        len(tools),
+        _config_generation,
+    )
+    return True
 
 
 def _poll_loop():
@@ -132,39 +150,45 @@ def stop_loader():
 
 
 def get_agent(agent_id: str) -> Optional[Dict[str, Any]]:
-    """Get agent from cache."""
-    return _agents_cache.get(agent_id)
+    with _cache_lock:
+        agent = _agents_cache.get(agent_id)
+        return dict(agent) if agent else None
 
 
 def get_skill(skill_id: str) -> Optional[Dict[str, Any]]:
-    """Get skill from cache."""
-    return _skills_cache.get(skill_id)
+    with _cache_lock:
+        skill = _skills_cache.get(skill_id)
+        return dict(skill) if skill else None
 
 
 def get_tool_meta(tool_id: str) -> Optional[Dict[str, Any]]:
-    """Get tool metadata from cache."""
-    return _tools_cache.get(tool_id)
+    with _cache_lock:
+        tool = _tools_cache.get(tool_id)
+        return dict(tool) if tool else None
 
 
 def list_agents() -> List[Dict[str, Any]]:
-    """List all cached agents."""
-    return list(_agents_cache.values())
+    with _cache_lock:
+        return [dict(agent) for agent in _agents_cache.values()]
 
 
 def list_skills() -> List[Dict[str, Any]]:
-    """List all cached skills."""
-    return list(_skills_cache.values())
+    with _cache_lock:
+        return [dict(skill) for skill in _skills_cache.values()]
 
 
 def list_tools() -> List[Dict[str, Any]]:
-    """List all cached tools."""
-    return list(_tools_cache.values())
+    with _cache_lock:
+        return [dict(tool) for tool in _tools_cache.values()]
 
 
-def force_reload():
-    """Force immediate reload from Firestore."""
-    _load_all()
-    logger.info("Forced reload complete")
+def force_reload() -> bool:
+    success = _load_all()
+    if success:
+        logger.info("Forced reload complete")
+    else:
+        logger.warning("Forced reload kept last valid snapshot")
+    return success
 
 
 def upsert_agent(agent_id: str, data: Dict[str, Any]) -> bool:
@@ -172,7 +196,7 @@ def upsert_agent(agent_id: str, data: Dict[str, Any]) -> bool:
     if db is None:
         return False
     try:
-        data["updated_at"] = __import__("datetime").datetime.utcnow().isoformat() + "Z"
+        data["updated_at"] = _now_iso()
         db.collection("agents").document(agent_id).set(data, merge=True)
         logger.info(f"Agent '{agent_id}' upserted to Firestore")
         force_reload()
@@ -201,7 +225,7 @@ def upsert_skill(skill_id: str, data: Dict[str, Any]) -> bool:
     if db is None:
         return False
     try:
-        data["updated_at"] = __import__("datetime").datetime.utcnow().isoformat() + "Z"
+        data["updated_at"] = _now_iso()
         db.collection("skills").document(skill_id).set(data, merge=True)
         force_reload()
         return True
@@ -215,7 +239,7 @@ def upsert_tool(tool_id: str, data: Dict[str, Any]) -> bool:
     if db is None:
         return False
     try:
-        data["updated_at"] = __import__("datetime").datetime.utcnow().isoformat() + "Z"
+        data["updated_at"] = _now_iso()
         db.collection("tools").document(tool_id).set(data, merge=True)
         force_reload()
         return True
@@ -290,7 +314,7 @@ def save_user(phone: str, data: Dict[str, Any]) -> bool:
     if db is None:
         return False
     try:
-        data["updated_at"] = __import__("datetime").datetime.utcnow().isoformat() + "Z"
+        data["updated_at"] = _now_iso()
         data["phone"] = phone
         db.collection("usuarios").document(phone).set(data, merge=True)
         return True
@@ -327,56 +351,66 @@ def get_config(section: str) -> Optional[Dict[str, Any]]:
 
 
 def get_cache_stats() -> Dict[str, Any]:
-    """Get cache statistics."""
-    return {
-        "agents": len(_agents_cache),
-        "skills": len(_skills_cache),
-        "tools": len(_tools_cache),
-        "last_loaded_at": _last_loaded_at,
-        "poll_interval_sec": POLL_INTERVAL_SEC,
-    }
+    with _cache_lock:
+        return {
+            "agents": len(_agents_cache),
+            "skills": len(_skills_cache),
+            "tools": len(_tools_cache),
+            "last_loaded_at": _last_loaded_at,
+            "last_reload_attempt_at": _last_reload_attempt_at,
+            "last_reload_error": _last_reload_error,
+            "config_generation": _config_generation,
+            "poll_interval_sec": POLL_INTERVAL_SEC,
+        }
 
 
 def seed_default_data():
-    """Seed default agents, skills, and tools if Firestore is empty.
-
-    Called on startup if cache is empty.
-    """
-    if _agents_cache or _skills_cache or _tools_cache:
-        return
-
     from scripts.seed_initial_data import DEFAULT_AGENTS, DEFAULT_SKILLS, DEFAULT_TOOLS
+
+    with _cache_lock:
+        missing_agents = not _agents_cache
+        missing_skills = not _skills_cache
+        missing_tools = not _tools_cache
+    if not any([missing_agents, missing_skills, missing_tools]):
+        return
 
     db = _get_firestore_client()
     if db is None:
-        logger.info("Firestore not configured, using in-memory defaults only")
-        for agent in DEFAULT_AGENTS:
-            _agents_cache[agent["id"]] = agent
-        for skill in DEFAULT_SKILLS:
-            _skills_cache[skill["id"]] = skill
-        for tool in DEFAULT_TOOLS:
-            _tools_cache[tool["id"]] = tool
+        logger.info("Firestore not configured, filling missing in-memory defaults")
+        with _cache_lock:
+            if missing_agents:
+                _agents_cache.update({agent["id"]: dict(agent) for agent in DEFAULT_AGENTS})
+            if missing_skills:
+                _skills_cache.update({skill["id"]: dict(skill) for skill in DEFAULT_SKILLS})
+            if missing_tools:
+                _tools_cache.update({tool["id"]: dict(tool) for tool in DEFAULT_TOOLS})
         return
 
     try:
         batch = db.batch()
-        for agent in DEFAULT_AGENTS:
-            ref = db.collection("agents").document(agent["id"])
-            batch.set(ref, agent)
-        for skill in DEFAULT_SKILLS:
-            ref = db.collection("skills").document(skill["id"])
-            batch.set(ref, skill)
-        for tool in DEFAULT_TOOLS:
-            ref = db.collection("tools").document(tool["id"])
-            batch.set(ref, tool)
+        if missing_agents:
+            for agent in DEFAULT_AGENTS:
+                batch.set(db.collection("agents").document(agent["id"]), agent)
+        if missing_skills:
+            for skill in DEFAULT_SKILLS:
+                batch.set(db.collection("skills").document(skill["id"]), skill)
+        if missing_tools:
+            for tool in DEFAULT_TOOLS:
+                batch.set(db.collection("tools").document(tool["id"]), tool)
         batch.commit()
-        logger.info("Seeded default agents, skills, and tools to Firestore")
+        logger.info(
+            "Seeded missing defaults: agents=%s skills=%s tools=%s",
+            missing_agents,
+            missing_skills,
+            missing_tools,
+        )
         _load_all()
-    except Exception as e:
-        logger.warning(f"Failed to seed to Firestore, using in-memory: {e}")
-        for agent in DEFAULT_AGENTS:
-            _agents_cache[agent["id"]] = agent
-        for skill in DEFAULT_SKILLS:
-            _skills_cache[skill["id"]] = skill
-        for tool in DEFAULT_TOOLS:
-            _tools_cache[tool["id"]] = tool
+    except Exception as exc:
+        logger.warning("Failed to seed Firestore, filling missing in-memory defaults: %s", exc)
+        with _cache_lock:
+            if missing_agents:
+                _agents_cache.update({agent["id"]: dict(agent) for agent in DEFAULT_AGENTS})
+            if missing_skills:
+                _skills_cache.update({skill["id"]: dict(skill) for skill in DEFAULT_SKILLS})
+            if missing_tools:
+                _tools_cache.update({tool["id"]: dict(tool) for tool in DEFAULT_TOOLS})

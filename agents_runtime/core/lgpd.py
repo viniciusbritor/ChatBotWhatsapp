@@ -15,6 +15,10 @@ logger = logging.getLogger(__name__)
 
 RETENTION_DAYS = int(os.getenv("RETENTION_DAYS", "90"))
 AUDIT_RETENTION_DAYS = int(os.getenv("AUDIT_RETENTION_DAYS", str(365 * 5)))
+BRT = timezone(timedelta(hours=-3))
+RAG_MEMORY_COLLECTION = os.getenv("RAG_MEMORY_COLLECTION", "conversation-memory-v2")
+RAG_PRIVATE_COLLECTION = os.getenv("RAG_PRIVATE_COLLECTION", "agent-knowledge-v2")
+PENDING_ACTION_COLLECTION = os.getenv("PENDING_ACTION_COLLECTION", "pending-actions")
 
 
 def _get_firestore():
@@ -26,6 +30,23 @@ def _get_firestore():
         return firestore.Client(project=project)
     except Exception:
         return None
+
+
+def _filtered_query(collection, field: str, operator: str, value):
+    from google.cloud.firestore_v1.base_query import FieldFilter
+
+    return collection.where(filter=FieldFilter(field, operator, value))
+
+
+def _delete_query_documents(db, query, batch_limit: int = 500) -> int:
+    documents = list(query.limit(batch_limit).stream())
+    if not documents:
+        return 0
+    batch = db.batch()
+    for document in documents:
+        batch.delete(document.reference)
+    batch.commit()
+    return len(documents)
 
 
 def cleanup_old_history(batch_limit: int = 500) -> Dict[str, Any]:
@@ -63,6 +84,17 @@ def cleanup_old_history(batch_limit: int = 500) -> Dict[str, Any]:
             if batch_count > 0:
                 batch.commit()
             scanned += batch_count
+
+        expires_at = datetime.now(BRT).isoformat()
+        memory_query = _filtered_query(
+            db.collection(RAG_MEMORY_COLLECTION),
+            "expires_at",
+            "<=",
+            expires_at,
+        )
+        vector_deleted = _delete_query_documents(db, memory_query, batch_limit)
+        deleted += vector_deleted
+        scanned += vector_deleted
     except Exception as e:
         logger.exception(f"cleanup_old_history error: {e}")
         return {"deleted": deleted, "scanned": scanned, "error": str(e)}
@@ -135,10 +167,12 @@ def export_user_data(phone: str) -> Dict[str, Any]:
 
     result = {
         "phone": phone,
-        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "exported_at": datetime.now(BRT).isoformat(),
         "contact": contact_doc.to_dict() if contact_doc.exists else None,
         "history": [],
         "corrections": [],
+        "vector_memory": [],
+        "private_knowledge": [],
     }
 
     if contact_doc.exists:
@@ -149,6 +183,17 @@ def export_user_data(phone: str) -> Dict[str, Any]:
         corrections_ref = contact_ref.collection("corrections")
         for corr in corrections_ref.stream():
             result["corrections"].append(corr.to_dict())
+
+    owner_hash = _owner_hash(phone)
+    for collection_name, result_key in [
+        (RAG_MEMORY_COLLECTION, "vector_memory"),
+        (RAG_PRIVATE_COLLECTION, "private_knowledge"),
+    ]:
+        query = _filtered_query(db.collection(collection_name), "owner_hash", "==", owner_hash)
+        for document in query.stream():
+            data = document.to_dict()
+            data.pop("vector_embedding", None)
+            result[result_key].append(data)
 
     return result
 
@@ -191,6 +236,15 @@ def delete_user_data(phone: str) -> Dict[str, Any]:
         except Exception:
             pass
 
+        owner_hash = _owner_hash(phone)
+        for collection_name in [RAG_MEMORY_COLLECTION, RAG_PRIVATE_COLLECTION]:
+            query = _filtered_query(db.collection(collection_name), "owner_hash", "==", owner_hash)
+            count = _delete_query_documents(db, query)
+            deleted.append(f"{collection_name}:{count}")
+
+        db.collection(PENDING_ACTION_COLLECTION).document(owner_hash).delete()
+        deleted.append(f"{PENDING_ACTION_COLLECTION}:1")
+
         return {"phone": phone, "deleted": deleted}
     except Exception as e:
         logger.exception(f"delete_user_data error: {e}")
@@ -200,3 +254,9 @@ def delete_user_data(phone: str) -> Dict[str, Any]:
 def _hash_phone(phone: str) -> str:
     import hashlib
     return hashlib.sha256(phone.lower().encode("utf-8")).hexdigest()[:32]
+
+
+def _owner_hash(phone: str) -> str:
+    import hashlib
+    normalized = "".join(char for char in str(phone) if char.isdigit())
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:32]

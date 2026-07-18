@@ -39,7 +39,21 @@
 24. **Documentar ANTES de implementar** — 4 docs mandatorios atualizados por fase.
 25. **Hot-reload obrigatorio** — toda alteracao de agente/skill/tool deve propagar em <= 2min sem rebuild.
 26. **Mudanca de embedding model** requer re-indexacao completa + flag `embedding_model` no doc para identificar epoca.
-27. **Whisper background load** obrigatorio (evita cold start penalty para texto).
+27. **Firestore Vector v2 usa somente MiniMax embo-01 1536d** — fallback de outro modelo ou dimensao na mesma collection e proibido.
+28. **Collections vetoriais possuem nome fixo** — isolamento por `owner_hash`; telefone cru nunca integra nome de collection.
+29. **Todo documento vetorial** exige `embedding_model`, `embedding_dim`, `schema_version`, `created_at` e campo tipado `Vector`.
+30. **Memoria vetorial privada** armazena apenas texto mascarado e possui expiracao de 90 dias.
+31. **Whisper background load** obrigatorio (evita cold start penalty para texto).
+32. **Status de agentes e deterministico** — consultas operacionais nunca chamam LLM, web search ou todos os agentes.
+33. **`healthy` exige sucesso recente** — agente sem execucao ou probe valido recebe `unverified`.
+34. **Managers sao internos** — `response_identity` externa e sempre Jennifer; IDs tecnicos ficam apenas na metadata protegida.
+35. **Confirmacao exige `pending_action`** — "sim", "pode" e equivalentes nao autorizam nenhuma acao sem estado tipado vigente.
+36. **Idempotencia usa `message_id`** — proibido reutilizar resposta apenas por telefone e texto.
+37. **Reload e atomico** — falha parcial preserva o ultimo snapshot valido e remocoes do Firestore saem do cache.
+38. **Audio STT usa Whisper local** — Gemini, Vertex AI e AI Studio sao proibidos no caminho de audio.
+39. **Base64 e o transporte canonico** — URL e fallback controlado por HTTPS, allowlist e protecao SSRF.
+40. **Audio possui limites duros** — tamanho maximo configurado e duracao maxima de 5 minutos.
+41. **Transcricao e mascarada antes da orquestracao** — audio, base64 e texto cru nunca entram em logs.
 
 ## Regras de Ouro (O que SEMPRE fazer)
 

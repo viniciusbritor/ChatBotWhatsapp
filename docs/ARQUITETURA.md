@@ -10,11 +10,11 @@
 |---|---|
 | Linguagem | Python 3.12 |
 | Web framework | FastAPI + Uvicorn |
-| LLM framework | Agno |
-| LLM primario | DeepSeek V4 Flash (cascata: NVIDIA NIM → MiniMax M3) |
-| LLM escalacao | DeepSeek V4 Pro (via heuristica) |
-| Embeddings RAG | MiniMax embo-01 (1536d) via `langchain_community.embeddings.MiniMaxEmbeddings` |
-| Vector DB | Firestore Vector (collection `agente-knowledge-{phone}`) |
+| LLM framework | Orquestrador Python async com tool calling |
+| LLM primario | MiniMax M2.7 Highspeed |
+| LLM fallback | MiniMax M3 → DeepSeek V4 Flash |
+| Embeddings RAG | MiniMax embo-01 (1536d), sem fallback entre dimensoes |
+| Vector DB | Firestore Vector v2 (`conversation-memory-v2`, `agent-knowledge-v2`, `public-knowledge-v2`) |
 | Datastore | Firestore (coherence-ominichannel-fs) |
 | Secrets | GCP Secret Manager (upload via `versions add` apenas) |
 | Audio STT | faster-whisper base CPU int8 (self-host, background load) |
@@ -35,50 +35,50 @@
 
 ```mermaid
 flowchart TB
-    subgraph WS["GCP: whatsapp-server (VPC existente)"]
-        EVO[Evolution API :8080]
-        WA[WhatsappAgente<br/>thin proxy]
+    subgraph WS["GCP: whatsapp-server VPC existente"]
+        EVO["Evolution API :8080"]
+        WA["WhatsappAgente<br/>thin proxy"]
     end
 
     subgraph FS["GCP: coherence-ominichannel-fs"]
-        AR[agents_runtime<br/>Cloud Run -test]
-        ORCH[Orchestrator<br/>Agno + cascata DeepSeek]
-        TOOLS[Tool Executors<br/>pre-registered]
+        AR["agents_runtime<br/>Cloud Run test"]
+        ORCH["Orchestrator async + tool calling"]
+        TOOLS["Tool Executors<br/>pre-registered"]
 
         subgraph SPECIALISTS["Specialists"]
-            INT[agent-intimacy]
-            LRN[agent-learning]
-            MOR[agent-morality<br/>+ RAG Firestore Vector]
-            ATA[ata-generator]
+            INT["agent-intimacy"]
+            LRN["agent-learning"]
+            MOR["agent-morality<br/>RAG Firestore Vector"]
+            ATA["ata-generator"]
         end
 
         subgraph MANAGERS["Managers"]
-            MC[manager-calendar]
-            MD[manager-drive]
-            ME[manager-email]
-            MW[manager-web]
+            MC["manager-calendar"]
+            MD["manager-drive"]
+            ME["manager-email"]
+            MW["manager-web"]
         end
 
-        PRO[proactive_worker<br/>Cloud Scheduler 15min]
-        ATW[ata_worker<br/>Cloud Scheduler 10min]
+        PRO["proactive_worker<br/>Cloud Scheduler 15min"]
+        ATW["ata_worker<br/>Cloud Scheduler 10min"]
 
-        PORTAL[Coherence Portal<br/>React + FastAPI]
-        FS_DB[(Firestore<br/>agents, skills, tools,<br/>contatos, knowledge,<br/>grupos)]
-        SM[GCP Secret Manager]
+        PORTAL["Coherence Portal<br/>React + FastAPI"]
+        FS_DB[("Firestore<br/>agents, skills, tools,<br/>contatos, knowledge,<br/>grupos")]
+        SM["GCP Secret Manager"]
     end
 
-    WA -- HTTPS POST /chat --> AR
+    WA -->|"HTTPS POST /chat"| AR
     AR --> ORCH
     ORCH --> MANAGERS
     ORCH --> SPECIALISTS
     MANAGERS --> TOOLS
     SPECIALISTS --> TOOLS
     MOR --> FS_DB
-    PRO -- POST /proactive/send --> AR
-    ATW -- tool calls --> TOOLS
-    PORTAL -- proxy CRUD --> AR
-    AR -- read/write --> FS_DB
-    AR -- secrets --> SM
+    PRO -->|"POST /proactive/send"| AR
+    ATW -->|"tool calls"| TOOLS
+    PORTAL -->|"proxy CRUD"| AR
+    AR -->|"read/write"| FS_DB
+    AR -->|"secrets"| SM
 ```
 
 ## Fluxo de Mensagem WhatsApp (texto + audio)
@@ -91,7 +91,7 @@ sequenceDiagram
     participant WA as WhatsappAgente
     participant AR as agents_runtime
     participant WHISPER as Whisper (self-host)
-    participant LLM as DeepSeek V4 Flash
+    participant LLM as MiniMax com fallback DeepSeek
     participant FS as Firestore
 
     User->>EVO: mensagem (texto/audio)
@@ -100,14 +100,19 @@ sequenceDiagram
     WA->>AR: POST /chat (Bearer SA token)<br/>{phone, text, sender_name, extra}
 
     alt extra.has_audio == true
-        AR->>WHISPER: transcribe(audio_url)
+        WA->>AR: audio_base64 + audio_mimetype
+        AR->>WHISPER: transcribe_base64(audio)
         WHISPER-->>AR: text_transcrito
         AR->>AR: LGPD masker no texto transcrito
+    else URL controlada sem base64
+        AR->>AR: valida HTTPS, host, DNS, tamanho e duracao
+        AR->>WHISPER: transcribe_url(audio_url)
+        WHISPER-->>AR: text_transcrito
     end
 
-    AR->>LLM: DeepSeek V4 Flash<br/>(com tools + skills do Firestore)
+    AR->>LLM: MiniMax M2.7 Highspeed<br/>(com tools + skills do Firestore)
     LLM-->>AR: response_text
-    Note over AR: Heuristica: resposta confiavel?<br/>Nao -> re-chama V4 Pro
+    Note over AR: Heuristica de confianca<br/>fallback MiniMax M3 e DeepSeek
     AR->>FS: salva em contatos/{phone}/historico/{msg_id}
     AR-->>WA: {reply, delay_ms, presence}
     WA->>EVO: POST /message/sendText (delay, presence)
@@ -125,9 +130,10 @@ sequenceDiagram
 | `contatos/{phone}/historico/{msg_id}` | Mensagens individuais (TTL 90d) | msg_id | So o dono |
 | `contatos/{phone}/corrections/{id}` | Log de correcoes aplicadas | correction_id | So o dono |
 | `apelidos_custom/{phone}` | Apelidos aprendidos por contato | phone | So o dono |
-| `agente-Knowledge-{phone}/{doc_id}` | Conhecimento privado vetorial (1536d) | doc_id | So o dono |
-| `public-Knowledge-Shared/{doc_id}` | Conhecimento publico vetorial (1536d) | doc_id | Todos |
-| `group-Knowledge-{grupo}/{doc_id}` | Conhecimento de grupo vetorial (1536d) | doc_id | Membros |
+| `conversation-memory-v2/{doc_id}` | Memoria vetorial mascarada, TTL 90d | owner_hash + message_id | So o dono |
+| `agent-knowledge-v2/{doc_id}` | Conhecimento privado vetorial (1536d) | owner_hash + doc_id | So o dono |
+| `public-knowledge-v2/{doc_id}` | Conhecimento publico vetorial (1536d) | doc_id | Todos |
+| `group-knowledge-v2/{doc_id}` | Conhecimento de grupo vetorial (1536d) | group_hash + doc_id | Membros |
 | `agents/{id}` | Definicoes de agentes | agent_id | Admin |
 | `skills/{id}` | Skills markdown reutilizaveis | skill_id | Admin |
 | `tools/{id}` | Tools pre-registradas com schema | tool_id | Admin |
@@ -140,6 +146,14 @@ sequenceDiagram
 | `audit/{id}` | LGPD audit log (5y retention) | audit_id | Admin |
 | `cost_runs/{month}` | Metricas de custo LLM | YYYY-MM |
 | `modules/{id}` | Registro de modulos (existente Portal) | module_id |
+
+### Contrato Firestore Vector v2
+
+Todas as collections vetoriais usam nomes fixos para permitir um unico indice por tipo de dado. Dados privados sao isolados por `owner_hash`, nunca por telefone cru no nome da collection. O campo `vector_embedding` e gravado como `google.cloud.firestore_v1.vector.Vector` e acompanhado por `embedding_model`, `embedding_dim` e `schema_version`.
+
+A memoria de conversa persiste somente `text_masked`, `conversation_id`, `message_id`, `turn_id`, `direction`, `agent_id`, `created_at` e `expires_at`. Consultas privadas aplicam filtro por `owner_hash` antes de `find_nearest`. Mudanca de modelo, dimensao ou schema exige reindexacao integral.
+
+A Fase 3 corretiva adota MiniMax `embo-01` 1536d como provider unico. Falha de embedding nao aciona fallback com outra dimensao; o item permanece reprocessavel e a falha e registrada.
 
 ## Hierarquia de Agentes
 
@@ -156,6 +170,16 @@ jennifier (orchestrator)
         ├── agent-morality (V4 Flash) - filtros + RAG juridico
         └── ata-generator (V4 Pro + thinking) - pos-reuniao
 ```
+
+### Inventario operacional dos agentes
+
+Agentes sao configuracoes executadas sob demanda, nao processos permanentemente ativos. O inventario central classifica cada agente como cadastrado, carregado, habilitado, compativel com a instancia, roteavel, tools validas, provider disponivel, pronto para o usuario, saudavel, degradado ou nao verificado.
+
+Consultas como "quantos agentes estao funcionando" sao respondidas deterministicamente, sem LLM, Serper ou fan-out. Um agente so e considerado saudavel quando possui pre-requisitos validos e sucesso recente dentro da janela configurada. Ausencia de execucao recente resulta em `unverified`, nunca em `healthy`.
+
+Managers e specialists sao componentes internos. A metadata preserva `executed_agent_id`, mas `response_identity` permanece `Jennifer`. O runtime injeta essa regra em toda execucao nao-orquestradora para impedir exposicao de nomes internos.
+
+Confirmacoes curtas dependem de `pending_action` tipada e expirada. Respostas como "sim" nunca alteram apelidos ou configuracoes sem uma acao pendente compativel. Idempotencia usa `message_id`, instancia e conversa; texto repetido isoladamente nao reutiliza resposta.
 
 ## Topologia Cloud Run (TEST)
 
