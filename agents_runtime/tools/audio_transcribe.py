@@ -60,15 +60,17 @@ def warm_up():
 
 
 async def transcribe_from_url(
-    audio_url: str,
+    audio_key: Dict[str, Any],
+    instance: str,
     evo_api_key: str,
     language: str = "pt",
     max_duration_sec: int = 300,
 ) -> Dict[str, Any]:
-    """Download audio from URL and transcribe.
+    """Download audio from Evolution API and transcribe.
 
     Args:
-        audio_url: URL to download audio (Evolution getMedia endpoint)
+        audio_key: WhatsApp key from webhook payload (data.key)
+        instance: Evolution instance name
         evo_api_key: Evolution API key for auth header
         language: Language code (default pt)
         max_duration_sec: Max duration to process (default 5min)
@@ -77,8 +79,14 @@ async def transcribe_from_url(
         {"text": str, "language": str, "duration_sec": float}
     """
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.get(audio_url, headers={"apikey": evo_api_key})
+        url = f"https://evolution.coherenceai.com.br/chat/getMedia/{instance}"
+        evo_key = evo_api_key.lstrip("\ufeff") if evo_api_key else ""
+        async with httpx.AsyncClient(timeout=60, verify=False) as client:
+            resp = await client.post(
+                url,
+                json={"key": audio_key, "convertToMp4": False},
+                headers={"apikey": evo_key, "Content-Type": "application/json"},
+            )
             resp.raise_for_status()
             audio_bytes = resp.content
     except Exception as e:

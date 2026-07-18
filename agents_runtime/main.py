@@ -126,14 +126,15 @@ async def chat(request: Request):
         raise HTTPException(status_code=422, detail="phone and text required")
 
     extra = body.get("extra", {})
-    if extra.get("has_audio") and extra.get("audio_url"):
+    if extra.get("has_audio") and extra.get("audio_key"):
         try:
             from core.secrets import get_secret
             from tools.audio_transcribe import transcribe_from_url
 
             evo_key = get_secret("EVOLUTION_API_KEY")
             transcription = await transcribe_from_url(
-                audio_url=extra["audio_url"],
+                audio_key=extra["audio_key"],
+                instance=extra.get("audio_instance", "Jennifer"),
                 evo_api_key=evo_key,
             )
             body["text"] = transcription.get("text") or body.get("text", "")
