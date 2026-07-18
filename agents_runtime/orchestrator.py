@@ -424,17 +424,20 @@ async def _search_memory(phone: str, query: str, limit: int = 5) -> str:
         from core.rag import embed_query
         from google.cloud.firestore_v1.vector import Vector
         embedding = await embed_query(query)
-        results = db.collection(f"conversation-memory-{phone}")\
-            .find_neighbors("vector_embedding", Vector(embedding),
-                            distance_measure="COSINE", limit=limit)
-        docs = []
-        for doc in results:
-            d = doc[0].to_dict() if isinstance(doc, tuple) else doc.to_dict()
-            text = d.get("text", "")[:100]
-            direction = d.get("direction", "in")
-            prefix = "Usuario" if direction == "in" else "Jennifer"
-            docs.append(f"- {prefix}: {text}")
-        return "\n".join(docs) if docs else ""
+        try:
+            results = db.collection(f"conversation-memory-{phone}")\
+                .find_neighbors("vector_embedding", Vector(embedding),
+                                distance_measure="COSINE", limit=limit)
+            docs = []
+            for doc in results:
+                d = doc[0].to_dict() if isinstance(doc, tuple) else doc.to_dict()
+                text = d.get("text", "")[:100]
+                direction = d.get("direction", "in")
+                prefix = "Usuario" if direction == "in" else "Jennifer"
+                docs.append(f"- {prefix}: {text}")
+            return "\n".join(docs) if docs else ""
+        except AttributeError:
+            return ""
     except Exception as e:
         logger.warning(f"RAG search failed: {e}")
         return ""
