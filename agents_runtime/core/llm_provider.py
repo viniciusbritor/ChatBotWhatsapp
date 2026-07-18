@@ -439,7 +439,7 @@ class LLMProvider:
         raise LLMError(f"all_providers_failed")
 
     async def transcribe_audio(self, audio_url: str, mimetype: str = "audio/ogg") -> str:
-        """STT: download audio from CDN → MiniMax M3 → Gemini fallback."""
+        """STT: download audio from CDN → Gemini Flash (único com inline_data audio)."""
         import httpx as _httpx
         audio_bytes = b""
         try:
@@ -456,12 +456,6 @@ class LLMProvider:
 
         audio_b64 = base64.b64encode(audio_bytes).decode()
 
-        if self.minimax_key:
-            try:
-                return await self._stt_minimax(audio_b64, mimetype)
-            except Exception as e:
-                logger.warning(f"MiniMax STT failed: {e}")
-
         if self.gemini_available():
             try:
                 return await self._stt_gemini(audio_b64, mimetype)
@@ -469,26 +463,6 @@ class LLMProvider:
                 logger.warning(f"Gemini STT failed: {e}")
 
         return "[audio]"
-
-    async def _stt_minimax(self, audio_b64: str, mimetype: str) -> str:
-        """MiniMax M3 audio STT via multimodal chat."""
-        url = f"{self.minimax_base}/chat/completions"
-        headers = {"Authorization": f"Bearer {self.minimax_key}", "Content-Type": "application/json"}
-        payload = {
-            "model": "MiniMax-M3",
-            "messages": [{"role": "user", "content": [
-                {"type": "text", "text": "Transcreva este audio em portugues brasileiro. Responda APENAS com a transcricao, sem mais nada."},
-            ]}],
-            "max_tokens": 500,
-            "temperature": 0.1,
-        }
-        async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(url, headers=headers, json=payload)
-        data = resp.json()
-        content = ""
-        if data.get("choices"):
-            content = data["choices"][0].get("message", {}).get("content", "")
-        return content.strip() or "[audio]"
 
     async def _stt_gemini(self, audio_b64: str, mimetype: str) -> str:
         """Gemini Flash STT via multimodal (inline_data)."""
