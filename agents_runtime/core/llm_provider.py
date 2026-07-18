@@ -217,14 +217,11 @@ class LLMProvider:
     def _build_cascade_providers(self, model: str, skip_gemini: bool = False):
         """Build interleaved cascade list, skipping providers without keys.
 
-        Cascade order (texto: highspeed → M3 → Gemini):
+        Cascade order (4 provedores essenciais):
         1. MiniMax M2.7-highspeed (primario texto, ~100tps)
-        2. MiniMax M3 (fallback texto + primario audio)
+        2. MiniMax M3 (fallback texto + audio STT)
         3. Gemini 2.5 Flash (fallback texto + audio)
-        4. DeepSeek V4 Flash
-        5. DeepSeek V4 Pro
-        6. NVIDIA NIM V4 Flash
-        7. NVIDIA NIM V4 Pro
+        4. DeepSeek V4 Flash (ultimo recurso)
         """
         providers = []
 
@@ -236,12 +233,6 @@ class LLMProvider:
             providers.append(("gemini", "gemini-2.5-flash", "_call_gemini", "gemini-2.5-flash"))
         if self.deepseek_key:
             providers.append(("deepseek", "deepseek-v4-flash", "_call_deepseek", "deepseek-v4-flash"))
-        if self.deepseek_key:
-            providers.append(("deepseek-pro", "deepseek-v4-pro", "_call_deepseek", "deepseek-v4-pro"))
-        if self.nvidia_key:
-            providers.append(("nvidia-flash", "deepseek-ai/deepseek-v4-flash", "_call_nvidia", "deepseek-ai/deepseek-v4-flash"))
-        if self.nvidia_key:
-            providers.append(("nvidia-pro", "deepseek-ai/deepseek-v4-pro", "_call_nvidia", "deepseek-ai/deepseek-v4-pro"))
 
         if not providers:
             raise LLMError("no_provider_keys_configured")
