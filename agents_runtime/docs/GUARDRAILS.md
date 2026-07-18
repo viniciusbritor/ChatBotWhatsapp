@@ -9,7 +9,7 @@
 ### Seguranca
 1. Nenhuma chave de API hardcoded. Usar `core/secrets.py` (env → Secret Manager → default).
 2. Upload de secrets APENAS via `gcloud secrets versions add` (nunca `update`).
-3. **Sem Gemini API** (Vertex AI ou AI Studio). Embeddings via MiniMax embo-01.
+3. **Sem Gemini API** (Vertex AI ou AI Studio). Embeddings via OpenAI text-embedding-3-small.
 4. **Sem Swagger publico** (`/docs`, `/redoc`, `/openapi.json` removidos).
 5. **`/chat`, `/proactive/send`, `/admin/*`** exigem Bearer SA token.
 6. **Sem UI propria** — toda gestao via Portal.

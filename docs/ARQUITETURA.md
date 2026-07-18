@@ -13,7 +13,7 @@
 | LLM framework | Orquestrador Python async com tool calling |
 | LLM primario | MiniMax M2.7 Highspeed |
 | LLM fallback | MiniMax M3 → DeepSeek V4 Flash |
-| Embeddings RAG | MiniMax embo-01 (1536d), sem fallback entre dimensoes |
+| Embeddings RAG | OpenAI text-embedding-3-small (1536d), sem fallback entre dimensoes |
 | Vector DB | Firestore Vector v2 (`conversation-memory-v2`, `agent-knowledge-v2`, `public-knowledge-v2`) |
 | Datastore | Firestore (coherence-ominichannel-fs) |
 | Secrets | GCP Secret Manager (upload via `versions add` apenas) |

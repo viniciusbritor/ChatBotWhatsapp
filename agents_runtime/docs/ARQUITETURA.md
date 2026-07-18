@@ -27,7 +27,7 @@
 | `core/masker.py` | LGPD PII masker |
 | `core/delay_calculator.py` | Typing effect |
 | `core/proactive_gate.py` | 8 camadas anti-spam |
-| `core/rag.py` | MiniMax embo-01 1536d + Firestore Vector v2 |
+| `core/rag.py` | OpenAI text-embedding-3-small 1536d + Firestore Vector v2 |
 | `core/agent_status.py` | Inventario operacional deterministico dos agentes |
 | `tools/*.py` | Tools pre-registradas |
 

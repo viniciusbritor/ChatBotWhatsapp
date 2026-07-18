@@ -4,6 +4,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
+def test_embedding_model_default_is_openai():
+    from core.rag import EMBEDDING_BASE_URL, EMBEDDING_MODEL
+
+    assert EMBEDDING_MODEL == "text-embedding-3-small"
+    assert EMBEDDING_BASE_URL == "https://api.openai.com/v1/embeddings"
+
+
 class FakeVectorQuery:
     def __init__(self, documents=None):
         self.documents = documents or []
@@ -39,6 +46,57 @@ class FakeDocument:
 
     def to_dict(self):
         return dict(self._data)
+
+
+class TestOpenAIEmbeddingContract:
+    def test_direct_request_uses_openai_endpoint(self, monkeypatch):
+        from core import rag
+
+        monkeypatch.setattr(rag, "EMBEDDING_BASE_URL", "https://api.openai.com/v1/embeddings")
+        monkeypatch.setattr(rag, "EMBEDDING_MODEL", "text-embedding-3-small")
+        captured = {}
+
+        def fake_post(url, headers=None, json=None, timeout=None):
+            captured["url"] = url
+            captured["headers"] = headers or {}
+            captured["json"] = json or {}
+            response = MagicMock()
+            response.status_code = 200
+            response.json.return_value = {
+                "data": [{"embedding": [0.1] * rag.EMBEDDING_DIM}],
+            }
+            return response
+
+        with patch("core.rag.get_secret", return_value="sk-test"):
+            with patch("core.rag.requests.post", side_effect=fake_post):
+                vector = rag._embed_direct("texto")
+
+        assert vector and len(vector) == rag.EMBEDDING_DIM
+        assert captured["url"] == "https://api.openai.com/v1/embeddings"
+        assert captured["headers"].get("Authorization") == "Bearer sk-test"
+        assert captured["json"]["model"] == "text-embedding-3-small"
+        assert captured["json"]["encoding_format"] == "float"
+        assert captured["json"]["input"] == "texto"
+
+    def test_direct_request_returns_none_on_http_error(self, monkeypatch):
+        from core import rag
+
+        def fake_post(url, headers=None, json=None, timeout=None):
+            response = MagicMock()
+            response.status_code = 429
+            response.text = "rate limit"
+            return response
+
+        with patch("core.rag.get_secret", return_value="sk-test"):
+            with patch("core.rag.requests.post", side_effect=fake_post):
+                assert rag._embed_direct("texto") is None
+
+    def test_direct_request_returns_none_on_missing_key(self, monkeypatch):
+        from core import rag
+
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        with patch("core.rag.get_secret", return_value=None):
+            assert rag._embed_direct("texto") is None
 
 
 class TestEmbeddingContract:

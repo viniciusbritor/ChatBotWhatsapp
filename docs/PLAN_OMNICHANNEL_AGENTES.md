@@ -195,7 +195,7 @@ sequenceDiagram
 |---|---|
 | agent-morality | Detecta linguagem grosseira -> recusa educada + info legal |
 | RAG storage | Firestore Vector (collection `agente-knowledge-{phone}`) |
-| Embeddings | **MiniMax embo-01 (1536d)** via `langchain_community.embeddings.MiniMaxEmbeddings` (incluido no MiniMax Plus) |
+| Embeddings | **OpenAI text-embedding-3-small (1536d)** via REST oficial (`https://api.openai.com/v1/embeddings`) |
 | Fontes | Leis BR (codigo penal, assedio moral), sites governamentais, transcricoes YouTube |
 | Cache | Documentos relevantes persistidos para reuso |
 

@@ -75,8 +75,9 @@ AUDIO_DOWNLOAD_TIMEOUT_SEC: "30"
 AUDIO_URL_ALLOWED_HOSTS: "evolution.coherenceai.com.br"
 
 # RAG Firestore Vector v2
-RAG_EMBEDDING_MODEL: "embo-01"
+RAG_EMBEDDING_MODEL: "text-embedding-3-small"
 RAG_EMBEDDING_DIM: "1536"
+RAG_EMBEDDING_BASE_URL: "https://api.openai.com/v1/embeddings"
 RAG_SCHEMA_VERSION: "2"
 RAG_MEMORY_COLLECTION: "conversation-memory-v2"
 RAG_PRIVATE_COLLECTION: "agent-knowledge-v2"

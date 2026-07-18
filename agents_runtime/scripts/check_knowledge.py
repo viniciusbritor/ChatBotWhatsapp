@@ -20,4 +20,5 @@ for document in documents:
         f"schema={data.get('schema_version')} "
         f"valid={bool(vector) and len(vector) == EMBEDDING_DIM and data.get('embedding_model') == EMBEDDING_MODEL and data.get('schema_version') == SCHEMA_VERSION}"
     )
+    print(f"expected model={EMBEDDING_MODEL} dim={EMBEDDING_DIM} schema={SCHEMA_VERSION}")
 print(f"collection={SHARED_COLLECTION} sampled={len(documents)}")

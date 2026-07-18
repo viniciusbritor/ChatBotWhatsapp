@@ -288,6 +288,13 @@ Fase 4 aprovada na branch `test`. Fase 5 liberada.
 
 Fase 5 aprovada na branch `test`. Revisao integrada final liberada.
 
+### Embeddings migrados para OpenAI
+
+- Provider canonico: `text-embedding-3-small` 1536d.
+- Secret Manager: `OPENAI_API_KEY` ja gravado via `gcloud secrets versions add`.
+- Indice Firestore Vector v2 mantido em 1536d, sem recriacao.
+- TCO de 1 ano < USD 1, sem mudanca de Cloud Run.
+
 ### Revisao integrada final
 
 - 212 passed, 9 skipped.

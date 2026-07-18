@@ -5,14 +5,20 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+import requests
+
 from core.masker import mask_pii
 from core.secrets import get_secret
 
 logger = logging.getLogger(__name__)
 
 BRT = timezone(timedelta(hours=-3))
-EMBEDDING_MODEL = os.getenv("RAG_EMBEDDING_MODEL", "embo-01")
+EMBEDDING_MODEL = os.getenv("RAG_EMBEDDING_MODEL", "text-embedding-3-small")
 EMBEDDING_DIM = int(os.getenv("RAG_EMBEDDING_DIM", "1536"))
+EMBEDDING_BASE_URL = os.getenv(
+    "RAG_EMBEDDING_BASE_URL",
+    "https://api.openai.com/v1/embeddings",
+)
 SCHEMA_VERSION = int(os.getenv("RAG_SCHEMA_VERSION", "2"))
 MEMORY_COLLECTION = os.getenv("RAG_MEMORY_COLLECTION", "conversation-memory-v2")
 PRIVATE_COLLECTION = os.getenv("RAG_PRIVATE_COLLECTION", "agent-knowledge-v2")
@@ -46,47 +52,41 @@ def _validate_embedding(embedding: Optional[Sequence[float]]) -> Optional[List[f
 
 
 def _embed_direct(text: str) -> Optional[List[float]]:
-    import requests
-
-    api_key = os.getenv("MINIMAX_API_KEY") or get_secret("MINIMAX_API_KEY")
-    group_id = os.getenv("MINIMAX_GROUP_ID") or get_secret("MINIMAX_GROUP_ID")
-    if not api_key or not group_id:
-        logger.error(
-            "MiniMax embedding unavailable: api_key=%s group_id=%s",
-            "set" if api_key else "missing",
-            "set" if group_id else "missing",
-        )
+    api_key = os.getenv("OPENAI_API_KEY") or get_secret("OPENAI_API_KEY")
+    if not api_key:
+        logger.error("OpenAI embedding unavailable: api_key_missing")
         return None
     api_key = api_key.strip().lstrip("\ufeff")
-    group_id = group_id.strip().lstrip("\ufeff")
     try:
         response = requests.post(
-            "https://api.minimax.io/v1/embeddings",
+            EMBEDDING_BASE_URL,
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
-                "GroupId": group_id,
             },
-            json={"model": EMBEDDING_MODEL, "texts": [text], "type": "db"},
+            json={"input": text, "model": EMBEDDING_MODEL, "encoding_format": "float"},
             timeout=30,
         )
-        data = response.json()
-        status = data.get("base_resp", {}).get("status_code", 0)
-        if response.status_code >= 400 or status != 0:
-            logger.error(
-                "MiniMax embedding failed: http_status=%s provider_status=%s",
-                response.status_code,
-                status,
-            )
-            return None
-        embedding = data.get("data", [{}])[0].get("embedding")
-        validated = _validate_embedding(embedding)
-        if validated is not None:
-            logger.info("MiniMax embedding generated: model=%s dim=%s", EMBEDDING_MODEL, len(validated))
-        return validated
     except Exception as exc:
-        logger.error("MiniMax embedding request failed: %s", exc)
+        logger.error("OpenAI embedding request failed: %s", exc)
         return None
+    if response.status_code >= 400:
+        logger.error(
+            "OpenAI embedding failed: http_status=%s body=%s",
+            response.status_code,
+            response.text[:200],
+        )
+        return None
+    data = response.json()
+    items = data.get("data") or []
+    if not items:
+        logger.error("OpenAI embedding returned empty data: %s", data)
+        return None
+    embedding = items[0].get("embedding")
+    validated = _validate_embedding(embedding)
+    if validated is not None:
+        logger.info("OpenAI embedding generated: model=%s dim=%s", EMBEDDING_MODEL, len(validated))
+    return validated
 
 
 def embed_best(text: str) -> Optional[List[float]]:

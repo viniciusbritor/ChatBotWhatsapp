@@ -93,8 +93,9 @@ Smoke tests obrigatorios:
 ## Firestore Vector v2
 
 ```text
-RAG_EMBEDDING_MODEL=embo-01
+RAG_EMBEDDING_MODEL=text-embedding-3-small
 RAG_EMBEDDING_DIM=1536
+RAG_EMBEDDING_BASE_URL=https://api.openai.com/v1/embeddings
 RAG_SCHEMA_VERSION=2
 RAG_MEMORY_COLLECTION=conversation-memory-v2
 RAG_PRIVATE_COLLECTION=agent-knowledge-v2

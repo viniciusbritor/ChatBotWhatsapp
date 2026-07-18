@@ -39,7 +39,7 @@
 24. **Documentar ANTES de implementar** — 4 docs mandatorios atualizados por fase.
 25. **Hot-reload obrigatorio** — toda alteracao de agente/skill/tool deve propagar em <= 2min sem rebuild.
 26. **Mudanca de embedding model** requer re-indexacao completa + flag `embedding_model` no doc para identificar epoca.
-27. **Firestore Vector v2 usa somente MiniMax embo-01 1536d** — fallback de outro modelo ou dimensao na mesma collection e proibido.
+27. **Firestore Vector v2 usa somente OpenAI text-embedding-3-small 1536d** — fallback de outro modelo ou dimensao na mesma collection e proibido.
 28. **Collections vetoriais possuem nome fixo** — isolamento por `owner_hash`; telefone cru nunca integra nome de collection.
 29. **Todo documento vetorial** exige `embedding_model`, `embedding_dim`, `schema_version`, `created_at` e campo tipado `Vector`.
 30. **Memoria vetorial privada** armazena apenas texto mascarado e possui expiracao de 90 dias.

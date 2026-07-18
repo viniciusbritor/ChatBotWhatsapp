@@ -437,7 +437,7 @@ DEFAULT_TOOLS = [
             }
         },
         "implementation": "rag",
-        "config": {"embedding_model": "embo-01", "embedding_dim": 1536},
+        "config": {"embedding_model": "text-embedding-3-small", "embedding_dim": 1536},
         "enabled": True,
         "updated_at": _now_iso(),
     },
