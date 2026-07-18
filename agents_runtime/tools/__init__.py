@@ -4,7 +4,6 @@ from tools import google_drive
 from tools import google_gmail
 from tools import web_search
 from tools import nickname
-from tools import audio_transcribe
 from tools import group
 from tools import correction
 from tools import ata_helper

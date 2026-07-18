@@ -217,27 +217,27 @@ class LLMProvider:
         """Build interleaved cascade list, skipping providers without keys.
 
         Cascade order:
-        1. Gemini 2.5 Flash (primary, mais rapido + barato)
-        2. DeepSeek V4 Flash (direct)
-        3. DeepSeek V4 Pro (direct)
-        4. NVIDIA NIM V4 Flash
-        5. NVIDIA NIM V4 Pro
-        6. MiniMax M3 (last resort)
+        1. MiniMax M3 (primary, Plus plan $20/mes)
+        2. Gemini 2.5 Flash (Vertex AI, fallback)
+        3. DeepSeek V4 Flash
+        4. DeepSeek V4 Pro
+        5. NVIDIA NIM V4 Flash
+        6. NVIDIA NIM V4 Pro
         """
         providers = []
 
+        if self.minimax_key:
+            providers.append(("minimax", self.minimax_model, "_call_minimax", self.minimax_model))
         if self.gemini_available() and not skip_gemini:
             providers.append(("gemini", "gemini-2.5-flash", "_call_gemini", "gemini-2.5-flash"))
         if self.deepseek_key:
-            providers.append(("deepseek", model, "_call_deepseek", model))
+            providers.append(("deepseek", "deepseek-v4-flash", "_call_deepseek", "deepseek-v4-flash"))
         if self.deepseek_key:
             providers.append(("deepseek-pro", "deepseek-v4-pro", "_call_deepseek", "deepseek-v4-pro"))
         if self.nvidia_key:
             providers.append(("nvidia-flash", "deepseek-ai/deepseek-v4-flash", "_call_nvidia", "deepseek-ai/deepseek-v4-flash"))
         if self.nvidia_key:
             providers.append(("nvidia-pro", "deepseek-ai/deepseek-v4-pro", "_call_nvidia", "deepseek-ai/deepseek-v4-pro"))
-        if self.minimax_key:
-            providers.append(("minimax", self.minimax_model, "_call_minimax", self.minimax_model))
 
         if not providers:
             raise LLMError("no_provider_keys_configured")
