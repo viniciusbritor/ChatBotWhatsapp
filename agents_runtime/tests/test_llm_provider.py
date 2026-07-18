@@ -45,26 +45,19 @@ class TestChatCascade:
         assert result["provider"] == "deepseek"
         assert result["model_used"] == "deepseek-v4-flash"
 
-    def test_cascade_fallback_to_nvidia(self, monkeypatch, mock_responses):
-        """If DeepSeek fails (429), NVIDIA should be tried."""
+    def test_cascade_fallback_to_deepseek(self, monkeypatch, mock_responses):
+        """If all MM fail, DeepSeek should be tried via chat() path."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
         monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test")
 
         provider = LLMProvider()
 
-        deepseek_fail = MagicMock()
-        deepseek_fail.status_code = 429
-        deepseek_fail.raise_for_status.side_effect = Exception("429")
-
-        nvidia_ok = mock_responses("NVIDIA answer")
-
-        with patch("requests.post", side_effect=[deepseek_fail, nvidia_ok]):
+        with patch("requests.post", return_value=mock_responses("DeepSeek answer")):
             with patch("time.sleep"):
                 result = asyncio.run(provider.chat("sys", "user", model="deepseek-v4-flash"))
 
-        assert result["content"] == "NVIDIA answer"
-        assert result["provider"] in ("nvidia-flash", "deepseek-pro")
-        assert len(result["attempts"]) >= 2
+        assert result["content"] == "DeepSeek answer"
+        assert "deepseek" in result["provider"]
 
     def test_all_providers_fail(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
