@@ -39,14 +39,20 @@ class TestAudioValidation:
     def test_rejects_private_dns_resolution(self):
         from tools.audio_transcribe import AudioValidationError, _validate_audio_url
 
-        with patch("tools.audio_transcribe.socket.getaddrinfo", return_value=[(2, 1, 6, "", ("127.0.0.1", 0))]):
+        with patch(
+            "tools.audio_transcribe.socket.getaddrinfo",
+            return_value=[(2, 1, 6, "", ("127.0.0.1", 0))],
+        ):
             with pytest.raises(AudioValidationError, match="audio_url_private_address"):
                 _validate_audio_url("https://evolution.coherenceai.com.br/audio.ogg")
 
     def test_accepts_allowlisted_public_host(self):
         from tools.audio_transcribe import _validate_audio_url
 
-        with patch("tools.audio_transcribe.socket.getaddrinfo", return_value=[(2, 1, 6, "", ("8.8.8.8", 0))]):
+        with patch(
+            "tools.audio_transcribe.socket.getaddrinfo",
+            return_value=[(2, 1, 6, "", ("8.8.8.8", 0))],
+        ):
             result = _validate_audio_url("https://evolution.coherenceai.com.br/audio.ogg")
 
         assert result == "https://evolution.coherenceai.com.br/audio.ogg"
@@ -58,7 +64,11 @@ class TestAudioTranscription:
         from tools.audio_transcribe import transcribe_base64
 
         encoded = base64.b64encode(b"audio-bytes").decode()
-        with patch("tools.audio_transcribe.transcribe_bytes", new_callable=AsyncMock, return_value="transcricao") as transcribe:
+        with patch(
+            "tools.audio_transcribe.transcribe_bytes",
+            new_callable=AsyncMock,
+            return_value="transcricao",
+        ) as transcribe:
             result = await transcribe_base64(encoded, "audio/ogg")
 
         assert result == "transcricao"
@@ -108,8 +118,14 @@ class TestNoGeminiAudio:
 
         monkeypatch.setenv("MINIMAX_API_KEY", "minimax-test")
         provider = LLMProvider()
-        with patch("tools.audio_transcribe.transcribe_base64", new_callable=AsyncMock, return_value="texto") as transcribe:
-            result = await provider.transcribe_audio_base64("YXVkaW8=", "audio/ogg")
+        with patch(
+            "tools.audio_transcribe.transcribe_base64",
+            new_callable=AsyncMock,
+            return_value="texto",
+        ) as transcribe:
+            result = await provider.transcribe_audio_base64(
+                "YXVkaW8=", "audio/ogg"
+            )
 
         assert result == "texto"
         transcribe.assert_awaited_once_with("YXVkaW8=", "audio/ogg")

@@ -71,6 +71,29 @@ pytest -q tests/test_audio_transcribe.py tests/test_main_audio.py tests/test_llm
 
 Resultado de 18/07/2026: 30 passed.
 
+## Audio local
+
+```text
+WHISPER_MODEL=base
+WHISPER_DEVICE=cpu
+WHISPER_COMPUTE_TYPE=int8
+WHISPER_DOWNLOAD_ROOT=/app/whisper_models
+AUDIO_MAX_BYTES=26214400
+AUDIO_MAX_DURATION_SEC=300
+AUDIO_DOWNLOAD_TIMEOUT_SEC=30
+AUDIO_URL_ALLOWED_HOSTS=evolution.coherenceai.com.br
+```
+
+Regras de smoke test:
+
+- Payload somente com `phone` e `extra.has_audio=true` e aceito.
+- Base64 tem precedencia sobre URL.
+- MIME fora da allowlist e rejeitado.
+- Audio maior que o limite ou acima de 5 minutos e rejeitado.
+- URL HTTP, host fora da allowlist, IP privado ou redirect e rejeitado.
+- A transcricao e mascarada antes de chegar ao orchestrator.
+- Nenhuma funcao Gemini participa do fluxo.
+
 ## Status operacional e estado conversacional
 
 ```text

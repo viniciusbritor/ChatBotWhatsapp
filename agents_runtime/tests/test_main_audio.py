@@ -32,9 +32,18 @@ class TestChatAudioRoute:
             "presence": "composing",
             "metadata": {"agent_id": "jennifier"},
         }
-        with patch("tools.audio_transcribe.transcribe_base64", new_callable=AsyncMock, return_value="Email pessoa@example.com") as base64_stt:
-            with patch("tools.audio_transcribe.transcribe_url", new_callable=AsyncMock) as url_stt:
-                with patch("main.orchestrate", new_callable=AsyncMock, return_value=response_payload) as orchestrate:
+        with patch(
+            "tools.audio_transcribe.transcribe_base64",
+            new_callable=AsyncMock,
+            return_value="Email pessoa@example.com",
+        ) as base64_stt:
+            with patch(
+                "tools.audio_transcribe.transcribe_url",
+                new_callable=AsyncMock,
+            ) as url_stt:
+                with patch(
+                    "main.orchestrate", new_callable=AsyncMock, return_value=response_payload
+                ) as orchestrate:
                     response = await chat(request_with_body(body))
 
         sent_body = orchestrate.await_args.args[0]
@@ -56,9 +65,19 @@ class TestChatAudioRoute:
                 "audio_mimetype": "audio/ogg",
             },
         }
-        with patch("tools.audio_transcribe.transcribe_base64", new_callable=AsyncMock) as base64_stt:
-            with patch("tools.audio_transcribe.transcribe_url", new_callable=AsyncMock, return_value="mensagem por voz") as url_stt:
-                with patch("main.orchestrate", new_callable=AsyncMock, return_value={"reply": "ok", "metadata": {}}) as orchestrate:
+        with patch(
+            "tools.audio_transcribe.transcribe_base64", new_callable=AsyncMock
+        ) as base64_stt:
+            with patch(
+                "tools.audio_transcribe.transcribe_url",
+                new_callable=AsyncMock,
+                return_value="mensagem por voz",
+            ) as url_stt:
+                with patch(
+                    "main.orchestrate",
+                    new_callable=AsyncMock,
+                    return_value={"reply": "ok", "metadata": {}},
+                ) as orchestrate:
                     await chat(request_with_body(body))
 
         base64_stt.assert_not_awaited()
@@ -102,7 +121,11 @@ class TestChatAudioRoute:
             new_callable=AsyncMock,
             side_effect=AudioValidationError("audio_base64_invalid"),
         ):
-            with patch("main.orchestrate", new_callable=AsyncMock, return_value={"reply": "ok", "metadata": {}}) as orchestrate:
+            with patch(
+                "main.orchestrate",
+                new_callable=AsyncMock,
+                return_value={"reply": "ok", "metadata": {}},
+            ) as orchestrate:
                 await chat(request_with_body(body))
 
         assert orchestrate.await_args.args[0]["text"] == "texto alternativo"

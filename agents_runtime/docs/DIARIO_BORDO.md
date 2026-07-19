@@ -315,3 +315,24 @@ Fase 5 aprovada na branch `test`. Revisao integrada final liberada.
 
 ### Status
 Documentado e pronto para commit e deploy.
+
+---
+
+## 19/07/2026 BRT — Fase 5 implantada em test
+
+### Implementacao
+- `tools/audio_transcribe.py`: Whisper local, warm-up, base64 e URL controlada, MIME allowlist, limites, allowlist de hosts e SSRF.
+- `main.py`: `/chat` aceita audio sem texto, prioriza base64, falha controlada sem Gemini.
+- `core/llm_provider.py`: STT removido do provider; cascade textual sem Gemini.
+- `Dockerfile`: bake do modelo Whisper, `tzdata`, `TZ=America/Sao_Paulo` e `AUDIO_URL_ALLOWED_HOSTS`.
+- Testes: `test_audio_transcribe.py` e `test_main_audio.py` adicionados.
+- Diagramas Mermaid sincronizados.
+
+### Testes
+- Específicos: 30 passed.
+- Suite completa: 216 passed, 9 skipped.
+- `ffprobe` 8.1 e `faster-whisper` 1.2.1 disponiveis.
+- Compilacao e YAMLs validos.
+
+### Status
+Pipeline pronto para commit, push e smoke real.

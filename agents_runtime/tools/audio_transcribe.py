@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 import threading
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 import httpx
@@ -86,7 +86,10 @@ def _decode_base64(audio_b64: str) -> bytes:
 
 def _host_allowed(hostname: str) -> bool:
     normalized = str(hostname or "").lower().rstrip(".")
-    return any(normalized == allowed or normalized.endswith(f".{allowed}") for allowed in AUDIO_URL_ALLOWED_HOSTS)
+    return any(
+        normalized == allowed or normalized.endswith(f".{allowed}")
+        for allowed in AUDIO_URL_ALLOWED_HOSTS
+    )
 
 
 def _validate_public_host(hostname: str) -> None:
@@ -119,7 +122,7 @@ def _validate_audio_url(audio_url: str) -> str:
 
 async def _download_audio(audio_url: str) -> bytes:
     validated_url = await asyncio.to_thread(_validate_audio_url, audio_url)
-    headers = {}
+    headers: Dict[str, str] = {}
     evolution_key = os.getenv("EVOLUTION_API_KEY") or get_secret("EVOLUTION_API_KEY")
     if evolution_key:
         headers["apikey"] = evolution_key.strip().lstrip("\ufeff")
@@ -199,9 +202,13 @@ def _get_model():
 def warm_up() -> None:
     global _warmup_thread
     with _model_lock:
-        if _model is not None or (_warmup_thread is not None and _warmup_thread.is_alive()):
+        if _model is not None or (
+            _warmup_thread is not None and _warmup_thread.is_alive()
+        ):
             return
-        _warmup_thread = threading.Thread(target=_warm_up_model, daemon=True, name="whisper-warmup")
+        _warmup_thread = threading.Thread(
+            target=_warm_up_model, daemon=True, name="whisper-warmup"
+        )
         _warmup_thread.start()
 
 
@@ -221,7 +228,9 @@ def _transcribe_file(file_path: str) -> str:
         vad_filter=True,
         beam_size=5,
     )
-    text = " ".join(segment.text.strip() for segment in segments if segment.text.strip()).strip()
+    text = " ".join(
+        segment.text.strip() for segment in segments if segment.text.strip()
+    ).strip()
     if not text:
         raise AudioProcessingError("audio_transcription_empty")
     return text
@@ -231,7 +240,7 @@ async def transcribe_bytes(audio_bytes: bytes, mimetype: str = "audio/ogg") -> s
     normalized_mimetype = _validate_mimetype(mimetype)
     _validate_size(audio_bytes)
     suffix = ALLOWED_MIME_TYPES[normalized_mimetype]
-    file_path = None
+    file_path: Optional[str] = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temporary:
             temporary.write(audio_bytes)
