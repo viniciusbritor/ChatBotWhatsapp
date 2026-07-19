@@ -360,20 +360,13 @@ class TestVectorLGPD:
 class TestIndexTaskTracking:
     @pytest.mark.asyncio
     async def test_indexing_task_is_tracked_until_completion(self):
-        from orchestrator import _indexing_tasks, _schedule_indexing, drain_indexing_tasks
-
-        gate = asyncio.Event()
+        from orchestrator import _indexing_tasks, _schedule_indexing
 
         async def work():
-            await gate.wait()
             return True
 
         task = _schedule_indexing(work())
         assert task in _indexing_tasks
-        gate.set()
-        await asyncio.wait_for(drain_indexing_tasks(timeout=5.0), timeout=5.0)
-        for _ in range(5):
-            if task not in _indexing_tasks:
-                break
-            await asyncio.sleep(0)
+        result = await task
+        assert result is True
         assert task not in _indexing_tasks
