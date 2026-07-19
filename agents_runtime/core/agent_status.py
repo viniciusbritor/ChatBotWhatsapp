@@ -4,6 +4,8 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+from core.llm_provider import LLMProvider as _LLMProvider
+
 BRT = timezone(timedelta(hours=-3))
 HEALTH_WINDOW_SEC = int(os.getenv("AGENT_HEALTH_WINDOW_SEC", "86400"))
 
@@ -34,13 +36,15 @@ def _model_provider_ready(model: str) -> bool:
     normalized = str(model or "").lower()
     if "gemini" in normalized:
         return False
-    if "minimax" in normalized:
-        return bool(os.getenv("MINIMAX_API_KEY"))
-    if "nvidia" in normalized:
-        return bool(os.getenv("NVIDIA_API_KEY"))
-    if "deepseek" in normalized:
-        return bool(os.getenv("DEEPSEEK_API_KEY"))
-    return bool(normalized)
+    if not normalized:
+        return False
+    try:
+        provider = _LLMProvider()
+    except Exception:
+        return False
+    if any(token in normalized for token in ("minimax", "deepseek", "nvidia", "claude", "gpt-")):
+        return provider.is_available()
+    return provider.is_available()
 
 
 def _execution_mode(agent: Dict[str, Any]) -> str:

@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 class TestAgentInventory:
@@ -82,6 +82,45 @@ class TestAgentInventory:
 
         assert inventory["agents"][0]["status"] == "tools_missing"
         assert inventory["agents"][0]["missing_tools"] == ["missing.tool"]
+
+    def test_provider_ready_uses_llm_cascade(self, monkeypatch):
+        from core import agent_status
+        from core.llm_provider import LLMProvider
+
+        class FakeLLM:
+            minimax_key = None
+            deepseek_key = None
+            nvidia_key = None
+            is_available = lambda self: False
+
+            def __init__(self):
+                pass
+
+        monkeypatch.setattr(agent_status, "_LLMProvider", FakeLLM)
+        with patch("core.rag._validate_embedding", return_value=[0.0] * 1536):
+            with patch("core.secrets.get_secret", return_value=None):
+                assert agent_status._model_provider_ready("MiniMax-M3") is False
+                assert agent_status._model_provider_ready("deepseek-v4-flash") is False
+                assert agent_status._model_provider_ready("nvidia/nemotron") is False
+                assert agent_status._model_provider_ready("anything-else") is False
+                assert agent_status._model_provider_ready("") is False
+                assert agent_status._model_provider_ready("Gemini-2.5-Flash") is False
+
+        class FakeLLMSingleKey(FakeLLM):
+            deepseek_key = "sk-test"
+            is_available = lambda self: True
+
+        monkeypatch.setattr(agent_status, "_LLMProvider", FakeLLMSingleKey)
+        assert agent_status._model_provider_ready("deepseek-v4-flash") is True
+        assert agent_status._model_provider_ready("anything-else") is True
+
+        class FakeLLMAvailable(FakeLLM):
+            is_available = lambda self: True
+
+        monkeypatch.setattr(agent_status, "_LLMProvider", FakeLLMAvailable)
+        assert agent_status._model_provider_ready("MiniMax-M3") is True
+        assert agent_status._model_provider_ready("deepseek-v4-flash") is True
+        assert agent_status._model_provider_ready("anything-else") is True
 
     def test_google_agent_distinguishes_user_setup(self, monkeypatch):
         from core.agent_status import build_agent_inventory

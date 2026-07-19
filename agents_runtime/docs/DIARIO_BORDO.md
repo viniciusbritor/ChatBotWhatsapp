@@ -336,3 +336,19 @@ Documentado e pronto para commit e deploy.
 
 ### Status
 Pipeline pronto para commit, push e smoke real.
+
+---
+
+## 19/07/2026 BRT — Correcao de provider_ready no inventario
+
+### Decisao
+- `_model_provider_ready` consultava chaves por substring de provedor; o cascade real usa MiniMax + DeepSeek, e o teste indicou `provider_ready=false` para os managers cujo modelo e `MiniMax-M3`. A heuristica foi trocada para considerar qualquer token de provedor (`minimax`, `deepseek`, `nvidia`, `claude`, `gpt-`) e delegar a verificacao a `LLMProvider.is_available()`.
+
+### Testes
+- Específicos: 1 novo teste em `tests/test_agent_status.py::TestAgentInventory::test_provider_ready_uses_llm_cascade`.
+- Suite completa: 217 passed, 9 skipped.
+- Compilacao `python -m compileall` sem erro.
+- YAMLs validos.
+
+### Status
+Pronto para commit, push e smoke real no cluster `test`.
