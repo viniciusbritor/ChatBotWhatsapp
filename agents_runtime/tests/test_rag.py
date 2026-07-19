@@ -371,6 +371,9 @@ class TestIndexTaskTracking:
         task = _schedule_indexing(work())
         assert task in _indexing_tasks
         gate.set()
-        await drain_indexing_tasks()
-        await asyncio.sleep(0)
+        await asyncio.wait_for(drain_indexing_tasks(timeout=5.0), timeout=5.0)
+        for _ in range(5):
+            if task not in _indexing_tasks:
+                break
+            await asyncio.sleep(0)
         assert task not in _indexing_tasks
