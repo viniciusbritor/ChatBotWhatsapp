@@ -12,7 +12,7 @@ Parses user commands for proactive mode changes:
 import os
 import logging
 import re
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Dict, Any
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)

@@ -9,10 +9,21 @@ Endpoints:
 """
 import os
 import logging
+import time
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse as _JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse as _JSONResponse, HTMLResponse, Response
 from starlette.responses import RedirectResponse
+
+from core.auth import auth_middleware
+from core.delay_calculator import calculate_delay_ms
+from core.masker import mask_pii
+from core import metrics
+from agent_loader import start_loader, stop_loader, list_agents, list_skills, list_tools, get_agent
+from agent_loader import upsert_agent, delete_agent, upsert_skill, upsert_tool
+from agent_loader import get_user, save_user, list_users
+from orchestrator import orchestrate, get_recent_interactions, drain_indexing_tasks
+
 
 class JSONResponse(_JSONResponse):
     """JSONResponse with ensure_ascii=False for UTF-8 characters."""
@@ -20,15 +31,6 @@ class JSONResponse(_JSONResponse):
         import json
         return json.dumps(content, ensure_ascii=False, default=str).encode("utf-8")
 
-from core.auth import auth_middleware
-from core.delay_calculator import calculate_delay_ms, calculate_presence
-from core.llm_provider import LLMProvider, LLMError
-from core.masker import mask_pii
-from core.escalation import compute_confidence_score
-from agent_loader import start_loader, stop_loader, list_agents, list_skills, list_tools, get_agent
-from agent_loader import force_reload, upsert_agent, delete_agent, upsert_skill, upsert_tool
-from agent_loader import get_user, save_user, list_users
-from orchestrator import orchestrate, get_recent_interactions, drain_indexing_tasks
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
@@ -83,18 +85,41 @@ async def healthz():
     }
 
 
+def _short_sha(value: str) -> str:
+    if not value:
+        return ""
+    if "ghtokens" in value or "/" in value:
+        return value.split("/")[-1][:7]
+    return value[:7]
+
+
 @app.get("/version")
 async def version():
     """Version info (Bearer SA required via middleware)."""
     from agent_loader import get_cache_stats
+
     return {
         "version": VERSION,
-        "commit_sha": COMMIT_SHA,
+        "commit_sha": _short_sha(COMMIT_SHA),
+        "commit_sha_full": COMMIT_SHA,
         "deployed_at": DEPLOYED_AT,
         "python_version": "3.12",
-        "agno_version": "1.x",
         "agents_loaded": get_cache_stats().get("agents", 0),
     }
+
+
+@app.get("/metrics")
+async def metrics_endpoint():
+    """Prometheus exposition format (text/plain)."""
+    try:
+        from core.agent_status import build_agent_inventory
+
+        inventory = build_agent_inventory(instance=os.getenv("INSTANCE", "jennifer"))
+        metrics.observe_inventory(inventory)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("metrics inventory observe skipped: %s", exc)
+    payload = metrics.generate_metrics()
+    return Response(content=payload, media_type=metrics.METRICS_CONTENT_TYPE)
 
 
 @app.post("/chat")
@@ -183,7 +208,10 @@ async def chat(request: Request):
                     },
                 })
 
+    chat_started = time.monotonic()
     result = await orchestrate(body)
+    has_error = bool((result.get("metadata") or {}).get("error"))
+    metrics.record_chat(chat_started, success=not has_error)
 
     return JSONResponse(content=result)
 
@@ -960,7 +988,7 @@ OAUTH_REDIRECT_URI = "https://agents-runtime-test-c5nbfc5meq-uc.a.run.app/oauth/
 @app.get("/oauth/google")
 async def oauth_google(request: Request):
     """Redirect to Google OAuth consent screen."""
-    import base64, urllib.parse
+    import urllib.parse
     state = request.query_params.get("state", "")
     if not state:
         raise HTTPException(status_code=422, detail="state required (base64 phone)")
@@ -980,7 +1008,8 @@ async def oauth_google(request: Request):
 @app.get("/oauth/callback")
 async def oauth_callback(request: Request):
     """Handle OAuth callback, exchange code for token, save to Firestore."""
-    import base64, requests
+    import base64
+    import requests
     code = request.query_params.get("code", "")
     state = request.query_params.get("state", "")
     if not code:
@@ -1021,7 +1050,7 @@ async def oauth_callback(request: Request):
             "scopes": OAUTH_SCOPES,
             "registered_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
         })
-        return HTMLResponse(content=f"""
+        return HTMLResponse(content="""
         <html><body style="font-family:Inter,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;background:#f9fafb">
         <div style="text-align:center"><h1 style="color:#16a34a">Vinculado com sucesso! 🎉</h1>
         <p style="color:#374151">Sua conta Google foi conectada. A Jennifer ja pode acessar sua agenda e emails.</p>

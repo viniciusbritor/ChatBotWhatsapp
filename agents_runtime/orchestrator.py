@@ -24,11 +24,11 @@ from typing import Dict, Any, Optional, List
 
 from core.llm_provider import LLMProvider, LLMError
 from core.masker import mask_pii
-from core.escalation import compute_confidence_score, should_escalate
+from core.escalation import compute_confidence_score
 from core.delay_calculator import calculate_delay_ms, calculate_presence
 from core.commands import detect_command, apply_command
-from tool_registry import TOOL_REGISTRY, get_tool, get_tool_schema
-from agent_loader import get_agent, get_skill, list_agents, list_skills, get_user, get_config, has_nickname
+from tool_registry import get_tool, get_tool_schema
+from agent_loader import get_agent, get_skill, list_agents, get_user, get_config, has_nickname
 from core.audit import log_action
 
 logger = logging.getLogger(__name__)
@@ -1007,7 +1007,18 @@ async def _execute_agent(
 
         tool_calls_made = _extract_tool_calls(reply_text, available_tools)
         model_used = result.get("model_used", fast_model)
-        provider = result.get("provider", "")
+        provider = result.get("provider") or "unknown"
+        if provider == "unknown":
+            lowered = model_used.lower()
+            if "deepseek" in lowered:
+                provider = "deepseek"
+            elif "minimax" in lowered or "minim" in lowered:
+                provider = "minimax"
+            elif "gemini" in lowered:
+                provider = "gemini"
+        from core import metrics
+
+        metrics.record_provider_latency(provider, True, execution_started)
         record_agent_success(agent_id, execution_started, model_used, provider)
 
         return {

@@ -1,8 +1,7 @@
 """Proactive gate - 8 camadas anti-spam (calibrado)."""
 import os
-import time
 import logging
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, Tuple
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)

@@ -1,5 +1,12 @@
 """Seed config/, new agents, and new skills into Firestore (upsert mode)."""
-import os, sys, json
+import io
+import os
+import sys
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except (AttributeError, ValueError):
+    pass
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ["GCP_PROJECT"] = "coherence-ominichannel-fs"
 
@@ -147,4 +154,4 @@ for skill in new_skills:
     db.collection("skills").document(skill["id"]).set(skill, merge=True)
 print(f"Skills seeded: {len(new_skills)}")
 
-print("\n✅ Fase 0 concluida!")
+print("\n[OK] Fase 0 concluida")

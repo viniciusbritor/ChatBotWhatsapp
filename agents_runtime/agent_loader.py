@@ -1,7 +1,6 @@
 """Agent loader - polls Firestore every 120s, caches agents/skills/tools in memory."""
 import os
 import time
-import asyncio
 import logging
 import threading
 from datetime import datetime, timedelta, timezone

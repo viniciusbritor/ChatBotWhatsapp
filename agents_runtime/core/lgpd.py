@@ -9,7 +9,7 @@ Functions:
 import os
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,6 @@ def cleanup_old_history(batch_limit: int = 500) -> Dict[str, Any]:
     try:
         contatos = db.collection("contatos").limit(batch_limit).stream()
         for contato_doc in contatos:
-            phone = contato_doc.id
             historico_ref = contato_doc.reference.collection("historico")
             old_msgs = historico_ref.where("ts", "<", cutoff_iso).limit(batch_limit).stream()
             batch = db.batch()

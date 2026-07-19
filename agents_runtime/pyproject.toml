@@ -1,0 +1,37 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+extend-exclude = ["__pycache__", ".venv", "venv", "tests", "docs", "data", "logs", ".mypy_cache"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+disallow_untyped_defs = false
+warn_unused_ignores = true
+no_implicit_optional = true
+files = [
+    "core/agent_status.py",
+    "core/auth.py",
+    "core/commands.py",
+    "core/delay_calculator.py",
+    "core/escalation.py",
+    "core/lgpd.py",
+    "core/llm_provider.py",
+    "core/masker.py",
+    "core/pending_actions.py",
+    "core/rag.py",
+    "core/secrets.py",
+    "core/audit.py",
+    "main.py",
+    "orchestrator.py",
+    "agent_loader.py",
+    "tool_registry.py",
+]
+exclude = ["__pycache__", "tests", "docs", "scripts", "tools"]
+
+[tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "function"

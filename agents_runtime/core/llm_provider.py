@@ -396,9 +396,10 @@ class LLMProvider:
         cascade = self._build_cascade_providers(model)
 
         for attempt_idx, (pname, pmodel, method_name, call_model) in enumerate(cascade):
+            data: Dict[str, Any]
             try:
                 if method_name == "_call_deepseek":
-                    data = await self._call_deepseek_raw(call_model, payload)
+                    data = self._normalize_raw(await self._call_deepseek_raw(call_model, payload))
                 elif method_name == "_call_nvidia":
                     data = await self._call_nvidia_raw(call_model, payload)
                 elif method_name == "_call_minimax":
@@ -406,12 +407,18 @@ class LLMProvider:
                 else:
                     raise LLMError(f"unknown_method: {method_name}")
                 return data
-            except LLMError as e:
+            except LLMError:
                 self._backoff_sleep(attempt_idx)
                 continue
-            except Exception as e:
+            except Exception:
                 continue
-        raise LLMError(f"all_providers_failed")
+        raise LLMError("all_providers_failed")
+
+    @staticmethod
+    def _normalize_raw(value: Any) -> Dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+        return {"choices": [{"message": {"content": str(value)}}]}
 
     async def transcribe_audio_base64(self, audio_b64: str, mimetype: str = "audio/ogg") -> str:
         from tools.audio_transcribe import transcribe_base64
