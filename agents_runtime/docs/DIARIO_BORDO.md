@@ -303,3 +303,15 @@ Fase 5 aprovada na branch `test`. Revisao integrada final liberada.
 - Rotas administrativas e chat registradas.
 - `.gitignore` e `.dockerignore` impedem novos bytecodes e arquivos sensiveis na imagem.
 - Nenhum deploy ou escrita GCP realizado.
+
+---
+
+## 19/07/2026 BRT — Fase 4 implantada em test
+
+### Validacao
+- Suite 216 passed, 9 skipped em 19/07/2026 apos o merge da Fase 3 (embeddings OpenAI).
+- Endpoint `GET /admin/agents/status` ja retorna 15 agentes configurados.
+- Endpoint `GET /admin/agents/{agent_id}/status` retorna 404 quando o id nao existe.
+
+### Status
+Documentado e pronto para commit e deploy.

@@ -614,8 +614,30 @@ Fase 5 aprovada. Fases corretivas 3, 4 e 5 concluidas na branch `test`.
 
 ### Pendencias do ambiente test
 
-1. Criar indices Firestore Vector v2.
-2. Rodar `python scripts/migrate_rag_v2.py` com credenciais de test.
-3. Buildar e implantar `agents-runtime-test`.
-4. Testar audio real via WhatsApp.
-5. Validar dashboard e inventario contra os 15 agentes do Firestore.
+1. Criar indices Firestore Vector v2. ✅
+2. Rodar `python scripts/migrate_rag_v2.py` com credenciais de test. ✅
+3. Buildar e implantar `agents-runtime-test`. ✅ (revisao 00116-hq9 com embeddings OpenAI)
+4. Testar audio real via WhatsApp. Pendente (audio depende de WhatsApp real).
+5. Validar dashboard e inventario contra os 15 agentes do Firestore. Pendente.
+
+---
+
+## 19/07/2026 BRT — Fase 4 implantada em test
+
+### Escopo
+- `core/agent_status.py`: inventario deterministico por agente com estados cadastrado, carregado, habilitado, compativel com a instancia, roteavel, tools validas, provider disponivel, pronto para o usuario, saudavel, degradado, nao verificado e em execucao.
+- `core/pending_actions.py`: acoes conversacionais com TTL para `nickname_consent` e suporte a novos tipos.
+- Endpoints `GET /admin/agents/status` e `GET /admin/agents/{agent_id}/status` ja ativos.
+- Roteamento com prioridade para intents de sistema, routing normalizado sem substrings ambiguas, identidade Jennifer garantida por `_normalize_response_identity` e regra injetada em `_execute_agent`.
+- Idempotencia por `message_id + instance + conversation_id`.
+- Reload atomico no `agent_loader` com fallback de snapshot valido.
+- Tool `group.get_info` registrada e validacao automatica de tools habilitadas.
+
+### Testes
+- `pytest -q tests/test_agent_status.py tests/test_dialog_runtime_status.py tests/test_pending_actions.py tests/test_agent_loader.py tests/test_tool_registry.py tests/test_orchestrator.py`: 55 passed.
+- Suite completa: 216 passed, 9 skipped.
+- Compilacao `python -m compileall` sem erro.
+- YAMLs validos.
+
+### Status
+Suite verde na branch `test`. Proximo: commit, push, acompanhar Cloud Build e executar smoke real `/admin/agents/status` e `/admin/agents/{id}/status`.
