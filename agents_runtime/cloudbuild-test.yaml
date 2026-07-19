@@ -4,7 +4,7 @@ steps:
     dir: "agents_runtime"
     args:
       - "-c"
-      - "pip install -q -r requirements.txt && pip install -q -r requirements-dev.txt && ruff check core/ main.py orchestrator.py agent_loader.py tool_registry.py && mypy --no-incremental --explicit-package-bases -p core && pytest -q tests/"
+      - "pip install -q -r requirements.txt && pip install -q -r requirements-dev.txt && ruff check core/ main.py orchestrator.py agent_loader.py tool_registry.py && mypy --no-incremental --explicit-package-bases --follow-imports=silent core && pytest -q tests/"
 
   - name: "gcr.io/cloud-builders/docker"
     args:

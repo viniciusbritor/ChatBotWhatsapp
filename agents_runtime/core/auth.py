@@ -10,7 +10,7 @@ import json
 import time
 import base64
 import logging
-from fastapi import Request, HTTPException
+from fastapi import Request
 from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
@@ -122,3 +122,4 @@ async def auth_middleware(request: Request, call_next):
         status_code=403,
         content={"error": "forbidden", "message": "Invalid SA token"},
     )
+

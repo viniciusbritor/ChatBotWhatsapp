@@ -1,8 +1,9 @@
+import logging
 import os
 import threading
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from core.llm_provider import LLMProvider as _LLMProvider
 
@@ -26,6 +27,7 @@ _INTERNAL_AGENTS = {"agent-privacy-guard", "agent-rag", "group-resolver"}
 _GOOGLE_PREFIXES = ("calendar.", "drive.", "gmail.")
 _telemetry: Dict[str, Dict[str, Any]] = {}
 _telemetry_lock = threading.RLock()
+logger = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
@@ -40,11 +42,16 @@ def _model_provider_ready(model: str) -> bool:
         return False
     try:
         provider = _LLMProvider()
-    except Exception:
+    except Exception as exc:
+        logger.warning("_LLMProvider init failed: %s", exc)
         return False
+    has_minimax = bool(provider.minimax_key)
+    has_deepseek = bool(provider.deepseek_key)
+    has_nvidia = bool(provider.nvidia_key)
+    cascade_avail = has_minimax or has_deepseek or has_nvidia or provider.is_available()
     if any(token in normalized for token in ("minimax", "deepseek", "nvidia", "claude", "gpt-")):
-        return provider.is_available()
-    return provider.is_available()
+        return cascade_avail
+    return cascade_avail
 
 
 def _execution_mode(agent: Dict[str, Any]) -> str:
@@ -147,7 +154,6 @@ def build_agent_inventory(instance: str = "jennifer", phone: Optional[str] = Non
         instances = [str(value).lower() for value in agent.get("instances", [])]
         instance_match = not instances or instance.lower() in instances
         mode = _execution_mode(agent)
-        route_type = mode
         routable = mode == "reactive" and agent_id in routable_ids
         declared_tools = list(agent.get("tools", []))
         missing_tools = sorted(tool for tool in declared_tools if tool not in executable_tools)
