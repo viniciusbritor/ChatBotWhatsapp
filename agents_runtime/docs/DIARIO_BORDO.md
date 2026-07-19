@@ -352,3 +352,65 @@ Pipeline pronto para commit, push e smoke real.
 
 ### Status
 Pronto para commit, push e smoke real no cluster `test`.
+
+---
+
+## 19/07/2026 BRT — Fase 6: observabilidade, lint, type-check e WhatsApp
+
+### Decisoes
+- Lint: configurado `pyproject.toml` com Ruff (`E`, `F`, `W`) e adicionado `requirements-dev.txt` (`ruff==0.6.9`, `mypy==1.11.2`, `types-requests==2.32.0.20240712`).
+- Type-check: mypy restrito a `core/` com `--follow-imports=silent`; 1 erro real em `_call_provider` corrigido com `_normalize_raw` para normalizar o retorno.
+- `prometheus_client` adicionado em `requirements.txt` (dependência de runtime, não só dev).
+- `pytest.ini_options.asyncio_default_fixture_loop_scope=function` para eliminar warning de `pytest-asyncio`.
+- `commit_sha` real em `/version` via `--set-env-vars=COMMIT_SHA=$BUILD_ID` no Cloud Build.
+- `GET /metrics` adicionado em `text/plain; version=0.0.4` Prometheus exposition; mede `agents_loaded`, `agents_healthy`, `agents_degraded`, `agents_unverified`, `agents_in_flight`, `chat_requests_total`, `chat_latency_seconds`, `embeddings_total`, `audio_transcriptions_total`, `index_operations_total`, `llm_provider_latency_seconds`.
+- `metadata["provider"]` corrigido em `_execute_agent` com fallback por substring do `model_used`.
+- `seed_config.py` com `sys.stdout.reconfigure(encoding="utf-8")` e `print("[OK] Fase 0 concluida")` (sem emoji).
+
+### Codigo
+- `core/metrics.py` (novo): CollectorRegistry + 5 Gauges + 2 Counters + 3 Histograms; helper `observe_inventory(inventory)`, `record_chat`, `record_chat_indexed`, `record_embedding`, `record_audio_transcription`, `record_provider_latency`, `generate_metrics`.
+- `main.py`: `/version` com `_short_sha()` (7 chars) + `commit_sha_full`; `/metrics` chamando `metrics.observe_inventory` antes de `generate_latest`; instrumentação de `chat_started` ao redor de `orchestrate` com `record_chat(success=not has_error)`.
+- `orchestrator.py`: `from core import metrics` dentro de `_execute_agent`; `metrics.record_provider_latency(provider, True, execution_started)`; `provider` inferido por substring (`deepseek`, `minimax`, `gemini`) se o cascade retornar vazio.
+- `core/llm_provider.py`: `_call_provider` anota `data: Dict[str, Any]` e normaliza retorno de `_call_deepseek_raw` (que retorna `str`) via `_normalize_raw` helper; `data["choices"]` agora sempre presente.
+- `cloudbuild-test.yaml`: step 0 atualizado com `ruff check`, `mypy` restrito e `pytest`; env var `COMMIT_SHA=$BUILD_ID` injetada no deploy.
+
+### Testes
+- Suite: **217 passed, 9 skipped**.
+- Ruff: **0 violações** em `core/`, `main.py`, `orchestrator.py`, `agent_loader.py`, `tool_registry.py`.
+- mypy: **0 erros** em `core/` (14 source files).
+- Compilação `python -m compileall` sem erro.
+- YAMLs válidos.
+
+### Cloud Build
+- Revisão final em produção: `agents-runtime-test-00122-xcp` (commit `d084839 fix: include prometheus_client in runtime deps`).
+- Build `bbaff876-...` SUCCESS.
+
+### Smoke real em test
+- `GET /version` 200 com `commit_sha=bbaff87` (real, do `BUILD_ID`).
+- `GET /metrics` 200 com 27 linhas Prometheus e Gauges atualizados.
+- `GET /admin/agents/status` 200, `counts.healthy=1` após invocar runtime-status.
+- `POST /chat` "Quantos agentes estão funcionando?" → resposta determinística `runtime-status`.
+- `POST /chat` áudio silêncio via base64 → `audio_transcriber` retornou resposta amigável (transcrição vazia esperada).
+- `chat_requests_total{outcome="success"}=1.0` confirmado em /metrics.
+
+### WhatsApp de voz real
+- Gerados 3 WAVs em `C:\Users\vinic\workspace_antigravity\Keys\`:
+  - `audio_01_ola.wav` (TTS SAPI: "Olá Jennifer") — 91 KB.
+  - `audio_02_query.wav` (TTS SAPI: "Quais eventos do meu calendário hoje") — 161 KB.
+  - `audio_04_pure_silence.wav` (silêncio, 1 s, 16 kHz) — gerado via `wave`.
+- Enviado `audio_02_query.wav` e `audio_01_ola.wav` via `POST https://evolution.coherenceai.com.br/message/sendWhatsAppAudio/Jennifer` (multipart, `number=5511966830020`).
+- **Resposta Evolution: 201 PENDING** com IDs `3EB005628C7D8269622A15` e `3EB0E0DE9985114E654F46`, `fromMe=true`, `remoteJid=5511966830020@s.whatsapp.net`.
+- **`whatsapp-agente-test` recebeu webhook 200 OK** (`POST /webhook 169.254.169.126:48028`) em 20:43:59 UTC.
+- **Gap conhecido**: `whatsapp-agente-test` **não proxifica o webhook para `agents_runtime`** (logs do whatsapp-agente não contêm chamadas a `agents_runtime` ou `/chat`). Pipeline está completo no lado do `agents_runtime` (aceita áudio, processa com Whisper, mascara, orquestra), mas o proxy reverso está desabilitado/ausente no repo do `whatsapp-agente`, que está fora deste repositório.
+
+### Pendencias (fora do escopo)
+- Habilitar proxy reverso em `whatsapp-agente` (repo separado) para fechar a ponta "WhatsApp → whatsapp-agente → agents_runtime".
+- Webhook Evolution precisa filtrar eventos `fromMe=true` para evitar eco.
+- Acessar `whatsapp-agente` para configurar forwarder via Bearer SA.
+
+### Conclusão
+- Pacote determinístico (Ruff, mypy, /version, /metrics, UTF-8, provider, gate) **100% concluído em test**.
+- Envio real de áudio para WhatsApp **100% concluído** (Evolution confirmou 201 PENDING para `+5511966830020`).
+- Pipeline ponta-a-ponta com transcrição real **bloqueado por configuração do whatsapp-agente** (não do `agents_runtime`).
+- Suíte **217 passed, 9 skipped**; Ruff **0**; mypy **0**; YAMLs válidos.
+- GitHub `test` branch à frente: `7e0ff88` → `d084839` (4 commits da Fase 6).
