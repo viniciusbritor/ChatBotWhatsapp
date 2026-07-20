@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import json
 import logging
 import threading
 from typing import Any, Awaitable, Callable, Dict, Optional, Set
@@ -33,16 +34,33 @@ def _strip_bearer(token: str) -> str:
     return token
 
 
+def _decode_unverified(token: str) -> Dict[str, Any]:
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return {}
+        import base64 as _b64
+
+        data = parts[1]
+        data += "=" * (-len(data) % 4)
+        return json.loads(_b64.urlsafe_b64decode(data.encode("utf-8")).decode("utf-8", errors="ignore"))
+    except Exception:
+        return {}
+
+
 def verify_pubsub_token(token: str) -> bool:
     raw = _strip_bearer(token)
     if not raw:
         return False
+    expected_audience = _oidc_audience().rstrip("/")
     try:
         from google.oauth2 import id_token
 
-        audience = _oidc_audience()
         request = google_requests.Request()
-        decoded = id_token.verify_token(raw, audience=audience, request=request, clock_skew_in_seconds=10)
+        try:
+            decoded = id_token.verify_token(raw, audience=expected_audience, request=request, clock_skew_in_seconds=10)
+        except Exception:
+            decoded = id_token.verify_token(raw, audience=_oidc_audience(), request=request, clock_skew_in_seconds=10)
         if not isinstance(decoded, dict):
             return False
         if decoded.get("iss") != "https://accounts.google.com":
