@@ -8,9 +8,11 @@ Endpoints:
 - /admin/*            (Bearer SA, proxy from Portal)
 """
 import os
+import json
 import logging
 import time
 from contextlib import asynccontextmanager
+from typing import Any, Dict
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse as _JSONResponse, HTMLResponse, Response
 from starlette.responses import RedirectResponse
@@ -213,6 +215,59 @@ async def chat(request: Request):
     has_error = bool((result.get("metadata") or {}).get("error"))
     metrics.record_chat(chat_started, success=not has_error)
 
+    return JSONResponse(content=result)
+
+
+@app.post("/pubsub/push")
+async def pubsub_push(request: Request):
+    """Pub/Sub push endpoint (whatsapp-messages).
+
+    Validates the Google-signed OIDC token, dedupes by message_id, and processes
+    the payload via `orchestrator.orchestrate` exactly like a normal WhatsApp flow.
+    On retry exhaustion or validation failure, re-publishes to the DLQ topic.
+    """
+    from core.pubsub_consumer import (
+        dispatch,
+        parse_pubsub_push_body,
+        verify_pubsub_token,
+    )
+    from core.pubsub_publisher import get_publisher
+
+    auth_header = request.headers.get("Authorization", "")
+    if not verify_pubsub_token(auth_header):
+        raise HTTPException(status_code=401, detail="invalid_pubsub_token")
+    try:
+        body = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"invalid_json: {e}")
+
+    envelope = parse_pubsub_push_body(body)
+    if envelope["data"]:
+        try:
+            payload = json.loads(envelope["data"])
+        except json.JSONDecodeError:
+            payload = {"raw": envelope["data"]}
+    else:
+        payload = envelope
+
+    request_id = envelope["message_id"]
+
+    async def _process(p: Dict[str, Any]) -> Dict[str, Any]:
+        result = await orchestrate(p)
+        return {"status": "ok", "request_id": request_id, "result": result}
+
+    try:
+        result = await dispatch(payload, _process)
+    except Exception as exc:
+        logger.error("pubsub process failed: %s", exc)
+        try:
+            get_publisher().publish_dlq(
+                {"request_id": request_id, "payload": payload, "error": str(exc)},
+                attributes={"source": "whatsapp-messages", "reason": "exception"},
+            )
+        except Exception as pub_exc:
+            logger.error("pubsub DLQ publish failed: %s", pub_exc)
+        return JSONResponse(status_code=500, content={"status": "error", "request_id": request_id})
     return JSONResponse(content=result)
 
 
