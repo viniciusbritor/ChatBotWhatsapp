@@ -1,12 +1,9 @@
-import asyncio
 import base64
 import hashlib
-import json
 import logging
 import threading
 from typing import Any, Awaitable, Callable, Dict, Optional, Set
 
-import google.auth
 from google.auth.transport import requests as google_requests
 
 logger = logging.getLogger(__name__)
