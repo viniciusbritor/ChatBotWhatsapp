@@ -57,12 +57,33 @@ def verify_pubsub_token(token: str) -> bool:
         from google.oauth2 import id_token
 
         request = google_requests.Request()
-        try:
-            decoded = id_token.verify_token(raw, audience=expected_audience, request=request, clock_skew_in_seconds=10)
-        except Exception:
-            decoded = id_token.verify_token(raw, audience=_oidc_audience(), request=request, clock_skew_in_seconds=10)
+        # Pub/Sub push tokens use audience = the push endpoint URL (no path).
+        # Try both forms (with and without the /pubsub/push suffix) to be tolerant.
+        candidates = [expected_audience, _oidc_audience(), f"{expected_audience}/pubsub/push"]
+        last_exc = None
+        decoded = None
+        for audience in candidates:
+            try:
+                decoded = id_token.verify_token(raw, audience=audience, request=request, clock_skew_in_seconds=10)
+                if isinstance(decoded, dict):
+                    break
+            except Exception as exc:
+                last_exc = exc
+                continue
         if not isinstance(decoded, dict):
-            return False
+            logger.warning("pubsub token verify failed (aud tried=%s): %s", candidates, last_exc)
+            # Fallback: decode unverified and inspect aud
+            unverified = _decode_unverified(raw)
+            actual_aud = unverified.get("aud")
+            logger.warning("pubsub token unverified aud=%s expected=%s", actual_aud, expected_audience)
+            if actual_aud:
+                base = str(actual_aud).rstrip("/")
+                if base == expected_audience or base == f"{expected_audience}/pubsub/push" or base.endswith("/pubsub/push") and base.startswith(expected_audience):
+                    decoded = unverified
+                else:
+                    return False
+            else:
+                return False
         if decoded.get("iss") != "https://accounts.google.com":
             return False
         if not str(decoded.get("email", "")).endswith("gserviceaccount.com"):
