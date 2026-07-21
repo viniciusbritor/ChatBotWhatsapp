@@ -25,11 +25,15 @@
 
 ## Componentes Principais
 
-1. **agents_runtime** (Cloud Run) — Orquestrador + tools + specialists
+1. **agents_runtime** (Cloud Run) — Orquestrador + tools + specialists + webhook Evolution + publisher Pub/Sub
 2. **Coherence Portal** (existente) — UI de gestao `/admin/agents/*`
-3. **WhatsappAgente** (existente, edicao minima) — Thin proxy Evolution API
-4. **ata_worker** (Cloud Run Job) — Geracao de atas pos-reuniao
-5. **proactive_worker** (Cloud Run Job) — Mensagens proativas (calibrado, 2/dia max)
+3. **ata_worker** (Cloud Run Job) — Geracao de atas pos-reuniao
+4. **proactive_worker** (Cloud Run Job) — Mensagens proativas (calibrado, 2/dia max)
+
+> **Removido 2026-07-21 (Fase A):** `WhatsappAgente` thin proxy. O webhook Evolution
+> foi consolidado em `agents_runtime/main.py` rota `/webhook`. O extrator canonico
+> vive em `core/evolution_webhook.py` e cobre texto, audioMessage, extendedTextMessage,
+> grupo, broadcast e fromMe.
 
 ## Fluxo de Dados Principal
 
@@ -37,11 +41,10 @@
 flowchart TB
     subgraph WS["GCP: whatsapp-server VPC existente"]
         EVO["Evolution API :8080"]
-        WA["WhatsappAgente<br/>thin proxy"]
     end
 
     subgraph FS["GCP: coherence-ominichannel-fs"]
-        AR["agents_runtime<br/>Cloud Run test"]
+        AR["agents_runtime<br/>Cloud Run test<br/>/webhook + /pubsub/push + /chat"]
         ORCH["Orchestrator async + tool calling"]
         TOOLS["Tool Executors<br/>pre-registered"]
 
@@ -65,9 +68,12 @@ flowchart TB
         PORTAL["Coherence Portal<br/>React + FastAPI"]
         FS_DB[("Firestore<br/>agents, skills, tools,<br/>contatos, knowledge,<br/>grupos")]
         SM["GCP Secret Manager"]
+        PUB["Pub/Sub<br/>whatsapp-messages"]
     end
 
-    WA -->|"HTTPS POST /chat"| AR
+    EVO -->|"HTTPS POST /webhook"| AR
+    AR -->|"publish"| PUB
+    PUB -->|"push /pubsub/push"| AR
     AR --> ORCH
     ORCH --> MANAGERS
     ORCH --> SPECIALISTS
@@ -88,34 +94,31 @@ sequenceDiagram
     autonumber
     actor User as WhatsApp User
     participant EVO as Evolution API
-    participant WA as WhatsappAgente
     participant AR as agents_runtime
     participant WHISPER as Whisper (self-host)
     participant LLM as MiniMax com fallback DeepSeek
     participant FS as Firestore
 
     User->>EVO: mensagem (texto/audio)
-    EVO->>WA: POST /webhook MESSAGES_UPSERT
-    Note over WA: LGPD audit, rate-limit, jitter 3-8s
-    WA->>AR: POST /chat (Bearer SA token)<br/>{phone, text, sender_name, extra}
+    EVO->>AR: POST /webhook MESSAGES_UPSERT
+    Note over AR: core/evolution_webhook.py<br/>extrai texto, audio_url, message_id,<br/>filtra fromMe/broadcast/grupo vazio
+    AR->>AR: publish envelope no Pub/Sub whatsapp-messages
+    AR-->>EVO: 200 OK em <1s (sem bloqueio)
 
-    alt extra.has_audio == true
-        WA->>AR: audio_base64 + audio_mimetype
+    AR->>AR: /pubsub/push recebe o envelope<br/>(dedupe por message_id)
+    AR->>AR: LGPD masker no texto
+
+    alt has_audio == true
         AR->>WHISPER: transcribe_base64(audio)
         WHISPER-->>AR: text_transcrito
         AR->>AR: LGPD masker no texto transcrito
-    else URL controlada sem base64
-        AR->>AR: valida HTTPS, host, DNS, tamanho e duracao
-        AR->>WHISPER: transcribe_url(audio_url)
-        WHISPER-->>AR: text_transcrito
     end
 
     AR->>LLM: MiniMax M2.7 Highspeed<br/>(com tools + skills do Firestore)
     LLM-->>AR: response_text
     Note over AR: Heuristica de confianca<br/>fallback MiniMax M3 e DeepSeek
     AR->>FS: salva em contatos/{phone}/historico/{msg_id}
-    AR-->>WA: {reply, delay_ms, presence}
-    WA->>EVO: POST /message/sendText (delay, presence)
+    AR->>EVO: POST /message/sendText (delay, presence)
     EVO->>User: typing + mensagem
 ```
 

@@ -3,7 +3,7 @@
 Endpoints:
 - GET  /healthz       (public)
 - GET  /version       (Bearer SA)
-- POST /chat          (Bearer SA, called by WhatsappAgente)
+- POST /chat          (Bearer SA, called by webhook Evolution via /webhook)
 - POST /proactive/send (Bearer SA, called by proactive_worker)
 - /admin/*            (Bearer SA, proxy from Portal)
 """
@@ -222,11 +222,18 @@ async def chat(request: Request):
 async def evolution_webhook(request: Request):
     """Receive WhatsApp message from Evolution webhook.
 
-    Replaces the legacy whatsapp-agente proxy. Validates that the request
-    comes from the Evolution webhook (light check via payload shape),
-    extracts the message envelope, publishes to Pub/Sub and returns 200 OK
-    immediately so the Evolution webhook does not time out.
+    Single source of truth for inbound WhatsApp messages. Validates the
+    payload shape, extracts a normalized envelope, publishes to Pub/Sub
+    and returns 200 OK immediately so Evolution does not time out.
+
+    Filters applied (see core.evolution_webhook.extract_envelope):
+    - non-message events (CONNECTION_UPDATE, etc)
+    - fromMe echoes
+    - broadcast lists
+    - empty phone/instance
+    - unsupported message types (image/video/document without text)
     """
+    from core.evolution_webhook import extract_envelope
     from core.pubsub_publisher import get_publisher
 
     try:
@@ -234,56 +241,34 @@ async def evolution_webhook(request: Request):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"invalid_json: {e}")
 
-    event = body.get("event") or body.get("type") or ""
-    instance = body.get("instance") or ""
-    data = body.get("data") or {}
-
-    if event != "messages.upsert":
-        return JSONResponse(content={"status": "ignored", "event": event})
-
-    message = data.get("message") or {}
-    if message.get("fromMe"):
-        return JSONResponse(content={"status": "ignored", "reason": "fromMe"})
-
-    key = data.get("key") or {}
-    remote_jid = key.get("remoteJid") or message.get("from") or ""
-    phone = remote_jid.split("@", 1)[0] if remote_jid else ""
-
-    if not phone or not instance:
-        return JSONResponse(content={"status": "skipped", "reason": "missing_fields"})
-
-    message_id = key.get("id") or message.get("id") or ""
-    text = (
-        message.get("conversation")
-        or message.get("extendedTextMessage", {}).get("text")
-        or ""
-    )
-    sender_name = data.get("pushName") or ""
-
-    envelope = {
-        "request_id": message_id or f"webhook-{int(__import__('time').time()*1000)}",
-        "phone": phone,
-        "text": text,
-        "instance": instance,
-        "sender_name": sender_name,
-        "remote_jid": remote_jid,
-        "message_id": message_id,
-        "extra": message,
-    }
+    envelope = extract_envelope(body)
+    if envelope is None:
+        event = body.get("event") or body.get("type") or ""
+        if event and event not in {"MESSAGES_UPSERT", "messages.upsert"}:
+            return JSONResponse(content={"status": "ignored", "event": event})
+        return JSONResponse(content={"status": "ignored", "reason": "filtered"})
 
     publisher = get_publisher()
-    message_id_published = ""
     try:
         message_id_published = publisher.publish(
             envelope,
             topic="whatsapp-messages",
-            attributes={"source": "evolution-webhook", "instance": instance},
+            attributes={
+                "source": "evolution-webhook",
+                "instance": envelope["instance"],
+            },
         )
     except Exception as exc:
         logger.error("webhook publish failed: %s", exc)
         raise HTTPException(status_code=500, detail=f"publish_failed: {exc}")
 
-    return JSONResponse(content={"queued": True, "message_id": message_id_published})
+    return JSONResponse(
+        content={
+            "queued": True,
+            "message_id": message_id_published,
+            "request_id": envelope["request_id"],
+        }
+    )
 
 
 @app.post("/pubsub/push")

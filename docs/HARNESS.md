@@ -11,7 +11,7 @@
 - **Servicos Cloud Run (TEST):**
   - `agents-runtime-test` (2Gi, min=0, max=3) — recebe webhook do Evolution, processa com LLM, retorna resposta
   - `coherence-portal-test` (2Gi, existente) — UI do Portal
-  - ~~`whatsapp-agente-test`~~ (deletado 2026-07-21) — proxy intermediário não é mais necessário
+  - ~~`whatsapp-agente-test`~~ (removido na Fase A 2026-07-21) — webhook consolidado em `agents-runtime`
 - **Jobs Cloud Run:**
   - `ata-worker-test` (geracao de atas)
   - `proactive-worker-test` (mensagens proativas)
@@ -133,10 +133,10 @@ ENVIRONMENT: "test"
 | `minimax-api-key` | LLM ultimo recurso |
 | `serper-api-key` | Web search |
 | `google-oauth-token` | Calendar/Drive/Gmail |
-| `agents-runtime-sa-token` | Bearer para Portal/WhatsappAgente chamarem |
+| `agents-runtime-sa-token` | Bearer para Portal chamarem `/chat` e `/proactive/send` |
 | `evolution-api-key` | Evolution API |
 | `agents-runtime-url` | URL do servico agents-runtime-test |
-| `whatsapp-agente-url` | URL do servico whatsapp-agente-test |
+| ~~`whatsapp-agente-url`~~ | **Removido na Fase A** (proxy eliminado) |
 
 **Upload correto (NUNCA `versions update`, sempre `versions add`):**
 
@@ -318,7 +318,39 @@ curl -X POST https://agents-runtime-test-XXX-uc.a.run.app/chat \
   -H "Authorization: Bearer $AGENTS_RUNTIME_SA_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"instance":"jennifer","phone":"+5511966830020","text":"oi","sender_name":"Test"}'
+
+# Webhook Evolution (publico, NAO requer SA token)
+curl -X POST https://agents-runtime-test-XXX-uc.a.run.app/webhook \
+  -H "Content-Type: application/json" \
+  -d '{
+    "event":"MESSAGES_UPSERT",
+    "instance":"jennifer",
+    "data":{
+      "key":{"remoteJid":"5511966830020@s.whatsapp.net","fromMe":false,"id":"SMOKE_001"},
+      "pushName":"Vinicius",
+      "message":{"conversation":"oi smoke test"},
+      "messageType":"conversation"
+    }
+  }'
+# Resposta esperada: {"queued":true,"message_id":"<pubsub-msg-id>","request_id":"SMOKE_001"}
 ```
+
+### Webhook Evolution (Fase A — 2026-07-21)
+
+Apos a consolidacao da Fase A, a Evolution API aponta **diretamente** para
+`agents-runtime-test/webhook`. O extrator canonico em
+`agents_runtime/core/evolution_webhook.py` aceita:
+
+- `MESSAGES_UPSERT` (UPPERCASE, formato padrao Evolution)
+- `messages.upsert` (lowercase, aceita tambem para tolerancia)
+
+E filtra:
+
+- `fromMe=true` (echo do proprio bot)
+- `@broadcast` (status do WhatsApp)
+- Eventos nao-message (CONNECTION_UPDATE, QRCODE_UPDATED, etc)
+- Mensagens sem phone/instance
+- Tipos nao suportados (image/video/document sem texto)
 
 ### Testes Automatizados
 

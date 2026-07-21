@@ -54,6 +54,9 @@
 39. **Base64 e o transporte canonico** — URL e fallback controlado por HTTPS, allowlist e protecao SSRF.
 40. **Audio possui limites duros** — tamanho maximo configurado e duracao maxima de 5 minutos.
 41. **Transcricao e mascarada antes da orquestracao** — audio, base64 e texto cru nunca entram em logs.
+42. **Webhook Evolution e unico** (Fase A 2026-07-21) — `POST /webhook` do `agents-runtime` e o unico entry point de mensagens WhatsApp. Proibido criar proxies externos ou duplicatas.
+43. **Extrator canonico de payload Evolution** (Fase A 2026-07-21) — toda alteracao no formato do payload Evolution passa por `core/evolution_webhook.py:extract_envelope`. Nenhum codigo fora desse modulo filtra ou normaliza mensagens WhatsApp.
+44. **`/webhook` nao exige autenticacao** (Fase A 2026-07-21) — rota publica chamada pela Evolution API. Filtros anti-spam (fromMe, broadcast, instance vazia) sao obrigatorios como compensacao.
 
 ## Regras de Ouro (O que SEMPRE fazer)
 
@@ -128,7 +131,7 @@
 | Whisper load strategy | **Background load** (sem cold start penalty para texto) |
 | Min-instances | **0** + ping Cloud Scheduler 5min (ambos servicos) |
 | RAG pre-seed | **~10 docs curados** (Codigo Penal, Lei Maria da Penha, etc.) |
-| whatsapp-agente min | **0** + ping (aceita cold start) |
+| ~~whatsapp-agente min~~ (removido 2026-07-21) | ~~0 + ping (aceita cold start)~~ |
 | Proatividade em grupo | **Sempre permitida** apos entrada + welcome message |
 | Proatividade em grupo (formato) | **Mensagem GERAL** (sem @mention obrigatoria) |
 | Frequencia proativa | **2/dia/contato, 5/dia global, cooldown 12h** |

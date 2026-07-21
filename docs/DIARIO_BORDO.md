@@ -6,6 +6,61 @@
 
 ---
 
+## 21/07/2026 — Fase A: Consolidar webhook Evolution no agents_runtime
+
+### Escopo
+
+Eliminar dependencia do `WhatsappAgente` (repo separado `viniciusbritor/WhatsappAgente`)
+como proxy de mensagens WhatsApp. Evolution API aponta direto para
+`agents-runtime-test/webhook`. O thin proxy externo sera deletado na Fase F
+(cleanup manual do usuario).
+
+### Decisao arquitetural
+
+| Item | Antes | Depois |
+|---|---|---|
+| Entry point WhatsApp | `https://whatsapp-agente-test.../webhook` (proxy externo) | `https://agents-runtime-test.../webhook` (unico) |
+| Extrator de payload | `whatsapp_agente_pubsub_reference.py:274` (legado) | `core/evolution_webhook.py:extract_envelope` (canonico) |
+| Filtros | fromMe + broadcast basico | + audio/extended/group/missing fields |
+| Eventos aceitos | `messages.upsert` apenas | `MESSAGES_UPSERT` + `messages.upsert` (tolerancia) |
+
+### Mudancas de codigo
+
+| Arquivo | Mudanca |
+|---|---|
+| `agents_runtime/core/evolution_webhook.py` | NOVO modulo. `extract_envelope()` canonico, `extract_message_id()` helper. Cobre texto, audioMessage, extendedTextMessage, grupo, broadcast, fromMe. |
+| `agents_runtime/main.py:221` | Rota `/webhook` reescrita para usar `extract_envelope()`. Publica no Pub/Sub com `request_id`, `instance`, `phone`, `text`, `sender_name`, `remote_jid`, `message_id`, `extra`. Retorna 200 + `queued: true` em <1s. |
+| `agents_runtime/tests/test_evolution_webhook.py` | NOVO. 15 testes cobrindo todos os cenarios (texto/audio/grupo/broadcast/fromMe/invalido/URL customizada). |
+
+### Testes
+
+- Suite: 221 passed, 9 skipped (excluindo `tests/test_llm_provider.py`)
+- 15 novos testes da Fase A **todos passam**
+- 3 falhas pre-existentes em `tests/test_llm_provider.py` (cascade reordenado para MiniMax-M2.7-highspeed primeiro, sera corrigido na **Fase E**)
+
+### Documentacao (regra 0)
+
+- `ARQUITETURA.md`: removido `WhatsappAgente` da secao Componentes; diagrama Mermaid atualizado (Evolution → agents_runtime direto); fluxo de mensagem agora mostra Pub/Sub como fila interna
+- `HARNESS.md`: secao "Webhook Evolution (Fase A)" com curl smoke test; pipeline ponta-a-ponta confirma Evolution direto para agents_runtime; secret `whatsapp-agente-url` marcado como removido
+- `GUARDRAILS.md`: 3 regras novas (#42 webhook unico, #43 extrator canonico, #44 /webhook publico com filtros obrigatorios)
+- `DIARIO_BORDO.md`: esta entrada
+
+### Pendencias externas (Fase F)
+
+1. Deletar pasta `C:\Users\vinic\workspace_antigravity\ChatBotWhatsapp\WhatsappAgente\`
+2. Deletar repo `github.com/viniciusbritor/WhatsappAgente`
+3. Remover trigger Cloud Build `deploy-whatsapp-agente-*` (se existir)
+4. Atualizar Evolution API para apontar para URL nova do agents-runtime (voce faz via painel Evolution)
+
+### Proxima fase
+
+**Fase B**: corrigir bug do audio quebrando RAG (`message_id` nao propagado).
+Ja investigada, causa raiz identificada: `agents_runtime/main.py:154-211` substitui
+`body["text"]` com transcricao mas nao propaga `message_id` corretamente para
+`_index_message`.
+
+---
+
 ## 13/07/2026 — Setup Inicial do Projeto
 
 ### O que foi construido
@@ -69,7 +124,7 @@
 
 ### Otimizacoes de Custo Aplicadas
 - agents-runtime: 2Gi memory, min-instances=0, ping 5min (Tier 1 A+B)
-- whatsapp-agente: min-instances=0, ping 5min (Tier 1 adicional)
+- ~~whatsapp-agente: min-instances=0, ping 5min~~ (removido 2026-07-21)
 - Serper: cache 24h
 - Proactive Worker: **INCLUIDO** no MVP (Fase 6.5) — usuario decidiu
 

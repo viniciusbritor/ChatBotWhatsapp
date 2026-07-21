@@ -175,7 +175,7 @@ Todas as 8 fases implementadas. 152 testes passando, 9 skipped.
 | Servico | URL |
 |---|---|
 | agents-runtime-test | `https://agents-runtime-test-c5nbfc5meq-uc.a.run.app` |
-| whatsapp-agente-test | `https://whatsapp-agente-test-c5nbfc5meq-uc.a.run.app` |
+| ~~whatsapp-agente-test~~ (removido 2026-07-21) | ~~`https://whatsapp-agente-test-c5nbfc5meq-uc.a.run.app`~~ |
 | Evolution (Jennifer) | `https://evolution.coherenceai.com.br` (sem SSL ainda) |
 
 ### Secrets no GCP (`coherence-ominichannel-fs`)
