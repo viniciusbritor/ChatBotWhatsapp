@@ -3,6 +3,11 @@ import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
 
+def close_coroutine(coroutine):
+    coroutine.close()
+    return MagicMock()
+
+
 class TestDetectIntent:
     def test_clean_message(self):
         from orchestrator import _detect_intent
@@ -70,6 +75,24 @@ class TestExtractToolCalls:
         assert result == []
 
 
+class TestBindToolArgs:
+    def test_user_phone_overrides_model_supplied_phone(self):
+        from orchestrator import _bind_tool_args
+
+        result = _bind_tool_args(
+            "gmail.search_messages",
+            {"query": "in:inbox", "phone": "attacker-phone"},
+            "5511966830020",
+        )
+        assert result["phone"] == "5511966830020"
+
+    def test_public_tool_does_not_receive_phone(self):
+        from orchestrator import _bind_tool_args
+
+        result = _bind_tool_args("web.search", {"query": "teste"}, "5511966830020")
+        assert "phone" not in result
+
+
 class TestBuildSkillsSection:
     def test_no_skills(self):
         from orchestrator import _build_skills_section
@@ -110,14 +133,15 @@ class TestOrchestrate:
 
         with patch("orchestrator.get_agent", return_value=mock_morality):
             with patch("orchestrator._execute_agent", new_callable=AsyncMock) as mock_exec:
-                mock_exec.return_value = {"reply": "OK", "delay_ms": 100, "presence": "composing", "metadata": {"agent_id": "agent-morality"}}
-                result = await orchestrate({
-                    "instance": "jennifer",
-                    "phone": "+5511966830020",
-                    "text": "Vai se foder",
-                    "sender_name": "User",
-                    "extra": {},
-                })
+                with patch("orchestrator._schedule_indexing", side_effect=close_coroutine):
+                    mock_exec.return_value = {"reply": "OK", "delay_ms": 100, "presence": "composing", "metadata": {"agent_id": "agent-morality"}}
+                    await orchestrate({
+                        "instance": "jennifer",
+                        "phone": "+5511966830020",
+                        "text": "Vai se foder",
+                        "sender_name": "User",
+                        "extra": {},
+                    })
 
         assert mock_exec.called
         call_args = mock_exec.call_args

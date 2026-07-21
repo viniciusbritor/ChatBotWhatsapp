@@ -1,5 +1,4 @@
 """Tests for core.escalation module."""
-import pytest
 from core.escalation import compute_confidence_score, should_escalate
 
 

@@ -362,14 +362,36 @@ Validação reproduzível em Python 3.12, com secrets externos neutralizados:
 [Environment]::SetEnvironmentVariable("GCP_PROJECT", "", "Process")
 [Environment]::SetEnvironmentVariable("GCLOUD_PROJECT", "", "Process")
 [Environment]::SetEnvironmentVariable("FIRESTORE_EMULATOR_HOST", "", "Process")
-Remove-Item Env:DEEPSEEK_API_KEY,Env:NVIDIA_API_KEY,Env:MINIMAX_API_KEY -ErrorAction SilentlyContinue
+Remove-Item Env:DEEPSEEK_API_KEY,Env:NVIDIA_API_KEY,Env:MINIMAX_API_KEY,Env:OPENAI_API_KEY -ErrorAction SilentlyContinue
 python -m pytest -q tests/test_audio_pipeline_rag.py tests/test_phase_b_fixes.py
 python -m pytest -q tests/
-python -m ruff check core/ main.py orchestrator.py agent_loader.py tool_registry.py
+python -m ruff check core/ main.py orchestrator.py agent_loader.py tool_registry.py tools/ scripts/
 python -m mypy --no-incremental --explicit-package-bases --follow-imports=silent core
+python scripts/check_lgpd_compliance.py
 ```
 
 Resultado do gate isolado: 17 testes específicos aprovados; suite geral com 249 aprovados e 9 ignorados; Ruff sem erros; mypy sem erros em 19 arquivos. Os 9 ignorados são testes de proatividade condicionados à allowlist vazia. O warning de tarefa RAG em shutdown foi separado como hardening da Fase C para não misturar escopos.
+
+### Gate da Fase C — Hardening de Confiabilidade
+
+A Fase C consolidou o trabalho em andamento (OAuth per-user, logging estruturado, evolution client, scripts LGPD, testes de Pub/Sub/webhook/oauth), fechou o `ResourceWarning` de event loop e ajustou os testes do cascade LLM para refletir a ordem vigente (`MiniMax-M2.7-highspeed -> MiniMax M3 -> DeepSeek V4 Flash`).
+
+Validação reproduzível em Python 3.12, com secrets externos neutralizados:
+
+```powershell
+[Environment]::SetEnvironmentVariable("GCP_PROJECT", "", "Process")
+[Environment]::SetEnvironmentVariable("GCLOUD_PROJECT", "", "Process")
+[Environment]::SetEnvironmentVariable("FIRESTORE_EMULATOR_HOST", "", "Process")
+Remove-Item Env:DEEPSEEK_API_KEY,Env:NVIDIA_API_KEY,Env:MINIMAX_API_KEY,Env:OPENAI_API_KEY -ErrorAction SilentlyContinue
+cd agents_runtime
+python -m pytest -q tests/
+python -m pytest -q tests/test_llm_provider.py tests/test_rag.py::TestOpenAIEmbeddingContract tests/test_structured_logging.py
+python -m ruff check tests/ core/ main.py orchestrator.py agent_loader.py tool_registry.py tools/ scripts/
+python -m mypy --no-incremental --explicit-package-bases --follow-imports=silent core
+python scripts/check_lgpd_compliance.py
+```
+
+Resultado do gate isolado: 303 testes aprovados (10 ignorados pelo allowlist de proatividade); zero falhas, zero erros e zero warnings do projeto; Ruff sem erros; mypy sem erros em 25 arquivos; LGPD compliance check aprovado. As duas `DeprecationWarning` do `google._upb._message` (third-party protobuf 4.25) são filtradas via `pyproject.toml` por estarem fora do código do projeto.
 
 
 ```bash

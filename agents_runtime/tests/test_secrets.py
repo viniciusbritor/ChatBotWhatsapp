@@ -1,7 +1,4 @@
 """Tests for core.secrets module."""
-import os
-import pytest
-from unittest.mock import patch
 
 
 def test_get_secret_from_env(monkeypatch):

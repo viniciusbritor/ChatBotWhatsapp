@@ -27,7 +27,7 @@ from core.masker import mask_pii
 from core.escalation import compute_confidence_score
 from core.delay_calculator import calculate_delay_ms, calculate_presence
 from core.commands import detect_command, apply_command
-from tool_registry import get_tool, get_tool_schema
+from tool_registry import get_tool, get_tool_schema, is_user_scoped_tool
 from agent_loader import get_agent, get_skill, list_agents, get_user, get_config, has_nickname
 from core.audit import log_action
 
@@ -902,6 +902,7 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
                     prefetch_data = None
 
             if prefetch_data and _has_real_data(prefetch_data):
+                prefetch_data = mask_pii(prefetch_data)
                 data_label = "CALENDARIO" if intent["is_calendar"] else \
                              "EMAILS" if intent["is_email"] else "DRIVE"
                 agent_copy["system_prompt"] += (
@@ -982,6 +983,13 @@ def _normalize_response_identity(text: str) -> str:
     return normalized
 
 
+def _bind_tool_args(tool_name: str, tool_args: Dict[str, Any], phone: str) -> Dict[str, Any]:
+    effective_args = dict(tool_args)
+    if is_user_scoped_tool(tool_name):
+        effective_args["phone"] = phone
+    return effective_args
+
+
 async def _execute_agent(
     agent: Dict[str, Any],
     text: str,
@@ -1060,13 +1068,14 @@ async def _execute_agent(
         if not tool_fn:
             return json.dumps({"error": f"Tool '{tool_name}' not found"})
         try:
+            effective_args = _bind_tool_args(tool_name, tool_args, phone)
             if asyncio.iscoroutinefunction(tool_fn):
-                result = await tool_fn(**tool_args)
+                result = await tool_fn(**effective_args)
             else:
-                result = tool_fn(**tool_args)
-            return json.dumps(result, ensure_ascii=False, default=str)
+                result = tool_fn(**effective_args)
+            return mask_pii(json.dumps(result, ensure_ascii=False, default=str))
         except Exception as e:
-            return json.dumps({"error": str(e)})
+            return json.dumps({"error": type(e).__name__})
 
     try:
         if tool_schemas:
@@ -1148,7 +1157,7 @@ def _extract_tool_calls(reply_text: str, available_tools: List[str]) -> List[Dic
     Checks both resource name (calendar) and method (list_events).
     For MVP, we detect by name pattern. Real Agno tool-calling would be JSON.
     """
-    tool_calls = []
+    tool_calls: List[Dict[str, Any]] = []
     if not reply_text or not available_tools:
         return tool_calls
 

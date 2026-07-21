@@ -9,7 +9,6 @@ if str(ROOT) not in sys.path:
 
 os.environ.setdefault("EVO_BASE_URL", "https://evolution.coherenceai.com.br")
 
-import pytest  # noqa: E402
 
 from core.evolution_webhook import extract_envelope, extract_message_id  # noqa: E402
 

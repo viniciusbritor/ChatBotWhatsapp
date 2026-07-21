@@ -89,7 +89,8 @@ async def test_audio_routes_through_pubsub_push_to_orchestrate():
         envelope = publisher.publish.call_args.args[0]
         with patch("main.orchestrate", new=AsyncMock(side_effect=fake_orchestrate)):
             with patch("core.pubsub_consumer.verify_pubsub_token", return_value=True):
-                push_response = await pubsub_push(_request(_push_body(envelope, "pubsub-msg-id-001")))
+                with patch("core.evolution_client.send_text", new_callable=AsyncMock):
+                    push_response = await pubsub_push(_request(_push_body(envelope, "pubsub-msg-id-001")))
 
     assert webhook_response.status_code == 200
     assert push_response.status_code == 200
@@ -115,7 +116,8 @@ async def test_message_id_indexed_in_rag_after_audio_pipeline():
         envelope = publisher.publish.call_args.args[0]
         with patch("main.orchestrate", new=AsyncMock(side_effect=fake_orchestrate)):
             with patch("core.pubsub_consumer.verify_pubsub_token", return_value=True):
-                await pubsub_push(_request(_push_body(envelope, "pubsub-index-001")))
+                with patch("core.evolution_client.send_text", new_callable=AsyncMock):
+                    await pubsub_push(_request(_push_body(envelope, "pubsub-index-001")))
 
     assert indexed == [{"phone": "5511966830020", "message_id": "AUD_INDEX_001"}]
 

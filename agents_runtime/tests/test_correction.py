@@ -1,6 +1,6 @@
 """Tests for correction tool."""
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 
 class TestDetectCorrection:

@@ -60,6 +60,12 @@
 
 45. **Falha de transcricao nao descarta a mensagem** — quando nao existe texto alternativo, indexar somente marcador mascarado de auditoria no RAG; nunca armazenar audio bruto, URL ou transcricao parcial.
 46. **Fallback de `message_id` e observavel sem PII** — emitir WARN com `owner_hash`, instancia e indicador de nao idempotencia; telefone bruto e proibido no log.
+47. **OAuth e per-user** (Fase C 2026-07-21) — `core.oauth_per_user.get_valid_user_token` e a fonte canonica de access_token; o secret global `google-oauth-token` e legado e sera removido quando todos os managers (`manager-calendar`, `manager-drive`, `manager-email`) consumirem `core/oauth_per_user.py`. Estado assinado via HMAC (`OAUTH_STATE_SECRET`) com TTL de 600s.
+48. **Logs estruturados em BRT** (Fase C 2026-07-21) — todo log de producao usa `core.logging.JsonFormatter`, com timestamp `America/Sao_Paulo` em milissegundos e campos extras fora do whitelist padrao do `logging.LogRecord`.
+49. **Cliente Evolution canonico** (Fase C 2026-07-21) — toda chamada de envio de mensagem para a Evolution API passa por `core.evolution_client.send_text`. Proibido chamar `httpx`/`requests` direto para `https://evolution.coherenceai.com.br`.
+50. **Gate local zero warning** (Fase C 2026-07-21) — `pytest -q tests/` deve retornar zero `failed`, zero `error` e zero warning do projeto. DeprecationWarning de `google._upb._message` (third-party protobuf) e filtrado via `pyproject.toml` por estar fora do codigo do projeto.
+51. **Cascata LLM inicia no MiniMax-M2.7-highspeed** (Fase C 2026-07-21) — a ordem canonica do cascade em `core/llm_provider.py` e `minimax-hs -> minimax -> deepseek`. Alterar a ordem exige atualizacao dos testes de cascade e aprovacao explicita no `DIARIO_BORDO`.
+52. **`tzdata` obrigatorio em dev/test** (Fase C 2026-07-21) — `ZoneInfo("America/Sao_Paulo")` precisa de `tzdata` em runners Linux e Windows sem timezone local. A dependencia esta em `requirements-dev.txt`.
 
 ## Regras de Ouro (O que SEMPRE fazer)
 

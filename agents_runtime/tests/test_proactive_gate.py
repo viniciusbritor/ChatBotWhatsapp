@@ -1,7 +1,6 @@
 """Tests for proactive_gate module."""
 import pytest
 from datetime import datetime, timezone, timedelta
-from unittest.mock import patch
 
 
 class TestProhibitedTemplates:
@@ -33,7 +32,7 @@ class TestProhibitedTemplates:
 
 class TestCheckDM:
     def test_phone_not_in_allowlist(self):
-        from core.proactive_gate import check, _disabled, ALLOWLIST
+        from core.proactive_gate import check, ALLOWLIST
         allowed, reason = check("+5511988887777", relevance_score=0.9)
         if "+5511988887777" not in ALLOWLIST:
             assert allowed is False
@@ -125,7 +124,6 @@ class TestCheckGroup:
         from core.proactive_gate import check, ALLOWLIST
         if not ALLOWLIST:
             pytest.skip("ALLOWLIST empty")
-        master = ALLOWLIST[0]
         allowed, reason = check(
             "+5511988887777",
             group_jid="120363123456@g.us",

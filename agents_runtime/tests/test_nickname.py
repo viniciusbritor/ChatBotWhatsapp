@@ -1,6 +1,6 @@
 """Tests for nickname tool."""
 import pytest
-from unittest.mock import patch, MagicMock, mock_open
+from unittest.mock import patch, mock_open
 
 
 class TestNormalizeName:

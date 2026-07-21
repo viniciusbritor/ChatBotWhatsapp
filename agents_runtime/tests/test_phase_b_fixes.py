@@ -1,5 +1,4 @@
 """Tests for Fase B fixes: telemetry on missing message_id + audio failure audit."""
-import asyncio
 import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 

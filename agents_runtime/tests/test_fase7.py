@@ -1,6 +1,6 @@
 """Tests for Fase 7 (LGPD + Commands + Audit)."""
 import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
+from unittest.mock import patch, AsyncMock
 
 
 class TestLGPDCleanup:

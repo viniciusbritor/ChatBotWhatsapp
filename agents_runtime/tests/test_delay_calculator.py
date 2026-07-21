@@ -1,5 +1,4 @@
 """Tests for core.delay_calculator module."""
-import pytest
 from core.delay_calculator import calculate_delay_ms, calculate_presence
 
 

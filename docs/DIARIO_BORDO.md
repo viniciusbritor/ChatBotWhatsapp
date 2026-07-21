@@ -6,6 +6,85 @@
 
 ---
 
+## 21/07/2026 — Fase C: Hardening de Confiabilidade
+
+### Contexto
+
+A esteira local divergiu do HEAD apos a Fase B. Havia trabalho em andamento
+nao commitado (OAuth per-user, logging estruturado, evolution client, scripts
+LGPD, testes de Pub/Sub) e a suite exibia 5 falhas e 3 warnings. A Fase C
+consolidou esse trabalho, estabilizou a suite e fechou o `ResourceWarning`
+observado em B.6.
+
+### Escopo
+
+| Bloco | Itens |
+|---|---|
+| C.1 | corrigir testes pre-existentes (cascade, rag, tzdata) |
+| C.2 | eliminar `ResourceWarning` em `chat_escalating` |
+| C.3 | estabilizar `core.oauth_per_user`, `core.logging`, `core.evolution_client` e suites de Pub/Sub/webhook/oauth |
+| C.4 | cobrir `scripts/check_lgpd_compliance.py` com testes |
+| C.5 | atualizar 4 docs permanentes e plano detalhado |
+
+### C.1 — Correcoes nos testes pre-existentes
+
+- `tests/test_llm_provider.py` reescrito para `@pytest.mark.asyncio` em vez de
+  `asyncio.run(...)`. Assercoes ajustadas para a cascata atual (MiniMax-M2.7
+  highspeed -> MiniMax M3 -> DeepSeek V4 Flash). Adicionado teste explicito
+  `test_minimax_highspeed_first`.
+- `core/rag.py:_embed_direct` agora consulta `get_secret` antes do `os.getenv`,
+  mantendo o segredo seguro fora do ambiente de teste.
+- `tzdata>=2024.1` adicionado a `requirements-dev.txt` para suportar
+  `ZoneInfo("America/Sao_Paulo")` no formatter JSON em runners sem timezone
+  local.
+
+### C.2 — Fechamento do event loop
+
+`chat_escalating` e `chat` passaram a usar `pytest.mark.asyncio`. O loop
+anterior era criado via `asyncio.run` que, em conjunto com o escopo de loop do
+pytest-asyncio, deixava um `ProactorEventLoop` sem fechar no teardown do
+Windows. Com a migracao para o decorator, o loop passa a ser gerenciado pela
+fixture e o `ResourceWarning` desapareceu.
+
+### C.3 — Estabilizacao dos modulos em andamento
+
+- `core/oauth_per_user.py`: fluxo de OAuth per-user coberto por 16 testes
+  (state, refresh, persistencia, escopo por telefone).
+- `core/logging.py`: `JsonFormatter` validado por `tests/test_structured_logging.py`
+  (timestamp BRT em milissegundos, campos extras fora do whitelist).
+- `core/evolution_client.py`: cliente HTTP canonico para `sendText` na Evolution,
+  derivado do envelope da Fase A.
+- Testes do Pub/Sub publisher/consumer, webhook, oauth, audio e integration
+  consolidados sem alterar o escopo da Fase B.
+- `pyproject.toml` filtra as duas `DeprecationWarning` do `google._upb._message`
+  (third-party protobuf 4.25); codigo do projeto nao emite nenhuma.
+
+### C.4 — Cobertura LGPD
+
+Novo `tests/test_lgpd_compliance.py` com 3 testes:
+
+- `test_check_lgpd_compliance_passes_in_repo` confirma gate atual.
+- `test_check_lgpd_compliance_reports_missing_file` simula arquivo faltante.
+- `test_check_lgpd_compliance_reports_missing_snippet` simula snippet faltante.
+
+### Gate tecnico final
+
+| Validador | Resultado |
+|---|---|
+| `pytest -q tests/` | `303 passed, 10 skipped` (zero failed, zero error, zero warning) |
+| `ruff check .` | `All checks passed!` |
+| `mypy core orchestrator.py main.py agent_loader.py tool_registry.py` | `Success: no issues found in 25 source files` |
+| `python scripts/check_lgpd_compliance.py` | `LGPD compliance checks passed` |
+
+### Pendencias externas (continuam para Fase D+)
+
+- Provisionar indices Firestore Vector v2 no projeto GCP de teste.
+- Reindexacao real do corpus no ambiente de teste.
+- Build da imagem com o modelo Whisper pre-baixado.
+- Implantar a branch `test` (gate atual e green build).
+
+---
+
 ## 21/07/2026 — Fase B: corrigir áudio quebrando RAG por usuário
 
 ### Investigação

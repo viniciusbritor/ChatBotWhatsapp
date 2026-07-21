@@ -3,6 +3,7 @@
 > **Modo**: build (consolidação final da rodada de esteira de test)
 > **Escopo**: esteira de CI/CD, gaps dos agentes, fluxo OAuth, secrets órfãos.
 > **Base de referência**: commits `076fbbf9`, `1654c68`, `5bcb488`, `32acd4f`, `e8b0634`, `fa1d707`, `d29e8f1`, `f14aa93`.
+> **Status**: Fase C concluida (gate local 303 passed, 10 skipped, ruff 0, mypy 0, LGPD 0). Pendencias externas continuam em D+.
 
 ---
 

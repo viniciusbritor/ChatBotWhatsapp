@@ -286,7 +286,7 @@ def _normalize_phones(phone: str) -> List[str]:
 
 def has_nickname(phone: str) -> bool:
     """Verifica se usuario ja tem apelido consentido no Firestore."""
-    cache = getattr(has_nickname, "cache", {})
+    cache: Dict[str, bool] = getattr(has_nickname, "cache", {})
     if phone in cache:
         return cache[phone]
     import hashlib
@@ -300,7 +300,7 @@ def has_nickname(phone: str) -> bool:
             data = doc.to_dict()
             result = bool(data.get("accepted", False))
             cache[phone] = result
-            has_nickname.cache = cache
+            has_nickname.cache = cache  # type: ignore[attr-defined]
             return result
         return False
     except Exception:

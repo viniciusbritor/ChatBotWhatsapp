@@ -1,5 +1,4 @@
 """Tests for core.masker module (LGPD PII)."""
-import pytest
 from core.masker import mask_pii, has_pii, extract_pii
 
 
@@ -49,7 +48,7 @@ class TestMaskPII:
 
     def test_empty_string(self):
         assert mask_pii("") == ""
-        assert mask_pii(None) == None
+        assert mask_pii(None) is None
 
     def test_multiple_pii_types(self):
         text = "Joao (joao@test.com, CPF 123.456.789-09, tel 11 98765-4321)"

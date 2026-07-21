@@ -35,3 +35,10 @@ exclude = ["__pycache__", "tests", "docs", "scripts", "tools"]
 
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "integration: tests that require external infrastructure",
+]
+filterwarnings = [
+    "ignore:Type google._upb._message.MessageMapContainer uses PyType_Spec:DeprecationWarning",
+    "ignore:Type google._upb._message.ScalarMapContainer uses PyType_Spec:DeprecationWarning",
+]

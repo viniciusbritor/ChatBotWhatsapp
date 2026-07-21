@@ -1,6 +1,6 @@
 """Tests for google_calendar tool."""
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, MagicMock
 
 
 @pytest.fixture

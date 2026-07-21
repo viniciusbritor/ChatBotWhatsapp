@@ -1,6 +1,5 @@
 """Tests for core.llm_provider module (cascade fallback with mocks)."""
 import pytest
-import asyncio
 from unittest.mock import patch, MagicMock
 from core.llm_provider import LLMProvider, LLMError
 
@@ -36,30 +35,59 @@ class TestIsAvailable:
 
 
 class TestChatCascade:
-    def test_deepseek_success(self, monkeypatch, mock_responses):
+    @pytest.mark.asyncio
+    async def test_deepseek_used_when_minimax_unavailable(self, monkeypatch, mock_responses):
+        """When only DeepSeek is configured, the cascade reaches it directly."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
+        monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
         provider = LLMProvider()
+
         with patch("requests.post", return_value=mock_responses("DeepSeek answer")):
-            result = asyncio.run(provider.chat("sys", "user", model="deepseek-v4-flash"))
+            result = await provider.chat("sys", "user", model="deepseek-v4-flash")
+
         assert result["content"] == "DeepSeek answer"
         assert result["provider"] == "deepseek"
         assert result["model_used"] == "deepseek-v4-flash"
 
-    def test_cascade_fallback_to_deepseek(self, monkeypatch, mock_responses):
-        """If all MM fail, DeepSeek should be tried via chat() path."""
+    @pytest.mark.asyncio
+    async def test_cascade_fallback_to_deepseek(self, monkeypatch, mock_responses):
+        """MiniMax fails (quota), DeepSeek is tried and used."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
-        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test")
+        monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+        monkeypatch.setenv("MINIMAX_API_KEY", "minimax-test")
 
         provider = LLMProvider()
 
-        with patch("requests.post", return_value=mock_responses("DeepSeek answer")):
+        fail_response = MagicMock()
+        fail_response.status_code = 429
+
+        success_response = mock_responses("DeepSeek answer")
+
+        with patch("requests.post", side_effect=[fail_response, fail_response, success_response]):
             with patch("time.sleep"):
-                result = asyncio.run(provider.chat("sys", "user", model="deepseek-v4-flash"))
+                result = await provider.chat("sys", "user", model="deepseek-v4-flash")
 
         assert result["content"] == "DeepSeek answer"
-        assert "deepseek" in result["provider"]
+        assert result["provider"] == "deepseek"
 
-    def test_all_providers_fail(self, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_minimax_highspeed_first(self, monkeypatch, mock_responses):
+        """MiniMax-M2.7-highspeed is the primary provider (Fase A decision)."""
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        monkeypatch.setenv("MINIMAX_API_KEY", "minimax-test")
+
+        provider = LLMProvider()
+
+        with patch("requests.post", return_value=mock_responses("MiniMax fast answer")):
+            result = await provider.chat("sys", "user")
+
+        assert result["content"] == "MiniMax fast answer"
+        assert result["provider"] == "minimax-hs"
+        assert result["model_used"] == "MiniMax-M2.7-highspeed"
+
+    @pytest.mark.asyncio
+    async def test_all_providers_fail(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
         monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test")
         monkeypatch.setenv("MINIMAX_API_KEY", "minimax-test")
@@ -72,27 +100,31 @@ class TestChatCascade:
         with patch("requests.post", return_value=fail_response):
             with patch("time.sleep"):
                 with pytest.raises(LLMError, match="all_providers_failed"):
-                    asyncio.run(provider.chat("sys", "user", model="deepseek-v4-flash"))
+                    await provider.chat("sys", "user", model="deepseek-v4-flash")
 
 
 class TestChatEscalating:
-    def test_no_escalation_when_confident(self, monkeypatch, mock_responses):
+    @pytest.mark.asyncio
+    async def test_no_escalation_when_confident(self, monkeypatch, mock_responses):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        monkeypatch.setenv("MINIMAX_API_KEY", "minimax-test")
         provider = LLMProvider()
 
         with patch("requests.post", return_value=mock_responses("Good long answer with many words")):
-            result = asyncio.run(provider.chat_escalating(
+            result = await provider.chat_escalating(
                 "sys", "user",
                 fast_model="deepseek-v4-flash",
                 pro_model="deepseek-v4-pro",
                 threshold=-2,
                 scoring_fn=lambda t: 0,
-            ))
+            )
         assert result["escalated"] is False
-        assert result["provider"] == "deepseek"
+        assert result["provider"] == "minimax-hs"
 
-    def test_escalation_when_low_confidence(self, monkeypatch, mock_responses):
+    @pytest.mark.asyncio
+    async def test_escalation_when_low_confidence(self, monkeypatch, mock_responses):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        monkeypatch.setenv("MINIMAX_API_KEY", "minimax-test")
         provider = LLMProvider()
 
         flash_response = mock_responses("sim")
@@ -100,27 +132,29 @@ class TestChatEscalating:
 
         with patch("requests.post", side_effect=[flash_response, pro_response]):
             with patch("time.sleep"):
-                result = asyncio.run(provider.chat_escalating(
+                result = await provider.chat_escalating(
                     "sys", "user",
                     fast_model="deepseek-v4-flash",
                     pro_model="deepseek-v4-pro",
                     threshold=-2,
                     scoring_fn=lambda t: -3,
-                ))
+                )
         assert result["escalated"] is True
         assert "fast_response" in result
         assert result["confidence_score"] == -3
 
-    def test_no_escalation_flag_disables_escalation(self, monkeypatch, mock_responses):
+    @pytest.mark.asyncio
+    async def test_no_escalation_flag_disables_escalation(self, monkeypatch, mock_responses):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        monkeypatch.setenv("MINIMAX_API_KEY", "minimax-test")
         provider = LLMProvider()
 
         with patch("requests.post", return_value=mock_responses("sim")):
-            result = asyncio.run(provider.chat_escalating(
+            result = await provider.chat_escalating(
                 "sys", "user",
                 no_escalation=True,
                 scoring_fn=lambda t: -5,
-            ))
+            )
         assert result["escalated"] is False
 
 

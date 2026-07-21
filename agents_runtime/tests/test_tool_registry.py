@@ -1,10 +1,9 @@
 """Tests for tool_registry."""
-import pytest
 
 
 class TestToolRegistry:
     def test_calendar_tools_registered(self):
-        from tool_registry import TOOL_REGISTRY, list_tool_ids
+        from tool_registry import list_tool_ids
         tools = list_tool_ids()
         assert "calendar.list_events" in tools
         assert "calendar.create_event" in tools
@@ -57,6 +56,13 @@ class TestToolRegistry:
         assert "description" in schema
         assert schema["parameters"]["type"] == "object"
         assert "start" in schema["parameters"]["required"]
+        assert "phone" not in schema["parameters"]["properties"]
+
+    def test_non_user_scoped_schema_is_unchanged(self):
+        from tool_registry import get_tool_schema
+
+        schema = get_tool_schema("web.search")
+        assert "query" in schema["parameters"]["properties"]
 
     def test_get_tools_for_agent(self):
         from tool_registry import get_tools_for_agent

@@ -52,7 +52,9 @@ def _validate_embedding(embedding: Optional[Sequence[float]]) -> Optional[List[f
 
 
 def _embed_direct(text: str) -> Optional[List[float]]:
-    api_key = os.getenv("OPENAI_API_KEY") or get_secret("OPENAI_API_KEY")
+    api_key = get_secret("OPENAI_API_KEY")
+    if not api_key:
+        api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         logger.error("OpenAI embedding unavailable: api_key_missing")
         return None

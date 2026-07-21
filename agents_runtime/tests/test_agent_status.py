@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 
 class TestAgentInventory:
@@ -85,13 +85,14 @@ class TestAgentInventory:
 
     def test_provider_ready_uses_llm_cascade(self, monkeypatch):
         from core import agent_status
-        from core.llm_provider import LLMProvider
 
         class FakeLLM:
             minimax_key = None
             deepseek_key = None
             nvidia_key = None
-            is_available = lambda self: False
+
+            def is_available(self) -> bool:
+                return False
 
             def __init__(self):
                 pass
@@ -108,14 +109,17 @@ class TestAgentInventory:
 
         class FakeLLMSingleKey(FakeLLM):
             deepseek_key = "sk-test"
-            is_available = lambda self: True
+
+            def is_available(self) -> bool:
+                return True
 
         monkeypatch.setattr(agent_status, "_LLMProvider", FakeLLMSingleKey)
         assert agent_status._model_provider_ready("deepseek-v4-flash") is True
         assert agent_status._model_provider_ready("anything-else") is True
 
         class FakeLLMAvailable(FakeLLM):
-            is_available = lambda self: True
+            def is_available(self) -> bool:
+                return True
 
         monkeypatch.setattr(agent_status, "_LLMProvider", FakeLLMAvailable)
         assert agent_status._model_provider_ready("MiniMax-M3") is True
