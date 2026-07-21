@@ -2,11 +2,18 @@ import logging
 import os
 import time
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, TYPE_CHECKING
 
 import requests
-from google.cloud import firestore
 from google.oauth2.credentials import Credentials
+
+if TYPE_CHECKING:
+    from google.cloud import firestore
+else:
+    try:
+        from google.cloud import firestore
+    except ImportError:
+        firestore = None
 
 logger = logging.getLogger(__name__)
 
