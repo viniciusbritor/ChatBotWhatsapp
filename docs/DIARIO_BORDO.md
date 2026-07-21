@@ -6,7 +6,38 @@
 
 ---
 
-## 21/07/2026 — Fase A: Consolidar webhook Evolution no agents_runtime
+## 21/07/2026 — Fase B: corrigir áudio quebrando RAG por usuário
+
+### Investigação
+
+A hipótese inicial de que `message_id` não chegava ao `_index_message` foi descartada. Os testes confirmaram a propagação do identificador desde o payload Evolution, passando pelo envelope Pub/Sub, até a indexação. Dedupe por retry e normalização de `owner_hash` também permaneceram corretos.
+
+A causa raiz real foi o caminho de erro do áudio: quando o Whisper falhava e não existia texto alternativo, `/chat` retornava imediatamente sem chamar o fluxo de orquestração/indexação. A mensagem de áudio ficava ausente da memória RAG.
+
+### Correção
+
+- `main.py`: os caminhos de falha de validação e erro inesperado chamam `index_audio_failure_for_audit()` antes de responder.
+- `orchestrator.py`: o marcador contém somente motivo sanitizado e timestamp BRT, sem bytes de áudio, URL ou transcrição bruta.
+- `_message_id()`: ausência do identificador gera WARN com `owner_hash`, sem telefone bruto.
+- O metadata da resposta informa o status real da indexação do marcador.
+
+### Validação
+
+- 17 testes específicos de áudio, propagação de ID, retry, RAG e fallback aprovados.
+- Suite isolada em Python 3.12: 249 aprovados e 9 ignorados.
+- Ruff aprovado.
+- Mypy aprovado em 19 arquivos.
+- Os 9 testes ignorados pertencem ao gate de proatividade condicionado à allowlist vazia.
+
+### Pendência separada
+
+Foi observado um warning de tarefa RAG em background durante o encerramento de testes. Ele não gerou falha no gate B.6 e foi separado para hardening de confiabilidade da Fase C, evitando misturar o escopo da correção de áudio.
+
+### Correção de histórico
+
+A entrada da Fase A registrava como próxima investigação a hipótese de `message_id` não propagado. A investigação da Fase B corrigiu essa interpretação: o identificador chegava corretamente; o problema era o retorno antecipado após falha do Whisper.
+
+
 
 ### Escopo
 

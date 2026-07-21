@@ -24,7 +24,7 @@ from core import metrics
 from agent_loader import start_loader, stop_loader, list_agents, list_skills, list_tools, get_agent
 from agent_loader import upsert_agent, delete_agent, upsert_skill, upsert_tool
 from agent_loader import get_user, save_user, list_users
-from orchestrator import orchestrate, get_recent_interactions, drain_indexing_tasks
+from orchestrator import orchestrate, get_recent_interactions, drain_indexing_tasks, index_audio_failure_for_audit
 
 
 class JSONResponse(_JSONResponse):
@@ -181,8 +181,9 @@ async def chat(request: Request):
             body["extra"] = extra
             logger.info("Audio transcribed locally: source=%s chars=%s", source, len(body["text"]))
         except (AudioValidationError, AudioProcessingError) as e:
-            logger.warning("Audio transcription rejected: code=%s", str(e))
+            logger.warning("Audio transcription rejected: code=%s message_id=%s", str(e), body.get("message_id", ""))
             if not body.get("text"):
+                audit_result = await index_audio_failure_for_audit(body, str(e))
                 reply = "Nao consegui processar esse audio com seguranca. Pode reenviar ou mandar a mensagem em texto?"
                 return JSONResponse(content={
                     "reply": reply,
@@ -193,11 +194,18 @@ async def chat(request: Request):
                         "response_identity": "Jennifer",
                         "error": "audio_transcription_failed",
                         "reason": str(e),
+                        "audit_indexed": audit_result.get("status") == "indexed",
+                        "audit_status": audit_result.get("status", "error"),
                     },
                 })
         except Exception as e:
-            logger.error("Audio transcription failed: error_type=%s", type(e).__name__)
+            logger.error(
+                "Audio transcription failed: error_type=%s message_id=%s",
+                type(e).__name__,
+                body.get("message_id", ""),
+            )
             if not body.get("text"):
+                audit_result = await index_audio_failure_for_audit(body, f"unavailable:{type(e).__name__}")
                 reply = "Nao consegui transcrever esse audio agora. Pode tentar novamente ou enviar em texto?"
                 return JSONResponse(content={
                     "reply": reply,
@@ -207,6 +215,8 @@ async def chat(request: Request):
                         "agent_id": "audio-transcriber",
                         "response_identity": "Jennifer",
                         "error": "audio_transcription_unavailable",
+                        "audit_indexed": audit_result.get("status") == "indexed",
+                        "audit_status": audit_result.get("status", "error"),
                     },
                 })
 

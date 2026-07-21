@@ -352,7 +352,25 @@ E filtra:
 - Mensagens sem phone/instance
 - Tipos nao suportados (image/video/document sem texto)
 
-### Testes Automatizados
+### Gate da Fase B — áudio → Pub/Sub → RAG
+
+A causa raiz corrigida foi o retorno antecipado quando o Whisper falhava sem texto alternativo. O runtime agora grava um marcador de auditoria mascarado no RAG e retorna a mensagem amigável sem armazenar áudio bruto.
+
+Validação reproduzível em Python 3.12, com secrets externos neutralizados:
+
+```powershell
+[Environment]::SetEnvironmentVariable("GCP_PROJECT", "", "Process")
+[Environment]::SetEnvironmentVariable("GCLOUD_PROJECT", "", "Process")
+[Environment]::SetEnvironmentVariable("FIRESTORE_EMULATOR_HOST", "", "Process")
+Remove-Item Env:DEEPSEEK_API_KEY,Env:NVIDIA_API_KEY,Env:MINIMAX_API_KEY -ErrorAction SilentlyContinue
+python -m pytest -q tests/test_audio_pipeline_rag.py tests/test_phase_b_fixes.py
+python -m pytest -q tests/
+python -m ruff check core/ main.py orchestrator.py agent_loader.py tool_registry.py
+python -m mypy --no-incremental --explicit-package-bases --follow-imports=silent core
+```
+
+Resultado do gate isolado: 17 testes específicos aprovados; suite geral com 249 aprovados e 9 ignorados; Ruff sem erros; mypy sem erros em 19 arquivos. Os 9 ignorados são testes de proatividade condicionados à allowlist vazia. O warning de tarefa RAG em shutdown foi separado como hardening da Fase C para não misturar escopos.
+
 
 ```bash
 cd agents_runtime

@@ -58,6 +58,9 @@
 43. **Extrator canonico de payload Evolution** (Fase A 2026-07-21) — toda alteracao no formato do payload Evolution passa por `core/evolution_webhook.py:extract_envelope`. Nenhum codigo fora desse modulo filtra ou normaliza mensagens WhatsApp.
 44. **`/webhook` nao exige autenticacao** (Fase A 2026-07-21) — rota publica chamada pela Evolution API. Filtros anti-spam (fromMe, broadcast, instance vazia) sao obrigatorios como compensacao.
 
+45. **Falha de transcricao nao descarta a mensagem** — quando nao existe texto alternativo, indexar somente marcador mascarado de auditoria no RAG; nunca armazenar audio bruto, URL ou transcricao parcial.
+46. **Fallback de `message_id` e observavel sem PII** — emitir WARN com `owner_hash`, instancia e indicador de nao idempotencia; telefone bruto e proibido no log.
+
 ## Regras de Ouro (O que SEMPRE fazer)
 
 ### Persona

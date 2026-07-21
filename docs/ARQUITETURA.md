@@ -213,7 +213,14 @@ flowchart TD
     K --> L
 ```
 
-## Referencias
+## Fase B — Resiliencia do fluxo de audio e RAG
+
+A investigação confirmou que `message_id`, dedupe e `owner_hash` chegam corretamente no fluxo Evolution → Pub/Sub → orchestrator. A causa real era o retorno antecipado de `/chat` quando o Whisper falhava sem texto alternativo: o áudio não passava pelo caminho de indexação.
+
+Quando a transcrição é concluída, o texto passa pelo masker e segue para a orquestração e memória vetorial. Quando a transcrição falha, o runtime mantém a resposta amigável ao usuário e indexa somente um marcador curto de auditoria, mascarado, em `conversation-memory-v2`. O marcador preserva `message_id`, `conversation_id`, `turn_id` e timestamp BRT, mas nunca armazena bytes, URL de áudio ou texto bruto.
+
+A telemetria de ausência de `message_id` usa `owner_hash` e nível WARN. O fallback temporal permanece diagnosticável, mas não é considerado idempotente em retries. O teste de fluxo cobre texto e áudio, propagação do ID, retry deduplicado, normalização do proprietário e falhas do Whisper.
+
 
 - [PLAN_OMNICHANNEL_AGENTES.md](./PLAN_OMNICHANNEL_AGENTES.md) - Plano completo
 - [HARNESS.md](./HARNESS.md) - Setup e deploy

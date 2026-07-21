@@ -68,12 +68,21 @@ async def drain_indexing_tasks(timeout: float = 15.0) -> None:
 
 def _message_id(payload: Dict[str, Any]) -> Optional[str]:
     extra = payload.get("extra", {})
-    return (
+    message_id = (
         payload.get("message_id")
         or extra.get("message_id")
         or extra.get("messageId")
         or (extra.get("key") or {}).get("id")
     )
+    if not message_id:
+        phone = re.sub(r"\D", "", str(payload.get("phone", "")))
+        owner_hash = __import__("hashlib").sha256(phone.encode("utf-8")).hexdigest()[:12] if phone else "unknown"
+        logger.warning(
+            "message_id_missing owner_hash=%s instance=%s fallback=time_based_key retry_idempotent=false",
+            owner_hash,
+            payload.get("instance", "unknown"),
+        )
+    return message_id or None
 
 
 def _conversation_id(payload: Dict[str, Any]) -> str:
@@ -612,6 +621,31 @@ async def _index_message(phone: str, text: str, direction: str, **metadata: Any)
     except Exception as exc:
         logger.error("RAG message indexing failed: %s", exc)
         return {"status": "error", "reason": str(exc)}
+
+
+async def index_audio_failure_for_audit(body: Dict[str, Any], error_code: str) -> Dict[str, Any]:
+    try:
+        phone = body.get("phone", "")
+        message_id = body.get("message_id") or (body.get("extra") or {}).get("message_id") or ""
+        if not phone:
+            return {"status": "skipped", "reason": "missing_phone"}
+        timestamp_brt = datetime.now(timezone(timedelta(hours=-3))).isoformat(timespec="minutes")
+        marker_text = mask_pii(
+            f"[audio transcription failed at {timestamp_brt} reason={error_code}]"
+        )
+        return await _index_message(
+            phone,
+            marker_text,
+            "in",
+            message_id=f"audio-fail:{message_id}" if message_id else None,
+            conversation_id=(body.get("extra") or {}).get("remote_jid") or phone,
+            turn_id=message_id,
+            agent_id="audio-transcriber",
+            response_identity="AudioAudit",
+        )
+    except Exception as exc:
+        logger.warning("audio failure audit indexing failed: %s", type(exc).__name__)
+        return {"status": "error", "reason": type(exc).__name__}
 
 
 async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
