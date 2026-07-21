@@ -9,14 +9,49 @@
 - **Project:** `coherence-ominichannel-fs`
 - **Region:** `us-central1`
 - **Servicos Cloud Run (TEST):**
-  - `agents-runtime-test` (2Gi, min=0, ping 5min)
-  - `coherence-portal-test` (2Gi, existente)
-  - `whatsapp-agente-test` (1Gi, min=0, ping 5min)
+  - `agents-runtime-test` (2Gi, min=0, max=3) — recebe webhook do Evolution, processa com LLM, retorna resposta
+  - `coherence-portal-test` (2Gi, existente) — UI do Portal
+  - ~~`whatsapp-agente-test`~~ (deletado 2026-07-21) — proxy intermediário não é mais necessário
 - **Jobs Cloud Run:**
   - `ata-worker-test` (geracao de atas)
   - `proactive-worker-test` (mensagens proativas)
 - **Pub/Sub topics:**
+  - `whatsapp-messages` (webhook → agents-runtime, prod e test)
+  - `whatsapp-messages-dlq` (DLQ para retries > 5)
   - `monitoria-whisper-jobs` (existente, eventual fallback audio)
+
+## Arquitetura consolidada (2026-07-21)
+
+O projeto `viniciusbritor/ChatBotWhatsapp` contém **apenas** o serviço de agentes. O proxy Evolution foi consolidado dentro do próprio `agents-runtime` via endpoint `POST /webhook` que publica no Pub/Sub `whatsapp-messages`. A pipeline ponta-a-ponta é:
+
+```
+Celular
+  ↕ (áudio/texto)
+Evolution API (projeto EvolutionWhatsapp, repo separado)
+  ↕ (webhook POST https://agents-runtime-test-...a.run.app/webhook)
+agents-runtime-test (Cloud Run, projeto ChatBotWhatsapp)
+  ↕ (POST /webhook → publish whatsapp-messages)
+Pub/Sub whatsapp-messages
+  ↕ (push subscription agents-runtime-consumer → /pubsub/push)
+agents-runtime-test (POST /pubsub/push, dedupe, orchestrate)
+  ↕ (Whisper + LLM cascade)
+Evolution /message/sendText
+  ↕ (resposta)
+Celular
+```
+
+Os repos `viniciusbritor/EvolutionWhatsapp` (hospeda o Evolution API) e `viniciusbritor/ChatBotWhatsapp` (hospeda o agents-runtime) são **separados** e **independentes**.
+
+## CI/CD (Cloud Build triggers)
+
+| Trigger | Repo | Branch | Build config | Service Account |
+|---|---|---|---|---|
+| `deploy-agents-runtime-test` | ChatBotWhatsapp | `^test$` | `agents_runtime/cloudbuild-test.yaml` | `894828119087-compute@developer.gserviceaccount.com` (compute default) |
+| `deploy-agents-runtime-prod` | ChatBotWhatsapp | `^main$` | `agents_runtime/cloudbuild.yaml` | (compute default) |
+| `EvolutionWhatsapp-test` | EvolutionWhatsapp | `^test$` | (do repo EvolutionWhatsapp) | (compute default) |
+| `EvolutionWhatsapp-prod` | EvolutionWhatsapp | `^main$` | (do repo EvolutionWhatsapp) | (compute default) |
+| `deploy-whatsapp-agente-*` | **deletado 2026-07-21** (proxy consolidado em `agents-runtime`) | — | — | — |
+| `chatbotwhatsapp-test` | **deletado 2026-07-21** (duplicado de `deploy-agents-runtime-test`) | — | — | — |
 
 ## Variaveis de Ambiente
 
