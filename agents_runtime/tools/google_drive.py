@@ -1,5 +1,9 @@
-"""Google Drive tools - 4 functions."""
-import json
+﻿"""Google Drive tools - 4 functions.
+
+Auth: per-user OAuth via core.oauth_per_user.get_user_credentials.
+The phone parameter is mandatory (Fase D); the global GOOGLE_OAUTH_TOKEN
+fallback was removed.
+"""
 import logging
 from typing import Optional, Dict, Any
 
@@ -18,32 +22,21 @@ _ATAS_SUBFOLDER = "Atas"
 _drive_services: Dict[str, Any] = {}
 
 
-def _get_credentials(phone: Optional[str] = None) -> Credentials:
-    """Load Google OAuth credentials - per-user if phone provided, else global token.
+def _get_credentials(phone: str) -> Credentials:
+    """Load Google OAuth credentials for the given user (per-user, Fase D)."""
+    if not phone:
+        raise RuntimeError("phone_required_for_drive_oauth")
+    from core.oauth_per_user import get_user_credentials
 
-    Uses core.oauth_per_user.get_user_credentials which centralises refresh logic.
-    """
-    if phone:
-        try:
-            from core.oauth_per_user import get_user_credentials
-
-            creds = get_user_credentials(phone)
-            if creds is not None:
-                return creds
-        except Exception as e:
-            logger.warning(f"Per-user credentials failed for {phone}: {e}")
-
-    from core.secrets import get_secret
-    token_json = get_secret("GOOGLE_OAUTH_TOKEN")
-    if not token_json:
-        raise RuntimeError("GOOGLE_OAUTH_TOKEN not configured")
-    token_data = json.loads(token_json) if isinstance(token_json, str) else token_json
-    return Credentials.from_authorized_user_info(token_data, SCOPES)
+    creds = get_user_credentials(phone)
+    if creds is None:
+        raise RuntimeError("user_google_oauth_required")
+    return creds
 
 
-def _get_service(phone: Optional[str] = None):
+def _get_service(phone: str):
     """Get or build Drive API service (cached per user)."""
-    cache_key = phone or "_global_"
+    cache_key = phone
     if cache_key not in _drive_services:
         creds = _get_credentials(phone)
         _drive_services[cache_key] = build("drive", "v3", credentials=creds, cache_discovery=False)
@@ -62,15 +55,16 @@ def _format_file(file: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def search_files(
+    phone: str,
     query: str,
     folder_id: Optional[str] = None,
     mime_type: Optional[str] = None,
     max_results: int = 20,
-    phone: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Search for files in Drive.
 
     Args:
+        phone: User phone for per-user OAuth token (mandatory, Fase D).
         query: Search query (Google Drive query syntax)
         folder_id: Restrict search to folder
         mime_type: Filter by MIME type
@@ -101,15 +95,16 @@ async def search_files(
 
 
 async def upload_file(
+    phone: str,
     folder_id: str,
     filename: str,
     content: str,
     mime_type: str = "text/plain",
-    phone: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Upload a file to Drive folder.
 
     Args:
+        phone: User phone for per-user OAuth token (mandatory, Fase D).
         folder_id: Destination folder ID
         filename: Name of the file
         content: File content (string)
@@ -141,13 +136,14 @@ async def upload_file(
 
 
 async def list_folder(
+    phone: str,
     folder_id: str = "root",
     max_results: int = 50,
-    phone: Optional[str] = None,
 ) -> Dict[str, Any]:
     """List contents of a folder.
 
     Args:
+        phone: User phone for per-user OAuth token (mandatory, Fase D).
         folder_id: Folder ID (default: root)
         max_results: Max results
 
@@ -174,13 +170,14 @@ async def list_folder(
 
 
 async def create_folder(
+    phone: str,
     name: str,
     parent_id: Optional[str] = None,
-    phone: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create a folder.
 
     Args:
+        phone: User phone for per-user OAuth token (mandatory, Fase D).
         name: Folder name
         parent_id: Parent folder ID (None for root)
 
@@ -202,8 +199,11 @@ async def create_folder(
         return {"error": str(e)}
 
 
-async def find_omnichannel_atas_folder(phone: Optional[str] = None) -> Dict[str, Any]:
+async def find_omnichannel_atas_folder(phone: str) -> Dict[str, Any]:
     """Find the Omnichannel/Atas/ folder, creating if missing.
+
+    Args:
+        phone: User phone for per-user OAuth token (mandatory, Fase D).
 
     Returns:
         {"folder_id": "..."} or {"error": str}
@@ -227,7 +227,7 @@ async def find_omnichannel_atas_folder(phone: Optional[str] = None) -> Dict[str,
         if atas_files:
             return {"folder_id": atas_files[0]["id"]}
 
-        created = await create_folder(_ATAS_SUBFOLDER, parent_id=omnichannel_id)
+        created = await create_folder(phone, _ATAS_SUBFOLDER, parent_id=omnichannel_id)
         if "folder" in created:
             return {"folder_id": created["folder"]["id"]}
         return {"error": "failed to create Atas folder"}

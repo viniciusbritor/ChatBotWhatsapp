@@ -1,5 +1,4 @@
 """Ata helper - generates meeting minutes from Calendar + Gmail data."""
-import os
 import logging
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
@@ -64,12 +63,14 @@ async def generate_ata_markdown(
 
 
 async def save_ata_to_drive(
+    phone: str,
     event: Dict[str, Any],
     ata_markdown: str,
 ) -> Dict[str, Any]:
     """Save ata markdown to Drive/Omnichannel/Atas/.
 
     Args:
+        phone: User phone for per-user OAuth token (mandatory, Fase D).
         event: Calendar event
         ata_markdown: Markdown content
 
@@ -78,7 +79,7 @@ async def save_ata_to_drive(
     """
     from tools.google_drive import find_omnichannel_atas_folder, upload_file
 
-    folder_result = await find_omnichannel_atas_folder()
+    folder_result = await find_omnichannel_atas_folder(phone)
     if "error" in folder_result:
         return folder_result
 
@@ -87,10 +88,11 @@ async def save_ata_to_drive(
     title_slug = event.get("summary", "reuniao").replace(" ", "_").replace("/", "-")[:50]
     filename = f"{start}_{title_slug}.md"
 
-    return await upload_file(folder_id, filename, ata_markdown, mime_type="text/markdown")
+    return await upload_file(phone, folder_id, filename, ata_markdown, mime_type="text/markdown")
 
 
 async def notify_organizer(
+    phone: str,
     organizer_email: str,
     event_title: str,
     drive_link: str,
@@ -99,6 +101,7 @@ async def notify_organizer(
     """Notify organizer via email with link to ata.
 
     Args:
+        phone: User phone for per-user OAuth token (mandatory, Fase D).
         organizer_email: Organizer email
         event_title: Meeting title
         drive_link: Link to ata file in Drive
@@ -118,7 +121,7 @@ async def notify_organizer(
         f"Qualquer ajuste, me avise.\n\n"
         f"Jennifer"
     )
-    return await send_message(organizer_email, subject, body)
+    return await send_message(phone, organizer_email, subject, body)
 
 
 def _now_iso():

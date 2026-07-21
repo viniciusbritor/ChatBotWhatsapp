@@ -432,9 +432,11 @@ async def _prefetch_calendar(phone: str) -> Optional[str]:
         brt = timezone(timedelta(hours=-3))
         hoje = datetime.now(brt)
         result = await list_events(
+            phone,
             time_min=hoje.strftime("%Y-%m-%dT00:00:00-03:00"),
             time_max=hoje.strftime("%Y-%m-%dT23:59:59-03:00"),
-            max_results=50, phone=phone)
+            max_results=50,
+        )
         events = result.get("events", [])
         if not events:
             return None
@@ -448,7 +450,7 @@ async def _prefetch_email(phone: str) -> Optional[str]:
     """Fase B: pre-busca ultimos emails sem LLM."""
     try:
         from tools.google_gmail import search_messages
-        result = await search_messages("in:inbox newer_than:30d", max_results=10, phone=phone)
+        result = await search_messages(phone, "in:inbox newer_than:30d", max_results=10)
         messages = result.get("messages", [])
         if not messages:
             return None
@@ -462,7 +464,7 @@ async def _prefetch_drive(phone: str, query_text: str = "") -> Optional[str]:
     """Fase B: pre-busca arquivos no Drive sem LLM."""
     try:
         from tools.google_drive import search_files
-        result = await search_files(query_text or "", max_results=20, phone=phone)
+        result = await search_files(phone, query_text or "", max_results=20)
         files = result.get("files", [])
         if not files:
             return None
@@ -504,8 +506,8 @@ async def _prefetch_drive_docs(phone: str, query_text: str = "") -> Optional[str
         if query_text:
             query_parts.append(f"name contains '{query_text}'")
         query_parts.append("mimeType contains 'document' or mimeType contains 'presentation'")
-        result = await search_files(query_text or "", mime_type="application/vnd.google-apps.document", max_results=20, phone=phone)
-        alt = await search_files(query_text or "", mime_type="application/vnd.google-apps.presentation", max_results=20, phone=phone)
+        result = await search_files(phone, query_text or "", mime_type="application/vnd.google-apps.document", max_results=20)
+        alt = await search_files(phone, query_text or "", mime_type="application/vnd.google-apps.presentation", max_results=20)
         all_files = result.get("files", []) + alt.get("files", [])
         if not all_files:
             return None

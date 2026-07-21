@@ -18,7 +18,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import httpx
 
 from core.llm_provider import LLMProvider, LLMError
-from core.masker import mask_pii
 from core.proactive_gate import (
     check,
     is_dry_run,
@@ -38,8 +37,16 @@ PROACTIVE_RELEVANCE_MIN = 0.75
 MAX_PROACTIVE_PER_RUN = 5
 
 
-async def scan_upcoming_events() -> List[Dict[str, Any]]:
-    """Scan Calendar for events in next 1h, 3h, 24h."""
+def _known_phones() -> List[str]:
+    """Resolve phones to iterate in this run (Fase D)."""
+    env_phones = os.getenv("PROACTIVE_WORKER_PHONES")
+    if env_phones:
+        return [p.strip() for p in env_phones.split(",") if p.strip()]
+    return []
+
+
+async def scan_upcoming_events(phone: str) -> List[Dict[str, Any]]:
+    """Scan Calendar for events in next 1h, 3h, 24h for the given user."""
     now = datetime.now(timezone.utc)
     brt_offset = timedelta(hours=-3)
     now_brt = now + brt_offset
@@ -53,6 +60,7 @@ async def scan_upcoming_events() -> List[Dict[str, Any]]:
     candidates = []
     for label, start, end in windows:
         result = await list_events(
+            phone,
             time_min=start.isoformat(),
             time_max=end.isoformat(),
             max_results=20,
@@ -61,6 +69,7 @@ async def scan_upcoming_events() -> List[Dict[str, Any]]:
             candidates.append({
                 "trigger": f"calendar_{label}",
                 "event": event,
+                "phone": phone,
                 "relevance_score": 0.85,
             })
 
@@ -189,7 +198,6 @@ async def process_candidate(candidate: Dict[str, Any]) -> bool:
             return False
 
         contact_state = _get_contact_state(phone)
-        is_group = bool(event.get("group_jid"))
         allowed, reason = check(
             phone=phone,
             group_jid=event.get("group_jid"),
@@ -208,22 +216,35 @@ async def process_candidate(candidate: Dict[str, Any]) -> bool:
 
 
 async def run_events_scan() -> Dict[str, Any]:
-    """Run the upcoming events scan."""
-    candidates = await scan_upcoming_events()
-    logger.info(f"Found {len(candidates)} upcoming event candidates")
+    """Run the upcoming events scan across known users (Fase D)."""
+    phones = _known_phones()
+    if not phones:
+        logger.info("No phones configured for proactive worker (PROACTIVE_WORKER_PHONES)")
+        return {"candidates": 0, "sent": 0, "blocked": 0, "users": 0}
+
+    all_candidates: List[Dict[str, Any]] = []
+    for phone in phones:
+        try:
+            user_candidates = await scan_upcoming_events(phone)
+            all_candidates.extend(user_candidates)
+        except Exception:
+            logger.exception(f"scan_upcoming_events failed for {phone}")
+
+    logger.info(f"Found {len(all_candidates)} upcoming event candidates across {len(phones)} users")
 
     sent = 0
     blocked = 0
-    for candidate in candidates[:MAX_PROACTIVE_PER_RUN]:
+    for candidate in all_candidates[:MAX_PROACTIVE_PER_RUN]:
         if await process_candidate(candidate):
             sent += 1
         else:
             blocked += 1
 
     return {
-        "candidates": len(candidates),
+        "candidates": len(all_candidates),
         "sent": sent,
         "blocked": blocked,
+        "users": len(phones),
     }
 
 

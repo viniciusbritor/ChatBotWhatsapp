@@ -1,5 +1,9 @@
-"""Google Gmail tools - 3 functions."""
-import json
+﻿"""Google Gmail tools - 3 functions.
+
+Auth: per-user OAuth via core.oauth_per_user.get_user_credentials.
+The phone parameter is mandatory (Fase D); the global GOOGLE_OAUTH_TOKEN
+fallback was removed.
+"""
 import base64
 import logging
 from typing import Optional, List, Dict, Any
@@ -17,32 +21,21 @@ SCOPES = [
 _gmail_services: Dict[str, Any] = {}
 
 
-def _get_credentials(phone: Optional[str] = None) -> Credentials:
-    """Load Google OAuth credentials - per-user if phone provided, else global token.
+def _get_credentials(phone: str) -> Credentials:
+    """Load Google OAuth credentials for the given user (per-user, Fase D)."""
+    if not phone:
+        raise RuntimeError("phone_required_for_gmail_oauth")
+    from core.oauth_per_user import get_user_credentials
 
-    Uses core.oauth_per_user.get_user_credentials which centralises refresh logic.
-    """
-    if phone:
-        try:
-            from core.oauth_per_user import get_user_credentials
-
-            creds = get_user_credentials(phone)
-            if creds is not None:
-                return creds
-        except Exception as e:
-            logger.warning(f"Per-user credentials failed for {phone}: {e}")
-
-    from core.secrets import get_secret
-    token_json = get_secret("GOOGLE_OAUTH_TOKEN")
-    if not token_json:
-        raise RuntimeError("GOOGLE_OAUTH_TOKEN not configured")
-    token_data = json.loads(token_json) if isinstance(token_json, str) else token_json
-    return Credentials.from_authorized_user_info(token_data, SCOPES)
+    creds = get_user_credentials(phone)
+    if creds is None:
+        raise RuntimeError("user_google_oauth_required")
+    return creds
 
 
-def _get_service(phone: Optional[str] = None):
+def _get_service(phone: str):
     """Get or build Gmail API service (cached per user)."""
-    cache_key = phone or "_global_"
+    cache_key = phone
     if cache_key not in _gmail_services:
         creds = _get_credentials(phone)
         _gmail_services[cache_key] = build("gmail", "v1", credentials=creds, cache_discovery=False)
@@ -86,14 +79,15 @@ def _format_message(msg: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def search_messages(
+    phone: str,
     query: str,
     max_results: int = 10,
     label_ids: Optional[List[str]] = None,
-    phone: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Search Gmail messages.
 
     Args:
+        phone: User phone for per-user OAuth token (mandatory, Fase D).
         query: Gmail search query (e.g., "from:user@example.com", "subject:meeting")
         max_results: Max results
         label_ids: Filter by labels (e.g., ["INBOX"])
@@ -126,10 +120,14 @@ async def search_messages(
         return {"messages": [], "count": 0, "error": str(e)}
 
 
-async def get_thread(thread_id: str, phone: Optional[str] = None) -> Dict[str, Any]:
+async def get_thread(
+    phone: str,
+    thread_id: str,
+) -> Dict[str, Any]:
     """Get all messages in a thread.
 
     Args:
+        phone: User phone for per-user OAuth token (mandatory, Fase D).
         thread_id: Gmail thread ID
 
     Returns:
@@ -146,16 +144,17 @@ async def get_thread(thread_id: str, phone: Optional[str] = None) -> Dict[str, A
 
 
 async def send_message(
+    phone: str,
     to: str,
     subject: str,
     body: str,
     thread_id: Optional[str] = None,
     html: bool = False,
-    phone: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Send an email.
 
     Args:
+        phone: User phone for per-user OAuth token (mandatory, Fase D).
         to: Recipient email
         subject: Email subject
         body: Email body

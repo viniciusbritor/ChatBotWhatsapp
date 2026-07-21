@@ -32,8 +32,9 @@ class TestScanUpcomingEvents:
                 ],
                 "count": 2,
             }
-            result = await pw_main.scan_upcoming_events()
+            result = await pw_main.scan_upcoming_events("5511966830020")
         assert len(result) >= 2
+        assert result[0]["phone"] == "5511966830020"
 
 
 class TestSendProactiveMessage:

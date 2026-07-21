@@ -1,4 +1,4 @@
-"""Tests for google_gmail tool."""
+"""Tests for google_gmail tool (per-user OAuth, Fase D)."""
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -9,6 +9,9 @@ def mock_gmail_service():
         service = MagicMock()
         mock.return_value = service
         yield service
+
+
+PHONE = "5511966830020"
 
 
 class TestSearchMessages:
@@ -32,7 +35,7 @@ class TestSearchMessages:
                 "mimeType": "text/plain",
             },
         }
-        result = await search_messages("subject:reuniao")
+        result = await search_messages(PHONE, "subject:reuniao")
         assert result["count"] >= 1
         assert result["messages"][0]["from"] == "joao@example.com"
 
@@ -40,7 +43,7 @@ class TestSearchMessages:
     async def test_search_messages_empty(self, mock_gmail_service):
         from tools.google_gmail import search_messages
         mock_gmail_service.users().messages().list().execute.return_value = {"messages": []}
-        result = await search_messages("subject:naoexiste")
+        result = await search_messages(PHONE, "subject:naoexiste")
         assert result["count"] == 0
 
 
@@ -56,7 +59,7 @@ class TestGetThread:
                  "payload": {"headers": [{"name": "Subject", "value": "Re: Test"}], "mimeType": "text/plain", "body": {"data": "aGk="}}},
             ]
         }
-        result = await get_thread("t1")
+        result = await get_thread(PHONE, "t1")
         assert result["count"] == 2
 
 
@@ -67,7 +70,7 @@ class TestSendMessage:
         mock_gmail_service.users().messages().send().execute.return_value = {
             "id": "sent1", "threadId": "t1",
         }
-        result = await send_message("to@example.com", "Subject", "Body text")
+        result = await send_message(PHONE, "to@example.com", "Subject", "Body text")
         assert "message" in result
         assert result["message"]["to"] == "to@example.com"
 
@@ -77,5 +80,35 @@ class TestSendMessage:
         mock_gmail_service.users().messages().send().execute.return_value = {
             "id": "sent2", "threadId": "t2",
         }
-        result = await send_message("to@example.com", "Subject", "<h1>HTML</h1>", html=True)
+        result = await send_message(PHONE, "to@example.com", "Subject", "<h1>HTML</h1>", html=True)
         assert "message" in result
+
+
+class TestPerUserOAuth:
+    def test_get_service_uses_per_user_oauth(self):
+        from tools import google_gmail
+        from core import oauth_per_user
+
+        google_gmail._gmail_services.clear()
+        with patch.object(google_gmail, "build", return_value="service-mock") as mock_build:
+            with patch.object(oauth_per_user, "get_user_credentials", return_value=MagicMock()) as mock_user_creds:
+                service = google_gmail._get_service(PHONE)
+                assert mock_user_creds.called
+                assert mock_user_creds.call_args.args[0] == PHONE
+                assert service == "service-mock"
+                assert mock_build.called
+                assert mock_build.call_args.args[0] == "gmail"
+
+    def test_get_credentials_requires_phone(self):
+        from tools import google_gmail
+
+        with pytest.raises(RuntimeError, match="phone_required_for_gmail_oauth"):
+            google_gmail._get_credentials("")
+
+    def test_get_credentials_requires_user_setup(self):
+        from tools import google_gmail
+        from core import oauth_per_user
+
+        with patch.object(oauth_per_user, "get_user_credentials", return_value=None):
+            with pytest.raises(RuntimeError, match="user_google_oauth_required"):
+                google_gmail._get_credentials(PHONE)

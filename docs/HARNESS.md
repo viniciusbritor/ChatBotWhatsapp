@@ -393,6 +393,29 @@ python scripts/check_lgpd_compliance.py
 
 Resultado do gate isolado: 303 testes aprovados (10 ignorados pelo allowlist de proatividade); zero falhas, zero erros e zero warnings do projeto; Ruff sem erros; mypy sem erros em 25 arquivos; LGPD compliance check aprovado. As duas `DeprecationWarning` do `google._upb._message` (third-party protobuf 4.25) são filtradas via `pyproject.toml` por estarem fora do código do projeto.
 
+### Gate da Fase D — OAuth per-user obrigatório
+
+A Fase D removeu o fallback global `GOOGLE_OAUTH_TOKEN` nos 3 managers e propagou `phone` em todos os call-sites (`orchestrator`, `tools/ata_helper`, `ata_worker`, `proactive_worker`). A esteira `ata_worker` e `proactive_worker` agora itera por usuario.
+
+Validacao reproduzivel em Python 3.12, com secrets externos neutralizados:
+
+```powershell
+[Environment]::SetEnvironmentVariable("GCP_PROJECT", "", "Process")
+[Environment]::SetEnvironmentVariable("GCLOUD_PROJECT", "", "Process")
+[Environment]::SetEnvironmentVariable("FIRESTORE_EMULATOR_HOST", "", "Process")
+Remove-Item Env:DEEPSEEK_API_KEY,Env:NVIDIA_API_KEY,Env:MINIMAX_API_KEY,Env:OPENAI_API_KEY -ErrorAction SilentlyContinue
+cd agents_runtime
+python -m pytest -q tests/
+python -m pytest -q tests/test_google_calendar.py tests/test_google_drive.py tests/test_google_gmail.py tests/test_oauth_per_user.py
+python -m ruff check tests/ core/ main.py orchestrator.py agent_loader.py tool_registry.py tools/ scripts/ ata_worker/ proactive_worker/
+python -m mypy --no-incremental --explicit-package-bases --follow-imports=silent core
+python scripts/check_lgpd_compliance.py
+```
+
+Resultado do gate isolado: 312 testes aprovados (10 ignorados pelo allowlist de proatividade); zero falhas, zero erros e zero warnings do projeto; Ruff sem erros; mypy sem erros em 25 arquivos; LGPD compliance check aprovado. Nenhum dos 3 managers consulta mais `core.secrets.get_secret("GOOGLE_OAUTH_TOKEN")` — o caminho per-user via `core.oauth_per_user.get_user_credentials(phone)` e o unico suportado.
+
+Para configurar os workers no ambiente `test`, defina `ATA_WORKER_PHONES` (CSV) e `PROACTIVE_WORKER_PHONES` (CSV) como variaveis de ambiente do Cloud Run Job.
+
 
 ```bash
 cd agents_runtime

@@ -20,7 +20,6 @@ from core.masker import mask_pii
 from tools.ata_helper import generate_ata_markdown, save_ata_to_drive, notify_organizer
 from tools.google_calendar import list_events
 from tools.google_gmail import search_messages, get_thread
-from core.secrets import get_secret
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger("ata_worker")
@@ -28,6 +27,27 @@ logger = logging.getLogger("ata_worker")
 ATA_LOOKBACK_MIN = 30
 ATA_LOOKBACK_WINDOW_MIN = 10
 ATA_MAX_PER_RUN = 20
+
+
+def _known_phones() -> List[str]:
+    """Resolve phones to iterate in this run (Fase D).
+
+    Order:
+    1. ATA_WORKER_PHONES env (comma-separated) for explicit allowlist.
+    2. usuarios/ collection with google_oauth_token (single Firestore read).
+    """
+    env_phones = os.getenv("ATA_WORKER_PHONES")
+    if env_phones:
+        return [p.strip() for p in env_phones.split(",") if p.strip()]
+    db = _get_firestore()
+    if db is None:
+        return []
+    try:
+        docs = db.collection("usuarios").where("google_oauth_token", "!=", None).stream()
+        return [doc.id for doc in docs]
+    except Exception as exc:
+        logger.warning("could not list known phones: %s", exc)
+        return []
 
 
 def _get_firestore():
@@ -71,8 +91,8 @@ def _mark_processed(event_id: str, status: str, drive_file_id: Optional[str] = N
         logger.warning(f"Failed to mark processed: {e}")
 
 
-async def find_recent_meetings() -> List[Dict[str, Any]]:
-    """Find meetings that ended 30±10 minutes ago."""
+async def find_recent_meetings(phone: str) -> List[Dict[str, Any]]:
+    """Find meetings that ended 30±10 minutes ago for the given user."""
     now = datetime.now(timezone.utc)
     brt_offset = timedelta(hours=-3)
     now_brt = now + brt_offset
@@ -80,6 +100,7 @@ async def find_recent_meetings() -> List[Dict[str, Any]]:
     window_end_brt = now_brt - timedelta(minutes=ATA_LOOKBACK_MIN - ATA_LOOKBACK_WINDOW_MIN)
 
     result = await list_events(
+        phone,
         time_min=window_start_brt.isoformat(),
         time_max=window_end_brt.isoformat(),
         max_results=ATA_MAX_PER_RUN,
@@ -89,12 +110,12 @@ async def find_recent_meetings() -> List[Dict[str, Any]]:
     return [e for e in events if e.get("id") and not _already_processed(e["id"])]
 
 
-async def find_event_thread(event: Dict[str, Any]) -> List[Dict[str, Any]]:
+async def find_event_thread(phone: str, event: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Find Gmail thread related to the event."""
     event_title = event.get("summary", "")
     event_date = event.get("start", "")[:10]
     query = f'subject:"{event_title}" OR from:me after:{event_date}'
-    result = await search_messages(query, max_results=10)
+    result = await search_messages(phone, query, max_results=10)
     messages = result.get("messages", [])
 
     if not messages:
@@ -105,7 +126,7 @@ async def find_event_thread(event: Dict[str, Any]) -> List[Dict[str, Any]]:
     if not thread_id:
         return messages
 
-    thread_result = await get_thread(thread_id)
+    thread_result = await get_thread(phone, thread_id)
     return thread_result.get("messages", [])
 
 
@@ -169,18 +190,18 @@ async def extract_organizer_email(event: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-async def process_event(event: Dict[str, Any]) -> Dict[str, Any]:
+async def process_event(phone: str, event: Dict[str, Any]) -> Dict[str, Any]:
     """Process a single meeting: generate ata, save, notify."""
     event_id = event.get("id", "unknown")
     logger.info(f"Processing event {event_id}: {event.get('summary', '')}")
 
     try:
-        emails = await find_event_thread(event)
+        emails = await find_event_thread(phone, event)
 
         ata_markdown = await generate_ata_via_llm(event, emails)
         ata_markdown = mask_pii(ata_markdown)
 
-        save_result = await save_ata_to_drive(event, ata_markdown)
+        save_result = await save_ata_to_drive(phone, event, ata_markdown)
         if "error" in save_result:
             logger.error(f"Failed to save ata: {save_result['error']}")
             _mark_processed(event_id, "save_failed")
@@ -194,7 +215,7 @@ async def process_event(event: Dict[str, Any]) -> Dict[str, Any]:
         if organizer_email:
             summary = ata_markdown[:500]
             notify_result = await notify_organizer(
-                organizer_email, event.get("summary", "Reuniao"), drive_link, summary
+                phone, organizer_email, event.get("summary", "Reuniao"), drive_link, summary
             )
             notified = "message" in notify_result
 
@@ -218,17 +239,24 @@ async def process_event(event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def main():
-    """Main entry point for Cloud Run Job."""
+    """Main entry point for Cloud Run Job (per-user, Fase D)."""
     logger.info("Ata Worker starting...")
 
-    events = await find_recent_meetings()
-    logger.info(f"Found {len(events)} events to process")
+    phones = _known_phones()
+    logger.info(f"Processing {len(phones)} users")
 
-    results = []
-    for event in events:
-        result = await process_event(event)
-        results.append(result)
-        logger.info(f"Result: {result}")
+    results: List[Dict[str, Any]] = []
+    for phone in phones:
+        try:
+            events = await find_recent_meetings(phone)
+            logger.info(f"User {phone}: {len(events)} events to process")
+            for event in events:
+                result = await process_event(phone, event)
+                results.append(result)
+                logger.info(f"Result: {result}")
+        except Exception as exc:
+            logger.exception(f"User {phone}: unhandled error")
+            results.append({"phone": phone, "status": "user_error", "error": str(exc)})
 
     logger.info(f"Ata Worker done. Processed {len(results)} events.")
     return {"processed": len(results), "results": results}

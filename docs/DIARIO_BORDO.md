@@ -6,6 +6,70 @@
 
 ---
 
+## 21/07/2026 — Fase D: OAuth per-user obrigatório nos managers
+
+### Contexto
+
+A infraestrutura de OAuth per-user (`core.oauth_per_user`) foi consolidada na
+Fase C, mas os 3 managers ainda aceitavam `phone: Optional[str] = None` e
+usavam o token global `GOOGLE_OAUTH_TOKEN` quando nenhum telefone era
+informado. Isso permitia bypass acidental da regra de isolamento por usuario
+(`core.secrets.get_secret("GOOGLE_OAUTH_TOKEN")` nao tem mascaramento
+LGPD por owner).
+
+### Mudancas
+
+- `tools/google_calendar.py`, `tools/google_drive.py`, `tools/google_gmail.py`:
+  `phone` virou primeiro parametro obrigatorio em todas as funcoes publicas;
+  o fallback `get_secret("GOOGLE_OAUTH_TOKEN")` foi removido.
+  Erros explicitos: `RuntimeError("phone_required_for_*_oauth")` ou
+  `RuntimeError("user_google_oauth_required")`.
+- `tools/ata_helper.save_ata_to_drive` e `notify_organizer` agora recebem
+  `phone` e propagam para `find_omnichannel_atas_folder`, `upload_file` e
+  `send_message`.
+- `ata_worker/main.py`: nova funcao `_known_phones()` resolve os telefones
+  via env `ATA_WORKER_PHONES` ou collection `usuarios/` com
+  `google_oauth_token` setado. `main()` itera por telefone e chama
+  `process_event(phone, event)` para cada.
+- `proactive_worker/main.py`: nova `_known_phones()` via env
+  `PROACTIVE_WORKER_PHONES`. `run_events_scan()` itera por telefone.
+- `orchestrator.py`: 4 prefetch calls atualizadas para o novo
+  positional-first (`list_events(phone, ...)`, `search_files(phone, ...)`,
+  `search_messages(phone, ...)`).
+- Cache de servico `_calendar_services` / `_drive_services` /
+  `_gmail_services` continuam indexados por telefone, garantindo isolamento
+  por usuario entre requests.
+
+### Testes adicionados (9)
+
+- `test_google_calendar.py::TestPerUserOAuth` (3): verifica uso de
+  `core.oauth_per_user.get_user_credentials`, exige `phone` nao vazio e
+  exige `user_google_oauth_required` quando nao ha token do usuario.
+- `test_google_drive.py::TestPerUserOAuth` (3): equivalentes.
+- `test_google_gmail.py::TestPerUserOAuth` (3): equivalentes.
+- `test_proactive_worker.py::test_scan_returns_candidates` agora passa
+  `phone` posicional.
+
+### Gate tecnico final
+
+| Validador | Resultado |
+|---|---|
+| `pytest -q tests/` | `312 passed, 10 skipped` (zero failed, zero error, zero warning) |
+| `ruff check tests/ core/ main.py orchestrator.py agent_loader.py tool_registry.py tools/ scripts/ ata_worker/ proactive_worker/` | `All checks passed!` |
+| `mypy core/ orchestrator.py main.py agent_loader.py tool_registry.py` | `Success: no issues found in 25 source files` |
+| `python scripts/check_lgpd_compliance.py` | `LGPD compliance checks passed` |
+
+### Pendencias externas
+
+- Provisionar `ATA_WORKER_PHONES` e `PROACTIVE_WORKER_PHONES` no Cloud
+  Scheduler / Cloud Run env de `test`.
+- Atualizar `cognition/google-oauth-token` no Secret Manager para
+  descontinuar a leitura (nao ha mais consulta).
+- Provisionar Authorized redirect URIs do OAuth Client no Google Cloud
+  Console.
+
+---
+
 ## 21/07/2026 — Fase C: Hardening de Confiabilidade
 
 ### Contexto

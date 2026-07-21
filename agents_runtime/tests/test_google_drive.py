@@ -1,4 +1,4 @@
-"""Tests for google_drive tool."""
+"""Tests for google_drive tool (per-user OAuth, Fase D)."""
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -11,6 +11,9 @@ def mock_drive_service():
         yield service
 
 
+PHONE = "5511966830020"
+
+
 class TestSearchFiles:
     @pytest.mark.asyncio
     async def test_search_files(self, mock_drive_service):
@@ -21,7 +24,7 @@ class TestSearchFiles:
                 {"id": "f2", "name": "Ata 2026-07-12.md", "mimeType": "text/markdown"},
             ]
         }
-        result = await search_files("Ata")
+        result = await search_files(PHONE, "Ata")
         assert result["count"] == 2
         assert "Ata" in result["files"][0]["name"]
 
@@ -34,7 +37,7 @@ class TestUploadFile:
             "id": "new1", "name": "test.md", "mimeType": "text/markdown",
             "webViewLink": "https://drive.google.com/file/d/new1",
         }
-        result = await upload_file("folder1", "test.md", "# Content")
+        result = await upload_file(PHONE, "folder1", "test.md", "# Content")
         assert "file" in result
         assert result["file"]["name"] == "test.md"
 
@@ -49,7 +52,7 @@ class TestListFolder:
                 {"id": "f2", "name": "Subfolder", "mimeType": "application/vnd.google-apps.folder"},
             ]
         }
-        result = await list_folder("parent_folder")
+        result = await list_folder(PHONE, "parent_folder")
         assert result["count"] == 2
 
 
@@ -60,7 +63,7 @@ class TestCreateFolder:
         mock_drive_service.files().create().execute.return_value = {
             "id": "new_folder", "name": "NewFolder", "mimeType": "application/vnd.google-apps.folder",
         }
-        result = await create_folder("NewFolder", parent_id="parent")
+        result = await create_folder(PHONE, "NewFolder", parent_id="parent")
         assert "folder" in result
         assert result["folder"]["name"] == "NewFolder"
 
@@ -73,12 +76,42 @@ class TestFindOmnichannelAtas:
             {"files": [{"id": "omni_id"}]},
             {"files": [{"id": "atas_id"}]},
         ]
-        result = await find_omnichannel_atas_folder()
+        result = await find_omnichannel_atas_folder(PHONE)
         assert result["folder_id"] == "atas_id"
 
     @pytest.mark.asyncio
     async def test_omnichannel_not_found(self, mock_drive_service):
         from tools.google_drive import find_omnichannel_atas_folder
         mock_drive_service.files().list().execute.return_value = {"files": []}
-        result = await find_omnichannel_atas_folder()
+        result = await find_omnichannel_atas_folder(PHONE)
         assert "error" in result
+
+
+class TestPerUserOAuth:
+    def test_get_service_uses_per_user_oauth(self):
+        from tools import google_drive
+        from core import oauth_per_user
+
+        google_drive._drive_services.clear()
+        with patch.object(google_drive, "build", return_value="service-mock") as mock_build:
+            with patch.object(oauth_per_user, "get_user_credentials", return_value=MagicMock()) as mock_user_creds:
+                service = google_drive._get_service(PHONE)
+                assert mock_user_creds.called
+                assert mock_user_creds.call_args.args[0] == PHONE
+                assert service == "service-mock"
+                assert mock_build.called
+                assert mock_build.call_args.args[0] == "drive"
+
+    def test_get_credentials_requires_phone(self):
+        from tools import google_drive
+
+        with pytest.raises(RuntimeError, match="phone_required_for_drive_oauth"):
+            google_drive._get_credentials("")
+
+    def test_get_credentials_requires_user_setup(self):
+        from tools import google_drive
+        from core import oauth_per_user
+
+        with patch.object(oauth_per_user, "get_user_credentials", return_value=None):
+            with pytest.raises(RuntimeError, match="user_google_oauth_required"):
+                google_drive._get_credentials(PHONE)

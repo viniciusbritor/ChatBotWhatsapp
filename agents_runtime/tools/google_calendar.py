@@ -1,8 +1,9 @@
-"""Google Calendar tools - 5 functions.
+﻿"""Google Calendar tools - 5 functions.
 
-Auth: reuses existing token at ~/.gemini/config/skills/google_calendar_manager/resources/token_drive.json
+Auth: per-user OAuth via core.oauth_per_user.get_user_credentials.
+The phone parameter is mandatory (Fase D); the global GOOGLE_OAUTH_TOKEN
+fallback was removed.
 """
-import json
 import logging
 from typing import Optional, List, Dict, Any
 
@@ -21,32 +22,25 @@ DEFAULT_CALENDAR_ID = "primary"
 _calendar_services: Dict[str, Any] = {}
 
 
-def _get_credentials(phone: Optional[str] = None) -> Credentials:
-    """Load Google OAuth credentials - per-user if phone provided, else global token.
+def _get_credentials(phone: str) -> Credentials:
+    """Load Google OAuth credentials for the given user (per-user, Fase D).
 
-    Uses core.oauth_per_user.get_user_credentials which centralises refresh logic.
+    Uses core.oauth_per_user.get_user_credentials which centralises refresh
+    logic and persists the rotated token back to Firestore.
     """
-    if phone:
-        try:
-            from core.oauth_per_user import get_user_credentials
+    if not phone:
+        raise RuntimeError("phone_required_for_calendar_oauth")
+    from core.oauth_per_user import get_user_credentials
 
-            creds = get_user_credentials(phone)
-            if creds is not None:
-                return creds
-        except Exception as e:
-            logger.warning(f"Per-user credentials failed for {phone}: {e}")
-
-    from core.secrets import get_secret
-    token_json = get_secret("GOOGLE_OAUTH_TOKEN")
-    if not token_json:
-        raise RuntimeError("GOOGLE_OAUTH_TOKEN not configured")
-    token_data = json.loads(token_json) if isinstance(token_json, str) else token_json
-    return Credentials.from_authorized_user_info(token_data, SCOPES)
+    creds = get_user_credentials(phone)
+    if creds is None:
+        raise RuntimeError("user_google_oauth_required")
+    return creds
 
 
-def _get_service(phone: Optional[str] = None):
+def _get_service(phone: str):
     """Get or build Calendar API service (cached per user)."""
-    cache_key = phone or "_global_"
+    cache_key = phone
     if cache_key not in _calendar_services:
         creds = _get_credentials(phone)
         _calendar_services[cache_key] = build("calendar", "v3", credentials=creds, cache_discovery=False)
@@ -68,20 +62,20 @@ def _format_event(event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def list_events(
+    phone: str,
     time_min: str,
     time_max: str,
     calendar_id: str = DEFAULT_CALENDAR_ID,
     max_results: int = 50,
-    phone: Optional[str] = None,
 ) -> Dict[str, Any]:
     """List calendar events between time_min and time_max.
 
     Args:
+        phone: User phone for per-user OAuth token (mandatory, Fase D).
         time_min: ISO 8601 datetime (e.g., "2026-07-13T00:00:00-03:00")
         time_max: ISO 8601 datetime
         calendar_id: Calendar to query (default: primary)
         max_results: Max events to return (default: 50)
-        phone: User phone for per-user OAuth token
 
     Returns:
         {"events": [...], "count": int}
@@ -108,6 +102,7 @@ async def list_events(
 
 
 async def create_event(
+    phone: str,
     start: str,
     end: str,
     summary: str,
@@ -115,11 +110,11 @@ async def create_event(
     attendees: Optional[List[str]] = None,
     location: Optional[str] = None,
     calendar_id: str = DEFAULT_CALENDAR_ID,
-    phone: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create a new calendar event.
 
     Args:
+        phone: User phone for per-user OAuth token (mandatory, Fase D).
         start: ISO 8601 datetime
         end: ISO 8601 datetime
         summary: Event title
@@ -127,7 +122,6 @@ async def create_event(
         attendees: List of email addresses
         location: Event location
         calendar_id: Calendar to add event to
-        phone: User phone for per-user OAuth token
 
     Returns:
         {"event": {...}} on success or {"error": str}
@@ -154,17 +148,17 @@ async def create_event(
 
 
 async def update_event(
+    phone: str,
     event_id: str,
     calendar_id: str = DEFAULT_CALENDAR_ID,
-    phone: Optional[str] = None,
     **kwargs,
 ) -> Dict[str, Any]:
     """Update an existing event.
 
     Args:
+        phone: User phone for per-user OAuth token (mandatory, Fase D).
         event_id: Event ID to update
         calendar_id: Calendar containing the event
-        phone: User phone for per-user OAuth token
         **kwargs: Fields to update (start, end, summary, description, location, attendees)
 
     Returns:
@@ -190,16 +184,16 @@ async def update_event(
 
 
 async def delete_event(
+    phone: str,
     event_id: str,
     calendar_id: str = DEFAULT_CALENDAR_ID,
-    phone: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Delete a calendar event.
 
     Args:
+        phone: User phone for per-user OAuth token (mandatory, Fase D).
         event_id: Event ID to delete
         calendar_id: Calendar containing the event
-        phone: User phone for per-user OAuth token
 
     Returns:
         {"deleted": True} or {"error": str}
@@ -214,18 +208,18 @@ async def delete_event(
 
 
 async def freebusy(
+    phone: str,
     time_min: str,
     time_max: str,
     calendars: Optional[List[str]] = None,
-    phone: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Check free/busy status for calendars.
 
     Args:
+        phone: User phone for per-user OAuth token (mandatory, Fase D).
         time_min: ISO 8601 datetime
         time_max: ISO 8601 datetime
         calendars: List of calendar IDs (default: ["primary"])
-        phone: User phone for per-user OAuth token
 
     Returns:
         {"busy": [{"start": ..., "end": ...}, ...], "calendars": [...]}
