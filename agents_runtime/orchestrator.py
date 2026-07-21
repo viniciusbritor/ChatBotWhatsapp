@@ -693,6 +693,49 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
             return await _finalize_orchestration(
                 payload, masked_text, sender_name, result, path, cache_key
             )
+        if pending_action and pending_action.get("action_type") == "group_consent":
+            await consume_pending_action(phone, "group_consent")
+            action_payload = pending_action.get("payload", {})
+            group_jid = action_payload.get("group_jid", "")
+            requested_intent = action_payload.get("intent", "calendar")
+            try:
+                from tools.group import set_member_confirmation
+
+                await set_member_confirmation(group_jid, phone, True)
+            except Exception as exc:
+                logger.warning("set_member_confirmation failed: %s", exc)
+            intent_token = f"is_{requested_intent}"
+            intent = {intent_token: True}
+            specialist_id = _resolve_agent_for_intent(intent, instance)
+            if specialist_id:
+                agent = get_agent(specialist_id)
+                if agent:
+                    agent_copy = dict(agent)
+                    payload["_group_consent_granted"] = True
+                    agent_result = await _execute_agent(
+                        agent_copy, masked_text, payload, extra
+                    )
+                    reply = agent_result.get("reply", "Ok, liberei o acesso.")
+                else:
+                    reply = "Ok, liberei o acesso."
+            else:
+                reply = "Ok, liberei o acesso."
+            result = {
+                "reply": reply,
+                "delay_ms": calculate_delay_ms(reply),
+                "presence": calculate_presence(),
+                "metadata": {
+                    "agent_id": "agent-privacy-guard",
+                    "response_identity": "Jennifer",
+                    "pending_action": "group_consent",
+                    "accepted": confirmation,
+                    "group_jid": group_jid,
+                },
+            }
+            path = [{"step": 1, "phase": "pending_action", "action": "group_consent"}]
+            return await _finalize_orchestration(
+                payload, masked_text, sender_name, result, path, cache_key
+            )
 
     intent = _detect_intent(masked_text)
     path = [{"step": 1, "phase": "intent_detect", "details": {key: value for key, value in intent.items() if value}}]
@@ -733,6 +776,21 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         if not is_confirmed:
             logger.info(f"Privacy guard: unconfirmed member {phone} in group {group_jid}")
+            from core.pending_actions import set_pending_action
+
+            await set_pending_action(
+                phone,
+                "group_consent",
+                {
+                    "group_jid": group_jid,
+                    "requested_by": phone,
+                    "intent": "calendar" if intent.get("is_calendar") else (
+                        "email" if intent.get("is_email") else "drive"
+                    ),
+                    "agent": "agent-privacy-guard",
+                },
+                ttl_sec=300,
+            )
             return {
                 "reply": (
                     f"Oi {sender_name}! Voce pediu para acessar informacoes pessoais no grupo. "
@@ -742,7 +800,11 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
                 ),
                 "delay_ms": 0,
                 "presence": "composing",
-                "metadata": {"agent_id": "privacy-guard", "blocked": "group_unconfirmed_member"},
+                "metadata": {
+                    "agent_id": "privacy-guard",
+                    "blocked": "group_unconfirmed_member",
+                    "pending_action": "group_consent",
+                },
             }
 
         logger.info(f"Privacy guard: confirmed member {phone} in group {group_jid}, executing")

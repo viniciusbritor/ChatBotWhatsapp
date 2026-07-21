@@ -2,11 +2,9 @@
 
 Auth: reuses existing token at ~/.gemini/config/skills/google_calendar_manager/resources/token_drive.json
 """
-import os
 import json
 import logging
 from typing import Optional, List, Dict, Any
-from datetime import datetime
 
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -24,27 +22,17 @@ _calendar_services: Dict[str, Any] = {}
 
 
 def _get_credentials(phone: Optional[str] = None) -> Credentials:
-    """Load Google OAuth credentials — per-user if phone provided, else global token."""
+    """Load Google OAuth credentials - per-user if phone provided, else global token.
+
+    Uses core.oauth_per_user.get_user_credentials which centralises refresh logic.
+    """
     if phone:
         try:
-            from agent_loader import get_user
-            user = get_user(phone)
-            if user and user.get("google_oauth_token"):
-                token_data = user["google_oauth_token"]
-                if isinstance(token_data.get("token"), str):
-                    creds = Credentials(
-                        token=token_data["token"],
-                        refresh_token=token_data.get("refresh_token"),
-                        token_uri=token_data.get("token_uri", "https://oauth2.googleapis.com/token"),
-                        client_id=token_data.get("client_id", ""),
-                        client_secret=token_data.get("client_secret", ""),
-                        scopes=SCOPES,
-                        expiry=datetime.fromtimestamp(float(token_data.get("expiry", 0))) if token_data.get("expiry") else None,
-                    )
-                    if creds.expired:
-                        from google.auth.transport.requests import Request
-                        creds.refresh(Request())
-                    return creds
+            from core.oauth_per_user import get_user_credentials
+
+            creds = get_user_credentials(phone)
+            if creds is not None:
+                return creds
         except Exception as e:
             logger.warning(f"Per-user credentials failed for {phone}: {e}")
 

@@ -1,5 +1,14 @@
 """Google OAuth interactivo - servidor local na porta 8088."""
-import json, os, tempfile, webbrowser, http.server, urllib.parse, requests, time, threading
+import json
+import os
+import tempfile
+import webbrowser
+import http.server
+import urllib.parse
+import requests
+import time
+import threading
+import datetime
 
 CLIENT_ID = "894828119087-goo6lcl6vgm5bdq5qgafscb8qbr4ueet.apps.googleusercontent.com"
 CLIENT_SECRET = "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"
@@ -45,8 +54,8 @@ print("=" * 60)
 print("GOOGLE OAUTH - GERAR TOKEN")
 print("Projeto: coherence-ominichannel-fs")
 print("=" * 60)
-print(f"\nAbrindo navegador... Autorize as permissoes.")
-print(f"\nScopes: Calendar + Drive + Gmail\n")
+print("\nAbrindo navegador... Autorize as permissoes.")
+print("\nScopes: Calendar + Drive + Gmail\n")
 
 server = http.server.HTTPServer(("localhost", REDIRECT_PORT), Handler)
 thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -57,7 +66,7 @@ webbrowser.open(auth_url)
 time.sleep(30)
 
 if auth_code:
-    print(f"\nCode recebido! Trocando por token...")
+    print("\nCode recebido! Trocando por token...")
     r = requests.post("https://oauth2.googleapis.com/token", data={
         "client_id": CLIENT_ID, "client_secret": CLIENT_SECRET,
         "code": auth_code, "redirect_uri": REDIRECT_URI, "grant_type": "authorization_code",
@@ -84,4 +93,3 @@ else:
     print("Nenhum code recebido em 30s. Verifique se a URL foi aberta corretamente.")
     print(f"\nURL manual:\n{auth_url}")
 
-import datetime
