@@ -6,6 +6,7 @@ python-dotenv==1.0.1
 PyYAML==6.0.2
 google-cloud-firestore==2.20.1
 google-cloud-secret-manager==2.29.0
+google-cloud-pubsub==2.21.1
 google-api-python-client==2.156.0
 google-auth-httplib2==0.2.0
 google-auth-oauthlib==1.2.1
