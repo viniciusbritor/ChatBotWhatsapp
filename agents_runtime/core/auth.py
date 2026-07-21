@@ -15,7 +15,8 @@ from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
 
-PROTECTED_PATHS = ("/admin", "/chat", "/proactive/send", "/version")
+PROTECTED_PATHS = ("/admin", "/chat", "/proactive/send", "/version", "/pubsub")
+PUBLIC_PATHS = ("/webhook", "/healthz")
 FIREBASE_PROJECT = os.getenv("GCP_PROJECT", "coherence-ominichannel-fs")
 
 
@@ -26,6 +27,8 @@ def get_sa_token() -> str:
 
 def is_path_protected(path: str) -> bool:
     """Check if path requires Bearer SA token."""
+    if any(path.startswith(p) for p in PUBLIC_PATHS):
+        return False
     return any(path.startswith(p) for p in PROTECTED_PATHS)
 
 
