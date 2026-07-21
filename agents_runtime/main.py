@@ -218,6 +218,74 @@ async def chat(request: Request):
     return JSONResponse(content=result)
 
 
+@app.post("/webhook")
+async def evolution_webhook(request: Request):
+    """Receive WhatsApp message from Evolution webhook.
+
+    Replaces the legacy whatsapp-agente proxy. Validates that the request
+    comes from the Evolution webhook (light check via payload shape),
+    extracts the message envelope, publishes to Pub/Sub and returns 200 OK
+    immediately so the Evolution webhook does not time out.
+    """
+    from core.pubsub_publisher import get_publisher
+
+    try:
+        body = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"invalid_json: {e}")
+
+    event = body.get("event") or body.get("type") or ""
+    instance = body.get("instance") or ""
+    data = body.get("data") or {}
+
+    if event != "messages.upsert":
+        return JSONResponse(content={"status": "ignored", "event": event})
+
+    message = data.get("message") or {}
+    if message.get("fromMe"):
+        return JSONResponse(content={"status": "ignored", "reason": "fromMe"})
+
+    key = data.get("key") or {}
+    remote_jid = key.get("remoteJid") or message.get("from") or ""
+    phone = remote_jid.split("@", 1)[0] if remote_jid else ""
+
+    if not phone or not instance:
+        return JSONResponse(content={"status": "skipped", "reason": "missing_fields"})
+
+    message_id = key.get("id") or message.get("id") or ""
+    text = (
+        message.get("conversation")
+        or message.get("extendedTextMessage", {}).get("text")
+        or ""
+    )
+    sender_name = data.get("pushName") or ""
+
+    envelope = {
+        "request_id": message_id or f"webhook-{int(__import__('time').time()*1000)}",
+        "phone": phone,
+        "text": text,
+        "instance": instance,
+        "sender_name": sender_name,
+        "remote_jid": remote_jid,
+        "message_id": message_id,
+        "extra": message,
+    }
+
+    publisher = get_publisher()
+    message_id_published = ""
+    try:
+        message_id_published = publisher.publish(
+            "whatsapp-messages",
+            envelope,
+            attributes={"source": "evolution-webhook", "instance": instance},
+        )
+    except Exception as exc:
+        logger.error("webhook publish failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"publish_failed: {exc}")
+
+    return JSONResponse(content={"queued": True, "message_id": message_id_published})
+
+
 @app.post("/pubsub/push")
 async def pubsub_push(request: Request):
     """Pub/Sub push endpoint (whatsapp-messages).
