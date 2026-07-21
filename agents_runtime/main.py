@@ -275,8 +275,8 @@ async def evolution_webhook(request: Request):
     message_id_published = ""
     try:
         message_id_published = publisher.publish(
-            "whatsapp-messages",
             envelope,
+            topic="whatsapp-messages",
             attributes={"source": "evolution-webhook", "instance": instance},
         )
     except Exception as exc:
