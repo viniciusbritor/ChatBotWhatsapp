@@ -1,31 +1,90 @@
+import base64
+import hashlib
+import hmac
+import json
 import logging
 import os
+import re
+import secrets
 import time
-from datetime import datetime
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, Optional
 
 import requests
 from google.oauth2.credentials import Credentials
-
-if TYPE_CHECKING:
-    from google.cloud import firestore
-else:
-    try:
-        from google.cloud import firestore
-    except ImportError:
-        firestore = None
 
 logger = logging.getLogger(__name__)
 
 GCP_PROJECT = os.getenv("GCP_PROJECT", "coherence-ominichannel-fs")
 TOKEN_REFRESH_BEFORE_SEC = int(os.getenv("OAUTH_REFRESH_BEFORE_SEC", "300"))
+OAUTH_STATE_TTL_SEC = int(os.getenv("OAUTH_STATE_TTL_SEC", "600"))
+OAUTH_USER_COLLECTION = os.getenv("OAUTH_USER_COLLECTION", "usuarios")
+BRT = timezone(timedelta(hours=-3))
+
+
+def _oauth_client_id() -> str:
+    return os.getenv("OAUTH_CLIENT_ID", "").strip()
+
+
+def _oauth_client_secret() -> str:
+    return os.getenv("OAUTH_CLIENT_SECRET", "").strip()
+
+
+def _state_secret() -> str:
+    return (os.getenv("OAUTH_STATE_SECRET") or _oauth_client_secret()).strip()
+
+
+def create_oauth_state(phone: str) -> str:
+    normalized_phone = re.sub(r"\D", "", phone)
+    secret = _state_secret()
+    if not normalized_phone or not secret:
+        raise ValueError("oauth_state_configuration_invalid")
+    payload = {
+        "phone": normalized_phone,
+        "nonce": secrets.token_urlsafe(16),
+        "expires_at": int(time.time()) + OAUTH_STATE_TTL_SEC,
+    }
+    encoded = base64.urlsafe_b64encode(
+        json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    ).decode("ascii").rstrip("=")
+    signature = hmac.new(
+        secret.encode("utf-8"),
+        encoded.encode("ascii"),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"{encoded}.{signature}"
+
+
+def parse_oauth_state(state: str) -> Optional[str]:
+    secret = _state_secret()
+    if not state or not secret or "." not in state:
+        return None
+    encoded, signature = state.rsplit(".", 1)
+    expected = hmac.new(
+        secret.encode("utf-8"),
+        encoded.encode("ascii"),
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(signature, expected):
+        return None
+    try:
+        padded = encoded + "=" * (-len(encoded) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+        phone = re.sub(r"\D", "", str(payload.get("phone", "")))
+        expires_at = int(payload.get("expires_at", 0))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if not phone or expires_at < int(time.time()):
+        return None
+    return phone
 
 
 def _get_firestore():
     try:
         project = os.getenv("GCP_PROJECT") or os.getenv("GCLOUD_PROJECT")
-        if not project or os.getenv("FIRESTORE_EMULATOR_HOST"):
+        if not project:
             return None
+        from google.cloud import firestore
         return firestore.Client(project=project)
     except Exception as exc:
         logger.warning("firestore unavailable for oauth per-user: %s", exc)
@@ -47,12 +106,16 @@ def _refresh_token(
     refresh_token: str,
     timeout: int = 15,
 ) -> Optional[Dict[str, Any]]:
+    effective_client_id = client_id or _oauth_client_id()
+    effective_client_secret = client_secret or _oauth_client_secret()
+    if not effective_client_id or not effective_client_secret or not refresh_token:
+        return None
     try:
         r = requests.post(
             token_uri,
             data={
-                "client_id": client_id,
-                "client_secret": client_secret,
+                "client_id": effective_client_id,
+                "client_secret": effective_client_secret,
                 "refresh_token": refresh_token,
                 "grant_type": "refresh_token",
             },
@@ -68,21 +131,28 @@ def _refresh_token(
     new_token = body.get("access_token")
     if not new_token:
         return None
-    return {
+    result = {
         "token": new_token,
         "refresh_token": body.get("refresh_token", refresh_token),
         "token_uri": token_uri,
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "scopes": body.get("scope", "").split() or None,
         "expiry": str(time.time() + body.get("expires_in", 3600)),
     }
+    scopes = body.get("scope", "").split()
+    if scopes:
+        result["scopes"] = scopes
+    return result
 
 
 def _persist_token(db, phone: str, token_data: Dict[str, Any]) -> None:
+    persisted = {
+        key: value
+        for key, value in token_data.items()
+        if key not in {"client_id", "client_secret"}
+    }
+    persisted["updated_at"] = datetime.now(BRT).isoformat()
     try:
-        db.collection("users").document(phone).set(
-            {"google_oauth_token": token_data},
+        db.collection(OAUTH_USER_COLLECTION).document(phone).set(
+            {"google_oauth_token": persisted},
             merge=True,
         )
     except Exception as exc:
@@ -94,7 +164,7 @@ def get_user_oauth(phone: str) -> Optional[Dict[str, Any]]:
     if db is None or not phone:
         return None
     try:
-        doc = db.collection("users").document(phone).get()
+        doc = db.collection(OAUTH_USER_COLLECTION).document(phone).get()
     except Exception as exc:
         logger.warning("oauth fetch failed: %s", exc)
         return None
@@ -146,31 +216,38 @@ def get_user_credentials(phone: str) -> Optional[Credentials]:
     refresh_token = token_data.get("refresh_token")
     if not access_token:
         return None
-    if _is_expired(token_data.get("expiry")) and refresh_token:
+    if _is_expired(token_data.get("expiry")):
+        if not refresh_token:
+            return None
         refreshed = _refresh_token(
             token_data.get("token_uri", "https://oauth2.googleapis.com/token"),
             token_data.get("client_id", ""),
             token_data.get("client_secret", ""),
             refresh_token,
         )
-        if refreshed:
-            access_token = refreshed["token"]
-            db = _get_firestore()
-            if db is not None:
-                merged = dict(token_data)
-                merged.update(refreshed)
-                _persist_token(db, phone, merged)
+        if not refreshed:
+            return None
+        access_token = refreshed["token"]
+        merged = dict(token_data)
+        merged.update(refreshed)
+        token_data = merged
+        db = _get_firestore()
+        if db is not None:
+            _persist_token(db, phone, merged)
     expiry = token_data.get("expiry")
     try:
-        expiry_dt = datetime.fromtimestamp(float(expiry)) if expiry else None
+        expiry_dt = datetime.fromtimestamp(
+            float(expiry),
+            tz=timezone(timedelta(hours=-3)),
+        ) if expiry else None
     except (TypeError, ValueError):
         expiry_dt = None
     return Credentials(
         token=access_token,
         refresh_token=refresh_token,
         token_uri=token_data.get("token_uri", "https://oauth2.googleapis.com/token"),
-        client_id=token_data.get("client_id", ""),
-        client_secret=token_data.get("client_secret", ""),
+        client_id=token_data.get("client_id") or _oauth_client_id(),
+        client_secret=token_data.get("client_secret") or _oauth_client_secret(),
         scopes=token_data.get("scopes") or [],
         expiry=expiry_dt,
     )
