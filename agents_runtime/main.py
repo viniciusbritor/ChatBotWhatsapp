@@ -359,19 +359,33 @@ async def pubsub_push(request: Request):
 
         result = await orchestrate(p)
         reply = result.get("reply", "")
-        if reply:
-            await send_text(
-                instance=p.get("instance", "jennifer"),
-                phone=p.get("phone", ""),
-                text=reply,
-                delay_ms=result.get("delay_ms", 0),
-                presence=result.get("presence", "composing"),
-                remote_jid=p.get("remote_jid", "") or (p.get("extra") or {}).get("remote_jid", ""),
+        phone = p.get("phone", "") or (p.get("extra") or {}).get("phone", "")
+        delivered = False
+        if reply and phone:
+            try:
+                await send_text(
+                    instance=p.get("instance", "jennifer"),
+                    phone=phone,
+                    text=reply,
+                    delay_ms=result.get("delay_ms", 0),
+                    presence=result.get("presence", "composing"),
+                    remote_jid=p.get("remote_jid", "") or (p.get("extra") or {}).get("remote_jid", ""),
+                )
+                delivered = True
+            except Exception as send_exc:
+                logger.warning(
+                    "pubsub send_text_skipped reason=%s phone_present=%s",
+                    type(send_exc).__name__, bool(phone),
+                )
+        elif reply and not phone:
+            logger.warning(
+                "pubsub reply_dropped_empty_phone request_id=%s reply_len=%d",
+                request_id, len(reply),
             )
         return {
             "status": "ok",
             "request_id": request_id,
-            "delivered": bool(reply),
+            "delivered": delivered,
             "result": result,
         }
 

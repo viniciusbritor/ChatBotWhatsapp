@@ -56,7 +56,12 @@ async def test_pubsub_push_delivers_orchestrator_reply_to_evolution():
 
 
 @pytest.mark.asyncio
-async def test_pubsub_push_retries_after_delivery_failure():
+async def test_pubsub_push_delivery_failure_does_not_retry_to_avoid_storm():
+    """Anti-retry-storm guard: send_text failures are LOGGED but return 200
+    so Pub/Sub does not redeliver the message. The underlying problem is
+    logged for observability; the user does not see exponential cost
+    growth from a transient Evolution outage.
+    """
     payload = {
         "message_id": "PUSH_RETRY_001",
         "instance": "jennifer",
@@ -64,17 +69,40 @@ async def test_pubsub_push_retries_after_delivery_failure():
         "text": "oi",
     }
     result = {"reply": "Resposta", "delay_ms": 0, "presence": "composing", "metadata": {}}
-    publisher = MagicMock()
     with patch("core.pubsub_consumer.verify_pubsub_token", return_value=True):
         with patch("main.orchestrate", new=AsyncMock(return_value=result)):
             with patch(
                 "core.evolution_client.send_text",
-                new=AsyncMock(side_effect=[RuntimeError("offline"), {}]),
+                new=AsyncMock(side_effect=RuntimeError("evolution offline")),
             ):
-                with patch("core.pubsub_publisher.get_publisher", return_value=publisher):
-                    first = await pubsub_push(_request(payload, "pubsub-retry-001"))
-                    second = await pubsub_push(_request(payload, "pubsub-retry-002"))
+                response = await pubsub_push(_request(payload, "pubsub-no-retry-001"))
 
-    assert first.status_code == 500
-    assert second.status_code == 200
-    publisher.publish_dlq.assert_called_once()
+    body = json.loads(response.body)
+    assert response.status_code == 200
+    assert body["status"] == "ok"
+    assert body["delivered"] is False
+
+
+@pytest.mark.asyncio
+async def test_pubsub_push_skips_send_when_phone_missing():
+    """Empty phone (stale Pub/Sub retries from before OAuth per-user was
+    required) must not crash or trigger 5xx. The reply is still generated
+    for observability but is dropped.
+    """
+    payload = {
+        "message_id": "PUSH_RETRY_NO_PHONE",
+        "instance": "jennifer",
+        "phone": "",
+        "text": "oi",
+    }
+    result = {"reply": "Resposta", "delay_ms": 0, "presence": "composing", "metadata": {}}
+    with patch("core.pubsub_consumer.verify_pubsub_token", return_value=True):
+        with patch("main.orchestrate", new=AsyncMock(return_value=result)):
+            with patch("core.evolution_client.send_text", new=AsyncMock(return_value={})) as send:
+                response = await pubsub_push(_request(payload, "pubsub-no-phone-001"))
+
+    body = json.loads(response.body)
+    assert response.status_code == 200
+    assert body["status"] == "ok"
+    assert body["delivered"] is False
+    send.assert_not_called()
