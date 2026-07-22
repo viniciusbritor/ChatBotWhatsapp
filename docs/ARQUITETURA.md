@@ -38,6 +38,8 @@
 > foi consolidado em `agents_runtime/main.py` rota `/webhook`. O extrator canonico
 > vive em `core/evolution_webhook.py` e cobre texto, audioMessage, extendedTextMessage,
 > grupo, broadcast e fromMe.
+>
+> **Cleanup pendente (Fase F):** a pasta local `C:\Users\vinic\workspace_antigravity\ChatBotWhatsapp\WhatsappAgente\` e o repo `viniciusbritor/WhatsappAgente` permanecem ate a execucao manual pelo usuario (ver `docs/fases/fase_F/cleanup_repo.md`). Os secrets orfaos `whatsapp-agente-url` e `agents-runtime-sa-token-clean` tambem serao deletados via procedure manual (ver `docs/fases/fase_F/cleanup_secrets.md`).
 
 ## Fluxo de Dados Principal
 

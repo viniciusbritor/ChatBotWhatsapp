@@ -6,6 +6,65 @@
 
 ---
 
+## 21/07/2026 — Fase F: Cleanup + Documentação Final
+
+### Contexto
+
+Apos 5 fases atomicas (A-E), o gate local esta verde (316 passed, 10 skipped)
+e os commits estao prontos para merge. A Fase F nao introduz codigo novo —
+documenta apenas as procedures externas que o usuario precisa executar
+apos o merge:
+
+1. Deletar secrets orfaos do Secret Manager
+   (`whatsapp-agente-url`, `agents-runtime-sa-token-clean`).
+2. Deletar a pasta local `C:\Users\vinic\workspace_antigravity\ChatBotWhatsapp\WhatsappAgente\`.
+3. Arquivar ou deletar o repo `viniciusbritor/WhatsappAgente` no GitHub.
+4. Configurar OAuth Client no Google Cloud Console (Authorized redirect URIs,
+   scopes) e executar o fluxo manual para `+5511966830020`.
+
+### Mudancas
+
+- `docs/fases/fase_F/cleanup_secrets.md` (NOVO): procedure PowerShell + gcloud
+  para destruir e deletar os secrets orfaos, com pre-condicoes, rollback e
+  checklist.
+- `docs/fases/fase_F/cleanup_repo.md` (NOVO): procedure para deletar a pasta
+  local (com backup opcional) e arquivar/deletar o repo GitHub.
+- `docs/fases/fase_F/oauth_setup.md` (NOVO): procedure para configurar o
+  OAuth Client no Google Cloud Console (Authorized redirect URIs, scopes)
+  e executar o fluxo `/oauth/google` para o telefone master.
+- `docs/fases/fase_F/plano_f1.md` (NOVO): plano de execucao.
+- `docs/fases/fase_F/checklist.md` (NOVO): checklist final.
+- `docs/HARNESS.md`: secao "Autenticação e Segredos" expandida com lista
+  de 15 secrets ativos, 3 secrets orfaos, troubleshooting OAuth per-user
+  (4 sintomas comuns), e links para as procedures da Fase F.
+- `docs/GUARDRAILS.md`: nova regra 56 "Cleanup post-merge documentado"
+  referenciando `docs/fases/fase_F/`.
+- `docs/ARQUITETURA.md`: nota de "Cleanup pendente" na secao Componentes.
+- `docs/PLANO_DETALHADO.md`: status atualizado para "F+".
+
+### Gate tecnico final
+
+| Validador | Resultado |
+|---|---|
+| `pytest -q tests/` | `316 passed, 10 skipped` (zero failed, zero error, zero warning) |
+| `ruff check ...` | `All checks passed!` |
+| `mypy core/ ...` | `Success: no issues found in 25 source files` |
+| `python scripts/check_lgpd_compliance.py` | `LGPD compliance checks passed` |
+
+### Pendencias externas (transferidas ao usuario)
+
+Apos merge de `test` em `main`, executar em sequencia:
+
+1. `docs/fases/fase_F/cleanup_secrets.md` — 2 secrets orfaos.
+2. `docs/fases/fase_F/cleanup_repo.md` — pasta local + repo GitHub.
+3. `docs/fases/fase_F/oauth_setup.md` — Console + fluxo manual.
+
+Ate a conclusao desses passos, o sistema permanece em estado de transicao
+(secret global `google-oauth-token` continua no Secret Manager mas nao e
+mais consultado pelo codigo de producao).
+
+---
+
 ## 21/07/2026 — Fase E: privacy-guard testado + deploy agent-proatividade
 
 ### Contexto

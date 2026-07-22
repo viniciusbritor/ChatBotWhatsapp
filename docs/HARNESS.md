@@ -454,6 +454,68 @@ pytest -q                                  # backend
 - **Cloud Run:** `--set-secrets` em `cloudbuild.yaml` referencia segredos do Secret Manager
 - **Nunca:** hardcoded keys em código (regra global + GUARDRAILS)
 
+### Lista de secrets ativos (junho/2026)
+
+| Secret | Consumer | Status |
+|---|---|---|
+| `DEEPSEEK_API_KEY` | `agents-runtime`, `ata-worker`, `proactive-worker` | ativo |
+| `NVIDIA_API_KEY` | `agents-runtime` (fallback cascade) | ativo |
+| `MINIMAX_API_KEY` | `agents-runtime` (fallback cascade) | ativo |
+| `OPENAI_API_KEY` | `agents-runtime` (embeddings RAG) | ativo |
+| `agents-runtime-sa-token` | `agents-runtime` (Cloud Run identity) | ativo |
+| `OAUTH_CLIENT_SECRET` | `agents-runtime` (OAuth per-user, Fase D) | ativo |
+| `OAUTH_STATE_SECRET` | `agents-runtime` (HMAC state, Fase D) | ativo |
+| `COHERENCE_18_PLUS_OAUTH_CLIENT_ID` | `agents-runtime` (OAuth per-user) | ativo |
+| `COHERENCE_18_PLUS_OAUTH_CLIENT_SECRET` | `agents-runtime` (OAuth per-user) | ativo |
+| `PROACTIVE_WORKER_PHONES` | `proactive-worker` (CSV de telefones, Fase D) | ativo |
+| `ATA_WORKER_PHONES` | `ata-worker` (CSV de telefones, Fase D) | ativo |
+| `evolution-api-key` | `agents-runtime` (envio de mensagens, Fase C) | ativo |
+| `google-maps-api-key` | `agents-runtime` (locomotion tool) | ativo |
+| `youtube-api-key` | `agents-runtime` (youtube tool) | ativo |
+| `serper-api-key` | `agents-runtime` (web search) | ativo |
+
+### Lista de secrets orfaos (cleanup pendente, Fase F)
+
+| Secret | Motivo | Procedure |
+|---|---|---|
+| `whatsapp-agente-url` | URL do `whatsapp-agente-test` (proxy deletado na Fase A) | `docs/fases/fase_F/cleanup_secrets.md` |
+| `agents-runtime-sa-token-clean` | Duplicata de `agents-runtime-sa-token` (refresh ja existe no codigo) | `docs/fases/fase_F/cleanup_secrets.md` |
+| `google-oauth-token` | OAuth global removido na Fase D | `docs/fases/fase_F/cleanup_secrets.md` (referencia) |
+
+### Troubleshooting OAuth per-user
+
+Sintoma: `RuntimeError("user_google_oauth_required")` no log do Cloud Run.
+
+Checklist:
+1. Verificar se o usuario concluiu o fluxo `/oauth/google`:
+   ```powershell
+   gcloud firestore documents get users/<phone>/google_oauth --project=coherence-ominichannel-fs
+   ```
+2. Se o campo nao existe, redirecionar o usuario para a URL gerada por
+   `core.oauth_per_user.create_oauth_state(phone)` (ver `docs/fases/fase_F/oauth_setup.md`).
+3. Se o token esta expirado e o refresh falha, verificar `OAUTH_CLIENT_SECRET`
+   no Secret Manager.
+4. Se o refresh falha com `invalid_grant`, o `refresh_token` foi revogado pelo
+   usuario; repetir o fluxo `/oauth/google`.
+
+Sintoma: `oauth refresh failed: ...` em loop.
+
+Verificar se `OAUTH_CLIENT_SECRET` e `COHERENCE_18_PLUS_OAUTH_CLIENT_SECRET`
+batem com os valores configurados no Google Cloud Console.
+
+Sintoma: prefetch retorna `None` para Calendar/Email/Drive.
+
+Verificar se `core.oauth_per_user.get_user_credentials(phone)` retorna
+`Credentials` valido. Logs do `_prefetch_*` devem mostrar `"Prefetch X failed: ..."`.
+
+### Procedures externas (Fase F)
+
+- `docs/fases/fase_F/oauth_setup.md` — configuracao do OAuth Client no Google
+  Cloud Console e execucao manual do fluxo.
+- `docs/fases/fase_F/cleanup_secrets.md` — delecao de secrets orfaos.
+- `docs/fases/fase_F/cleanup_repo.md` — delecao da pasta local e do repo
+  GitHub legados.
+
 ## CI/CD
 
 ```yaml
@@ -511,4 +573,5 @@ Sincroniza membros dos grupos via Evolution API. Chamado pelo Cloud Scheduler a 
 - [ARQUITETURA.md](./ARQUITETURA.md) - Arquitetura
 - [GUARDRAILS.md](./GUARDRAILS.md) - Regras inegociaveis
 - `Coherence_Portal/docs/HARNESS.md` - Harness do Portal
-- `WhatsappAgente/docs/HARNESS.md` - Harness do adapter
+- `docs/fases/fase_F/` — procedures de cleanup e OAuth (Fase F)
+- `docs/fases/fase_{A,B,C,D,E}/` — historico das fases anteriores
