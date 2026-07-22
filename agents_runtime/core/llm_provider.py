@@ -6,8 +6,10 @@ Features:
 - JSON mode support (auto-injects "JSON:" prefix per DeepSeek requirement)
 - Thinking mode toggle per request
 - chat_escalating uses built-in cascade order (Pro comes after Flash in fallback chain)
+- chat_with_tools handles MiniMax-style tool_call tags emitted inside content
 """
 import os
+import re
 import json
 import time
 import random
@@ -18,6 +20,57 @@ from typing import Optional, Dict, Any, List
 import httpx
 import requests
 from core.secrets import get_secret
+
+logger = logging.getLogger(__name__)
+
+_MINIMAX_INVOKE_RE = re.compile(
+    r'<\s*invoke\s+name="([^"]+)"[^>]*>(.*?)</\s*invoke\s*>',
+    re.DOTALL,
+)
+_MINIMAX_ACTION_RE = re.compile(r'<\s*action\b[^>]*>(.*?)</\s*action\s*>', re.DOTALL)
+_MINIMAX_TOOL_CALL_BLOCK_RE = re.compile(r'<\s*tool_call\s*>.*?</\s*tool_call\s*>', re.DOTALL)
+
+
+def _extract_minimax_tool_calls(content: str) -> tuple:
+    """Best-effort extractor for MiniMax-style inline tool calls.
+
+    Some providers return tool invocations embedded in `content` instead of the
+    structured `tool_calls` field. Returns (tool_calls_list, cleaned_content).
+    """
+    if not content:
+        return [], content
+    invoke_matches = list(_MINIMAX_INVOKE_RE.finditer(content))
+    if not invoke_matches:
+        return [], content
+
+    cleaned = content
+    tool_calls: List[Dict[str, Any]] = []
+    for idx, match in enumerate(invoke_matches):
+        name = match.group(1).strip()
+        inner = match.group(2)
+        action = _MINIMAX_ACTION_RE.search(inner)
+        args_str = action.group(1).strip() if action else "{}"
+        try:
+            args = json.loads(args_str) if args_str else {}
+            if not isinstance(args, dict):
+                args = {"value": args}
+        except json.JSONDecodeError:
+            args = {"raw": args_str}
+        tool_calls.append({
+            "id": f"minimax_call_{idx}_{name}",
+            "type": "function",
+            "function": {
+                "name": name,
+                "arguments": json.dumps(args, ensure_ascii=False),
+            },
+        })
+        cleaned = cleaned.replace(match.group(0), "")
+
+    cleaned = _MINIMAX_TOOL_CALL_BLOCK_RE.sub("", cleaned)
+    cleaned = re.sub(r'\[\s*<\s*minimax\s*>\s*\[', '', cleaned)
+    cleaned = re.sub(r'\]\s*<\s*/?\s*minimax\s*>\s*\]', '', cleaned)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return tool_calls, cleaned
 
 logger = logging.getLogger(__name__)
 
@@ -363,6 +416,14 @@ class LLMProvider:
             msg = choices[0].get("message", {})
             content = msg.get("content", "")
             tool_calls = msg.get("tool_calls", [])
+            if not tool_calls and content:
+                extracted, cleaned_content = _extract_minimax_tool_calls(content)
+                if extracted:
+                    tool_calls = extracted
+                    content = cleaned_content
+                    logger.info(
+                        "minimax_inline_tool_calls extracted count=%d", len(tool_calls)
+                    )
             last_content = content
 
             if not tool_calls:

@@ -1,4 +1,6 @@
 """Tests for core.llm_provider module (cascade fallback with mocks)."""
+import json
+
 import pytest
 from unittest.mock import patch, MagicMock
 from core.llm_provider import LLMProvider, LLMError
@@ -177,3 +179,111 @@ class TestJsonMarkerInjection:
         provider = LLMProvider()
         result = provider._maybe_inject_json_marker("Plain text", json_mode=False)
         assert result == "Plain text"
+
+
+class TestExtractMiniMaxToolCalls:
+    def test_extracts_invoke_from_content(self):
+        from core.llm_provider import _extract_minimax_tool_calls
+
+        dirty = (
+            'Vou checar [<minimax>[<tool_call>'
+            '<invoke name="calendar.list_events" date="2026-07-21">'
+            '<action>{"time_min": "2026-07-21T00:00:00-03:00"}</action>'
+            '</invoke>'
+            '</tool_call>]'
+        )
+        tool_calls, cleaned = _extract_minimax_tool_calls(dirty)
+        assert len(tool_calls) == 1
+        assert tool_calls[0]["function"]["name"] == "calendar.list_events"
+        assert json.loads(tool_calls[0]["function"]["arguments"]) == {
+            "time_min": "2026-07-21T00:00:00-03:00"
+        }
+        assert "Vou checar" in cleaned
+        assert "[<minimax>" not in cleaned
+        assert "<tool_call>" not in cleaned
+
+    def test_returns_empty_for_normal_text(self):
+        from core.llm_provider import _extract_minimax_tool_calls
+
+        tool_calls, cleaned = _extract_minimax_tool_calls("Oi tudo bem?")
+        assert tool_calls == []
+        assert cleaned == "Oi tudo bem?"
+
+    def test_handles_invoke_without_action(self):
+        from core.llm_provider import _extract_minimax_tool_calls
+
+        dirty = '<invoke name="calendar.list_events"></invoke>'
+        tool_calls, cleaned = _extract_minimax_tool_calls(dirty)
+        assert len(tool_calls) == 1
+        assert json.loads(tool_calls[0]["function"]["arguments"]) == {}
+        assert cleaned == ""
+
+    def test_extracts_multiple_invocations(self):
+        from core.llm_provider import _extract_minimax_tool_calls
+
+        dirty = (
+            'oi [<minimax>[<tool_call>'
+            '<invoke name="calendar.list_events"></invoke>'
+            '</tool_call>]'
+            ' [<minimax>[<tool_call>'
+            '<invoke name="gmail.search_messages"></invoke>'
+            '</tool_call>]'
+        )
+        tool_calls, cleaned = _extract_minimax_tool_calls(dirty)
+        names = [tc["function"]["name"] for tc in tool_calls]
+        assert names == ["calendar.list_events", "gmail.search_messages"]
+        assert "oi" in cleaned
+        assert "[<minimax>" not in cleaned
+
+
+@pytest.mark.asyncio
+class TestChatWithToolsMiniMaxFallback:
+    @pytest.mark.asyncio
+    async def test_extracts_inline_tool_call_when_structured_empty(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        monkeypatch.setenv("MINIMAX_API_KEY", "sk-mm")
+
+        provider = LLMProvider()
+
+        dirty_content = (
+            "Vou checar [<minimax>[<tool_call>"
+            '<invoke name="calendar.list_events">'
+            '<action>{"time_min": "2026-07-21T00:00:00-03:00"}</action>'
+            "</invoke></tool_call>]"
+        )
+        clean_content = "Voce tem 0 eventos hoje."
+
+        call_count = {"n": 0}
+
+        async def fake_call_provider(payload, model):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return {
+                    "choices": [
+                        {"message": {"content": dirty_content, "tool_calls": []}}
+                    ]
+                }
+            return {
+                "choices": [
+                    {"message": {"content": clean_content, "tool_calls": []}}
+                ]
+            }
+
+        async def fake_executor(name, args):
+            return json.dumps({"events": [], "count": 0})
+
+        with patch.object(provider, "_call_provider", side_effect=fake_call_provider):
+            result = await provider.chat_with_tools(
+                system_prompt="sys",
+                user_prompt="user",
+                tools=[{"type": "function", "function": {"name": "calendar.list_events"}}],
+                tool_executor=fake_executor,
+                model="MiniMax-M2.7-highspeed",
+            )
+
+        assert "[<minimax>" not in result["content"]
+        assert "<tool_call>" not in result["content"]
+        assert "<invoke" not in result["content"]
+        assert result["content"] == clean_content
+        assert result["tool_rounds"] == 1
+

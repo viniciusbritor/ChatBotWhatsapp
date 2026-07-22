@@ -273,3 +273,52 @@ class TestPrivacyGuard:
         assert result["metadata"]["agent_id"] == "privacy-guard"
         assert result["metadata"]["blocked"] == "unregistered_user"
         assert "Portal" in result["reply"]
+
+
+class TestResponseCleanup:
+    def test_strips_minimax_prefix_suffix(self):
+        from orchestrator import _strip_provider_artifacts
+
+        cleaned = _strip_provider_artifacts(
+            "Oi, Vinicius! Tudo bem? [<minimax>[<tool_call>o que nao devia"
+        )
+        assert "[<minimax>" not in cleaned
+        assert "<tool_call" not in cleaned
+        assert "Oi, Vinicius!" in cleaned
+
+    def test_strips_tool_call_xml(self):
+        from orchestrator import _strip_provider_artifacts
+
+        dirty = (
+            "Vou checar sua agenda [<minimax>[<tool_call>"
+            "<invoke name=\"calendar.list_events\">foo</invoke>"
+            "</tool_call>]"
+        )
+        cleaned = _strip_provider_artifacts(dirty)
+        assert "<tool_call>" not in cleaned
+        assert "<invoke" not in cleaned
+        assert "[<minimax>" not in cleaned
+        assert "Vou checar sua agenda" in cleaned
+
+    def test_strips_invoke_blocks(self):
+        from orchestrator import _strip_provider_artifacts
+
+        dirty = "<invoke name=\"gmail.search_messages\"></invoke><tool_call>"
+        cleaned = _strip_provider_artifacts(dirty)
+        assert "<invoke" not in cleaned
+        assert "<tool_call>" not in cleaned
+
+    def test_preserves_normal_text(self):
+        from orchestrator import _strip_provider_artifacts
+
+        text = "OI! Hoje voce tem 2 compromissos: 17h-18h CoherenceAI e 19h-20h 1:1 Marketing."
+        cleaned = _strip_provider_artifacts(text)
+        assert cleaned == text
+
+    def test_normalize_response_identity_strips_first(self):
+        from orchestrator import _normalize_response_identity
+
+        dirty = "[<minimax>[<tool_call>x</tool_call>] Eu sou a Web Manager."
+        out = _normalize_response_identity(dirty)
+        assert "[<minimax>" not in out
+        assert "sou a Jennifer".casefold() in out.casefold()

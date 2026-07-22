@@ -970,8 +970,31 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
+_MINIMAX_TOOL_CALL_RE = re.compile(r"<\s*tool_call\s*>.*?</\s*tool_call\s*>", re.DOTALL)
+_MINIMAX_TOOL_CALL_SELF_RE = re.compile(r"<\s*tool_call\s*/?\s*>")
+_MINIMAX_INVOKE_RE = re.compile(r"<\s*invoke\b[^>]*>.*?</\s*invoke\s*>", re.DOTALL)
+_MINIMAX_INVOKE_SELF_RE = re.compile(r"<\s*invoke\b[^>]*/?>")
+_MINIMAX_TAG_RE = re.compile(r"\[\s*<\s*minimax\s*>\s*\[|\]\s*<\s*/?\s*minimax\s*>\s*\]")
+
+
+def _strip_provider_artifacts(text: str) -> str:
+    """Safety net: remove MiniMax-style tags that may leak into `content`.
+
+    `chat_with_tools` strips these when it parses inline tool calls, but if
+    the parser is bypassed (e.g. provider returns clean `tool_calls`), a few
+    fragments can still survive. We collapse them here as defense in depth.
+    """
+    cleaned = _MINIMAX_TOOL_CALL_RE.sub("", text)
+    cleaned = _MINIMAX_TOOL_CALL_SELF_RE.sub("", cleaned)
+    cleaned = _MINIMAX_INVOKE_RE.sub("", cleaned)
+    cleaned = _MINIMAX_INVOKE_SELF_RE.sub("", cleaned)
+    cleaned = _MINIMAX_TAG_RE.sub("", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
 def _normalize_response_identity(text: str) -> str:
-    normalized = str(text or "")
+    normalized = _strip_provider_artifacts(str(text or ""))
     replacements = [
         (r"(?i)\bsou\s+(?:o|a)\s+(?:web|calendar|drive|email)\s+manager\b", "sou a Jennifer"),
         (r"(?i)\baqui\s+e\s+(?:o|a)\s+(?:web|calendar|drive|email)\s+manager\b", "aqui e a Jennifer"),
