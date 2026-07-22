@@ -1,9 +1,37 @@
 # Plano Detalhado de Correções — ChatBotWhatsapp `test` (2026-07-21)
 
 > **Modo**: build (consolidação final da rodada de esteira de test)
-> **Escopo**: esteira de CI/CD, gaps dos agentes, fluxo OAuth, secrets órfãos.
+> **Escopo**: esteira de CI/CD, gaps dos agentes, fluxo OAuth, secrets órfãos, controle rigoroso de custos GCP.
 > **Base de referência**: commits `076fbbf9`, `1654c68`, `5bcb488`, `32acd4f`, `e8b0634`, `fa1d707`, `d29e8f1`, `f14aa93`.
-> **Status**: Fase C concluida (commit `1862d51`) + Fase D concluida (commit `ff6375f`) + Fase E concluida (gate local 316 passed, 10 skipped, ruff 0, mypy 0, LGPD 0). Pendencias externas continuam em F+.
+> **Status**: Fase C concluida + Fase D concluida + Fase E concluida + Governança de Custos GCP Aplicada (2026-07-22).
+> **Foco**: SOMENTE o projeto `coherence-ominichannel-fs` (chatbot). Outros
+> produtos no mesmo billing account (`Portal Coherence`, `Monitoria IA`,
+> `brasil-ai`) estao fora do escopo desta esteira. A contestacao GCP
+> (R$ 1.070,71) **pode ter sido aberta para o projeto errado** (`brasil-ai`,
+> nao `omnichannel`) - revalidar antes de qualquer decisao de migracao.
+
+---
+
+## 0. Ressalvas de Infraestrutura e Governança de Custos GCP (2026-07-22)
+
+1. **Isolamento de Ambiente DEV (ChatBotWhatsapp)**:
+   - O módulo `ChatBotWhatsapp` (`agents_runtime`) opera **100% em ambiente de Desenvolvimento/Teste**.
+   - O container de produção `agents-runtime-prod` foi **DELETADO permanentemente** via gcloud CLI para evitar qualquer cobrança indevida ou duplicidade.
+2. **Premissa Mandatória Scale-to-Zero**:
+   - Em desenvolvimento/teste, os custos do Cloud Run devem tender rigorosamente a **R$ 0,00 quando ocioso**.
+   - É estritamente proibido utilizar `--no-cpu-throttling` (`CPU-THROTTLING: false`) ou `minScale > 0` no Cloud Run em ambiente de teste/dev.
+3. **Preservação dos Módulos de Produção**:
+   - Os serviços `coherence-portal` e `monitoria` são os únicos mantidos em produção. Operam com `minScale: 0` e `cpu-throttling: true` para responder sob demanda sem desmobilizar a estrutura.
+4. **Contestação de Faturamento GCP Billing**:
+   - Conduzido atendimento ao vivo com o suporte da GCP (Atendente: Don Don) referente ao valor de **R$ 1.070,71** cobrado por vCPUs ociosas no Cloud Run em Julho/2026.
+   - O suporte aprovou a submissão da exceção de cortesia (*goodwill credit adjustment*) pendente da janela de agregação de 32h.
+   - **CORRECAO 22/07**: o billing account `0182AB-52893A-9993BE` ("projeto jennifer")
+     e **compartilhado** entre `coherence-ominichannel-fs` (chatbot) e `brasil-ai`
+     (outro produto). A contestacao pode ter sido aberta para o projeto
+     errado. Revalidar com filtro de `coherence-ominichannel-fs` no Console.
+5. **Guardrail 57 Integrado**:
+   - Registrada a proibição de flags de CPU Always Allocated em `docs/GUARDRAILS.md`.
+
 
 ---
 

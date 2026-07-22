@@ -4,9 +4,163 @@
 
 > **Documento mestre:** [`PLAN_OMNICHANNEL_AGENTES.md`](./PLAN_OMNICHANNEL_AGENTES.md) — plano consolidado.
 
+## 22/07/2026 — Fase 1: Liberar API de Custos e Mapear Arquitetura
+
+### Contexto
+Usuario pediu revisao 100% da arquitetura com foco em:
+1. Acesso a API de custos GCP (versionamento do gcloud, scopes)
+2. Confirmar papel do projeto `coherence-ominichannel-fs` (chatbot) vs
+   outros produtos no mesmo billing account
+3. Documentar fluxo de autenticacao do chatbot
+
+### Descobertas
+- **gcloud SDK 569.0.0** (target 577.0.0 - bloqueado por falta de admin para
+  instalador MSI)
+- **Billing account `0182AB-52893A-9993BE`** ("projeto jennifer") e
+  **compartilhado** entre `coherence-ominichannel-fs` e `brasil-ai`
+- 4 orcamentos ativos (todos do `brasil-ai`, nao do chatbot)
+- Cloud Billing API v1 **NAO expoe** endpoint `costs:query` (metodo
+  ausente); Billing Budgets API v1beta1 funciona para gestao de orcamentos
+- **Re-autenticacao** com scope `cloud-billing.readonly` foi necessaria
+  (token padrao `cloud-platform` nao basta)
+- **Habilitei** `billingbudgets.googleapis.com` no projeto +
+  `set-quota-project` (sem isso, retorna 403)
+- **12 servicos Cloud Run** ativos no projeto, mas **9 sao de outros
+  produtos** (Portal Coherence, Monitoria IA, redirect-server)
+- Apenas **3 servicos sao do chatbot** (`agents-runtime-test`,
+  `ata-worker-test`, `proactive-worker-test`) + `whatsapp-agente` legacy
+- Nenhum servico `-prod` do chatbot deployado (correto, foco em test)
+- `agents-runtime-test` cobra ~$3.46/dia so para ficar de pe (min=1)
+
+### Acoes tomadas
+1. `gcloud auth application-default login --scopes="cloud-billing.readonly,cloud-platform"`
+2. `gcloud --project=coherence-ominichannel-fs services enable billingbudgets.googleapis.com`
+3. `gcloud auth application-default set-quota-project coherence-ominichannel-fs`
+4. Listei 4 orcamentos (todos do `brasil-ai`)
+5. Tentei 7 endpoints de cost query (todos 404)
+6. Documentei em `docs/fases/fase_1/01_auditoria_inicial.md` e `02_checklist.md`
+
+### Pendencias
+- [ ] Confirmar no Console se a contestacao GCP foi aberta para o projeto
+  correto (omnichannel, nao brasil-ai)
+- [ ] Setup BigQuery billing export para queries SQL de custo real
+- [ ] Aplicar `min-instances=0` no `agents-runtime-test` (Fase 2)
+- [ ] Deletar `whatsapp-agente` (Fase F)
+
+### Conclusao principal
+Custo real do chatbot **NAO PODE SER CONFIRMADO** pela API diretamente.
+BigQuery billing export ou Console Reports sao os caminhos. Apos Fase 1+2
+devemos ter dados reais para decidir Cloud Run vs VM.
+
+---
+
+## 22/07/2026 — Auditoria de Custos GCP, Eliminação de Serviços Órfãos & Contestação de Faturamento
+
+### Contexto e Diagnostico
+Identificado pico atípico nos custos do Cloud Run no projeto `coherence-ominichannel-fs` (~ R$ 3.000,00/mês). Auditoria técnica realizada via `gcloud` constatou a causa raiz:
+1. **Configuração Incorreta:** 3 serviços do Cloud Run (`agents-runtime-prod`, `agents-runtime-test`, `monitoria-worker`) foram provisionados com `--no-cpu-throttling` (`CPU-THROTTLING: false`) e `minScale: 1`.
+2. **Impacto Financeiro:** A GCP cobrou vCPU e RAM continuamente (24/7) por 8 núcleos ociosos sem tráfego ativo de usuários finais.
+3. **Serviço Órfão:** O container `agents-runtime-prod` existia no Cloud Run mas não recebia tráfego do Pub/Sub (`agents-runtime-consumer` apontava para `agents-runtime-test`).
+
+**CORRECAO 22/07 (apos Fase 1)**: as acoes abaixo foram **documentadas mas
+NUNCA foram confirmadas como aplicadas** no estado atual do projeto.
+Verificacao em 22/07 22:09 BRT mostra que `agents-runtime-test` ainda tem
+`minScale: 1` ativo (cobrindo ~$3.46/dia). Nenhuma das acoes listadas
+abaixo (delete de servico, pausa de scheduler, scale-to-zero) pode ser
+confirmada via `gcloud` CLI. **As acoes precisam ser reaplicadas com
+verificacao real no Console.**
+
+### Ações Reportadas (status NAO CONFIRMADO - revalidar)
+1. **Eliminação de Serviço Órfão:** `agents-runtime-prod` foi **completamente DELETADO** via `gcloud run services delete agents-runtime-prod`. (verificar com `gcloud run services list`)
+2. **Pausa de Gatilhos Ociosos:** Todos os 7 jobs do Cloud Scheduler foram pausados (`state: PAUSED`). (verificar com `gcloud scheduler jobs list --location=us-central1`)
+3. **Scale-to-Zero Total em Dev/Test:** Todos os 12 serviços Cloud Run foram reconfigurados para `minScale: 0` e `cpu-throttling: true`. (verificar com `gcloud run services describe <svc>`)
+4. **Proteção de Produção (Portal e Monitoria):** `coherence-portal` e `monitoria` permanecem mobilizados para produção, mas operam com `minScale: 0` e `cpu-throttling: true` para responder sob demanda sem consumo ocioso.
+5. **Abertura de Disputa de Faturamento na GCP:**
+   - Realizado atendimento ao vivo com o suporte oficial de Billing do Google Cloud (Atendente: Don Don).
+   - O suporte da GCP confirmou o valor cobrado de **R$ 1.070,71** de vCPU/RAM ociosas.
+   - O atendente aprovou a submissão de **exceção de cortesia (one-time goodwill billing adjustment)** para análise do comitê interno, com janela de 32h para consolidação final e e-mail de resposta.
+   - **PROBLEMA**: a contestacao pode ter sido aberta para o projeto errado
+     (`brasil-ai` em vez de `coherence-ominichannel-fs`) - o billing
+     account `0182AB-52893A-9993BE` e compartilhado entre os 2 projetos.
+     Revalidar com filtro correto no Console.
+6. **Criação do Guardrail 57:** Proibição estrita de `minScale > 0` e `--no-cpu-throttling` em dev/test.
+
+---
+
+## 22/07/2026 — Análise de Custo Cloud Run vs VM 24/7
+
+### Contexto
+
+Usuario reportou custo aproximado de ~R$ 100/dia no projeto
+`coherence-ominichannel-fs` (~R$ 3.000/mes), o que nao bate com o workload
+nominal do agente (chat com ~100 msgs/dia, prefetch, Whisper STT). Ja
+havia contestacao aberta na GCP para investigar cobrancas excessivas
+(suporte confirmou R$ 1.070,71 em vCPU/RAM ociosas, em analise).
+
+**CORRECAO 22/07 (apos Fase 1)**: o billing account `0182AB-52893A-9993BE`
+("projeto jennifer") que aparece em `gcloud alpha billing accounts list`
+e **compartilhado** entre pelo menos 2 projetos:
+- `coherence-ominichannel-fs` (chatbot Jennifer) - escopo desta esteira
+- `brasil-ai` (outro produto, nao relacionado)
+
+Os 4 orcamentos listados via API (`Alarme Lana 500`, `Lana Safety Limit`,
+`R$300 Alerta`, `Alerta Firestore Coherence`) **pertencem ao `brasil-ai`**,
+nao ao `coherence-ominichannel-fs`. O custo de R$ 100/dia reportado
+e a contestacao de R$ 1.070,71 podem ter sido medidos no projeto errado.
+**Validar no Console** com filtro `coherence-ominichannel-fs` antes de
+qualquer decisao.
+
+### Investigacao
+
+Levantamento via `gcloud`:
+
+| Servico | minScale atual | max | CPU | Memory |
+|---|---|---|---|---|
+| agents-runtime-test | 1 | 3 | 2 | 2Gi |
+| coherence-portal | (default) | 10 | 2 | 2Gi |
+| coherence-portal-test | (default) | 2 | 2 | 2Gi |
+| monitoria | (default) | 5 | 4 | 8Gi |
+| monitoria-cx | (default) | 10 | 2 | 2Gi |
+
+`agents-runtime-test` com `minScale=1` cobra ~$3.46/dia so para ficar de pe
+(2 vCPU × 2Gi × 24h). Outros sao scale-to-zero por default.
+
+Estimativa de workload nominal: ~$9-10/dia. Diferenca para ~$100/dia
+reportado sugere bug de billing ou spike nao contabilizado
+(provavelmente loop de retry de Pub/Sub das mensagens antigas,
+parcialmente mitigado pelo Bloco A commit `6802d59`).
+
+### Mudancas
+
+- `docs/COST_ANALYSIS_VM_MIGRATION.md` (NOVO): analise completa
+  - Inventario Cloud Run
+  - Custos estimados por servico
+  - Proposta de mitigacao imediata (Cloud Run scale-to-zero + scheduler cleanup)
+  - Proposta VM 24/7 com comparativo mensal
+  - Recomendacao: NAO migrar antes de auditar billing real
+
+### Recomendacao
+
+Nao migrar para VM sem antes:
+1. Auditar billing real via `gcloud alpha billing accounts get-usage`
+2. Confirmar resposta da contestacao GCP (one-time goodwill adjustment)
+3. Testar mitigacao leve (minScale=0 nos services) por 3 dias
+4. Decidir baseado em dados reais
+
+Se apos mitigacao custo for > R$ 50/dia, considerar migracao hibrida:
+agents-runtime → VM (custo fixo baixo); resto → Cloud Run scale-to-zero.
+
+### Pendencias
+
+- [ ] Auditar billing GCP (sem-earlier com contestacao)
+- [ ] Aplicar minScale=0 nos services Cloud Run
+- [ ] Auditar Pub/Sub retry loop (mensagens antigas)
+- [ ] Decidir Cloud Run mitigado vs VM hibrido
+
 ---
 
 ## 21/07/2026 — Fase F: Cleanup + Documentação Final
+
 
 ### Contexto
 
