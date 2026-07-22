@@ -336,8 +336,7 @@ async def pubsub_push(request: Request):
     from core.pubsub_publisher import get_publisher
 
     auth_header = request.headers.get("Authorization", "")
-    token_audience = str(request.url).split("?", 1)[0]
-    if not verify_pubsub_token(auth_header, audience=token_audience):
+    if not verify_pubsub_token(auth_header):
         raise HTTPException(status_code=401, detail="invalid_pubsub_token")
     try:
         body = await request.json()
