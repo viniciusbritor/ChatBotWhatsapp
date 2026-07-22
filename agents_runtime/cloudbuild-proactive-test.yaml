@@ -40,8 +40,8 @@ steps:
       - "--max-retries=0"
       - "--parallelism=1"
       - "--task-timeout=300"
-      - "--set-env-vars=ENVIRONMENT=test,LOG_LEVEL=INFO,GCP_PROJECT=coherence-ominichannel-fs"
-      - "--set-secrets=DEEPSEEK_API_KEY=DEEPSEEK_API_KEY:latest,GOOGLE_OAUTH_TOKEN=google-oauth-token:latest,WHATSAPP_AGENTE_URL=whatsapp-agente-url:latest,AGENTS_RUNTIME_SA_TOKEN=agents-runtime-sa-token:latest"
+      - "--set-env-vars=ENVIRONMENT=test,LOG_LEVEL=INFO,GCP_PROJECT=coherence-ominichannel-fs,PROACTIVE_WORKER_PHONES="
+      - "--set-secrets=DEEPSEEK_API_KEY=DEEPSEEK_API_KEY:latest,AGENTS_RUNTIME_SA_TOKEN=agents-runtime-sa-token:latest"
 
 images:
   - "gcr.io/$PROJECT_ID/proactive-worker:$BUILD_ID"

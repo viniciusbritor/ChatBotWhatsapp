@@ -1,4 +1,6 @@
 """Tests for orchestrator module."""
+from typing import Dict
+
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
@@ -146,3 +148,128 @@ class TestOrchestrate:
         assert mock_exec.called
         call_args = mock_exec.call_args
         assert call_args[0][0]["id"] == "agent-morality"
+
+
+def _calendar_intent() -> Dict[str, bool]:
+    return {
+        "is_gross": False,
+        "is_assault_related": False,
+        "is_correction": False,
+        "is_calendar": True,
+        "is_drive": False,
+        "is_email": False,
+        "is_web_search": False,
+        "is_intimacy": False,
+        "is_personal_access": True,
+    }
+
+
+class TestPrivacyGuard:
+    """Tests for agent-privacy-guard automatic trigger (Fase E)."""
+
+    @pytest.mark.asyncio
+    async def test_personal_intent_in_group_unconfirmed_member_sets_pending_action(self):
+        from orchestrator import orchestrate
+        from core.pending_actions import _local_actions
+
+        _local_actions.clear()
+
+        with patch("orchestrator._detect_intent", return_value=_calendar_intent()):
+            with patch("tools.group.get_member_confirmation", AsyncMock(return_value=False)):
+                with patch("core.pending_actions.set_pending_action", AsyncMock()) as mock_set:
+                    with patch("orchestrator.get_user", return_value={"phone": "5511966830020"}):
+                        with patch("orchestrator._resolve_agent_for_intent", return_value="manager-calendar"):
+                            with patch("orchestrator.get_agent", return_value={"id": "manager-calendar", "tools": []}):
+                                result = await orchestrate({
+                                    "instance": "jennifer",
+                                    "phone": "5511966830020",
+                                    "text": "minha agenda de hoje",
+                                    "sender_name": "Vini",
+                                    "extra": {"remote_jid": "120363123456@g.us"},
+                                })
+
+        assert mock_set.called
+        args = mock_set.call_args.args
+        kwargs = mock_set.call_args.kwargs
+        assert args[0] == "5511966830020"
+        assert args[1] == "group_consent"
+        assert kwargs["ttl_sec"] == 300
+        assert result["metadata"]["agent_id"] == "privacy-guard"
+        assert result["metadata"]["blocked"] == "group_unconfirmed_member"
+        assert result["metadata"]["pending_action"] == "group_consent"
+        assert "Portal" in result["reply"]
+
+    @pytest.mark.asyncio
+    async def test_personal_intent_in_group_confirmed_member_proceeds(self):
+        from orchestrator import orchestrate
+        from core.pending_actions import _local_actions
+
+        _local_actions.clear()
+
+        with patch("orchestrator._detect_intent", return_value=_calendar_intent()):
+            with patch("tools.group.get_member_confirmation", AsyncMock(return_value=True)):
+                with patch("orchestrator.get_user", return_value={"phone": "5511966830020"}):
+                    with patch("orchestrator._resolve_agent_for_intent", return_value="manager-calendar"):
+                        with patch("orchestrator.get_agent", return_value={"id": "manager-calendar", "tools": []}):
+                            with patch("orchestrator._execute_agent", new_callable=AsyncMock) as mock_exec:
+                                with patch("orchestrator._schedule_indexing", side_effect=close_coroutine):
+                                    mock_exec.return_value = {
+                                        "reply": "Voce tem 2 eventos hoje",
+                                        "delay_ms": 100,
+                                        "presence": "composing",
+                                        "metadata": {"agent_id": "manager-calendar"},
+                                    }
+                                    await orchestrate({
+                                        "instance": "jennifer",
+                                        "phone": "5511966830020",
+                                        "text": "minha agenda",
+                                        "sender_name": "Vini",
+                                        "extra": {"remote_jid": "120363123456@g.us"},
+                                    })
+
+        assert mock_exec.called
+        assert mock_exec.call_args[0][0]["id"] == "manager-calendar"
+
+    @pytest.mark.asyncio
+    async def test_personal_intent_in_private_proceeds(self):
+        from orchestrator import orchestrate
+
+        with patch("orchestrator._detect_intent", return_value=_calendar_intent()):
+            with patch("orchestrator.get_user", return_value={"phone": "5511966830020"}):
+                with patch("orchestrator._resolve_agent_for_intent", return_value="manager-calendar"):
+                    with patch("orchestrator.get_agent", return_value={"id": "manager-calendar", "tools": []}):
+                        with patch("orchestrator._execute_agent", new_callable=AsyncMock) as mock_exec:
+                            with patch("orchestrator._schedule_indexing", side_effect=close_coroutine):
+                                mock_exec.return_value = {
+                                    "reply": "ok",
+                                    "delay_ms": 100,
+                                    "presence": "composing",
+                                    "metadata": {"agent_id": "manager-calendar"},
+                                }
+                                await orchestrate({
+                                    "instance": "jennifer",
+                                    "phone": "5511966830020",
+                                    "text": "minha agenda",
+                                    "sender_name": "Vini",
+                                    "extra": {},
+                                })
+
+        assert mock_exec.called
+
+    @pytest.mark.asyncio
+    async def test_personal_intent_unregistered_user_returns_portal_link(self):
+        from orchestrator import orchestrate
+
+        with patch("orchestrator._detect_intent", return_value=_calendar_intent()):
+            with patch("orchestrator.get_user", return_value=None):
+                result = await orchestrate({
+                    "instance": "jennifer",
+                    "phone": "5511999999999",
+                    "text": "minha agenda",
+                    "sender_name": "User",
+                    "extra": {},
+                })
+
+        assert result["metadata"]["agent_id"] == "privacy-guard"
+        assert result["metadata"]["blocked"] == "unregistered_user"
+        assert "Portal" in result["reply"]

@@ -6,6 +6,9 @@ REQUIRED_FILES = [
     ROOT / "core" / "masker.py",
     ROOT / "docs" / "PRIVACIDADE.md",
     ROOT / "docs" / "TERMOS.md",
+    ROOT / "Dockerfile",
+    ROOT / "ata_worker" / "Dockerfile",
+    ROOT / "proactive_worker" / "Dockerfile",
 ]
 REQUIRED_SNIPPETS = {
     ROOT / "main.py": ["mask_pii(transcript)"],

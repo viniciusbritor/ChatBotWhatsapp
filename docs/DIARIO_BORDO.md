@@ -6,6 +6,55 @@
 
 ---
 
+## 21/07/2026 — Fase E: privacy-guard testado + deploy agent-proatividade
+
+### Contexto
+
+A integracao do `agent-privacy-guard` no `orchestrator.py` (linhas 803-844)
+estava pronta desde a consolidacao inicial, mas sem cobertura de testes. O
+`cloudbuild-proactive-test.yaml` ainda referenciava o secret obsoleto
+`GOOGLE_OAUTH_TOKEN` (removido do codigo na Fase D) e o LGPD compliance
+check nao exigia `Dockerfile` dos workers.
+
+### Mudancas
+
+- `tests/test_orchestrator.py`: nova `TestPrivacyGuard` com 4 testes
+  deterministicos cobrindo os 4 ramos: (a) personal intent em grupo sem
+  confirmacao cria `pending_action: group_consent`; (b) personal intent em
+  grupo com confirmacao prossegue para o agent; (c) personal intent em
+  privado prossegue direto; (d) personal intent de usuario nao registrado
+  retorna link do Portal. Os mocks usam `tools.group.get_member_confirmation`
+  e `core.pending_actions.set_pending_action` (caminhos de import lazy do
+  orchestrator).
+- `cloudbuild-proactive-test.yaml`: removido
+  `--set-secrets=...GOOGLE_OAUTH_TOKEN=google-oauth-token:latest`. Adicionado
+  `PROACTIVE_WORKER_PHONES=` placeholder em `--set-env-vars` para o operador
+  popular via Cloud Scheduler.
+- `scripts/check_lgpd_compliance.py`: `REQUIRED_FILES` agora inclui
+  `Dockerfile`, `ata_worker/Dockerfile` e `proactive_worker/Dockerfile`
+  (gate explicito para deploy dos workers).
+- `tests/test_lgpd_compliance.py`: testes de missing-file e missing-snippet
+  atualizados para os 3 Dockerfiles.
+
+### Gate tecnico final
+
+| Validador | Resultado |
+|---|---|
+| `pytest -q tests/` | `316 passed, 10 skipped` (zero failed, zero error, zero warning) |
+| `ruff check ...` | `All checks passed!` |
+| `mypy core/ ...` | `Success: no issues found in 25 source files` |
+| `python scripts/check_lgpd_compliance.py` | `LGPD compliance checks passed` |
+
+### Pendencias externas
+
+- Provisionar Cloud Scheduler para `proactive-worker-test` (cron `*/15min`
+  para `events`; Tue+Fri 8h BRT para `topics`).
+- Definir `PROACTIVE_WORKER_PHONES` no Cloud Run env (CSV).
+- Provisionar Authorized redirect URIs do OAuth Client no Google Cloud
+  Console.
+
+---
+
 ## 21/07/2026 — Fase D: OAuth per-user obrigatório nos managers
 
 ### Contexto

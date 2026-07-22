@@ -416,6 +416,32 @@ Resultado do gate isolado: 312 testes aprovados (10 ignorados pelo allowlist de 
 
 Para configurar os workers no ambiente `test`, defina `ATA_WORKER_PHONES` (CSV) e `PROACTIVE_WORKER_PHONES` (CSV) como variaveis de ambiente do Cloud Run Job.
 
+### Gate da Fase E — privacy-guard testado + deploy agent-proatividade
+
+A Fase E fechou a cobertura do `agent-privacy-guard` no orchestrator e removeu a dependencia obsoleta `GOOGLE_OAUTH_TOKEN` do job `proactive-worker-test`. O LGPD compliance check agora exige os 3 Dockerfiles (agents-runtime, ata_worker, proactive_worker).
+
+Validacao reproduzivel em Python 3.12, com secrets externos neutralizados:
+
+```powershell
+[Environment]::SetEnvironmentVariable("GCP_PROJECT", "", "Process")
+[Environment]::SetEnvironmentVariable("GCLOUD_PROJECT", "", "Process")
+[Environment]::SetEnvironmentVariable("FIRESTORE_EMULATOR_HOST", "", "Process")
+Remove-Item Env:DEEPSEEK_API_KEY,Env:NVIDIA_API_KEY,Env:MINIMAX_API_KEY,Env:OPENAI_API_KEY -ErrorAction SilentlyContinue
+cd agents_runtime
+python -m pytest -q tests/
+python -m pytest -q tests/test_orchestrator.py::TestPrivacyGuard
+python -m ruff check tests/ core/ main.py orchestrator.py agent_loader.py tool_registry.py tools/ scripts/ ata_worker/ proactive_worker/
+python -m mypy --no-incremental --explicit-package-bases --follow-imports=silent core
+python scripts/check_lgpd_compliance.py
+```
+
+Resultado do gate isolado: 316 testes aprovados (10 ignorados); zero falhas, zero erros e zero warnings; Ruff sem erros; mypy sem erros em 25 arquivos; LGPD compliance check aprovado. `cloudbuild-proactive-test.yaml` NAO referencia mais `GOOGLE_OAUTH_TOKEN`. Os 4 testes do `TestPrivacyGuard` cobrem: grupo sem confirmacao (pending_action), grupo com confirmacao (executa agent), privado (executa agent) e unregistered user (link Portal).
+
+Para deploy do `proactive-worker-test` no GCP via Cloud Scheduler:
+1. Buildar via `cloudbuild-proactive-test.yaml` no push em `test`.
+2. Provisionar Cloud Scheduler jobs: `*/15 * * * *` para `python proactive_worker/main.py --mode events`; `0 8 * * 2,5` (Tue+Fri 8h BRT) para `python proactive_worker/main.py --mode topics`.
+3. Definir `PROACTIVE_WORKER_PHONES` no Cloud Run env (CSV dos telefones elegiveis).
+
 
 ```bash
 cd agents_runtime

@@ -16,7 +16,7 @@
 | OAuth por usuario | `core/oauth_per_user.py` (Fase C 2026-07-21) com HMAC state, refresh automatico e persistencia em `usuarios/{phone}/google_oauth_token`. `phone` e obrigatorio nos 3 managers (Fase D 2026-07-21); secret global `GOOGLE_OAUTH_TOKEN` removido |
 | Cliente Evolution | `core/evolution_client.py` (Fase C 2026-07-21) — fonte canonica de envio de mensagens WhatsApp |
 | Logs estruturados | `core/logging.py:JsonFormatter` (Fase C 2026-07-21) — JSON com timestamp BRT em milissegundos |
-| Compliance LGPD | `scripts/check_lgpd_compliance.py` (Fase C 2026-07-21) — gate local de arquivos obrigatorios e snippets canonicos |
+| Compliance LGPD | `scripts/check_lgpd_compliance.py` (Fase C 2026-07-21) — gate local de arquivos obrigatorios e snippets canonicos. Fase E: passou a exigir `Dockerfile`, `ata_worker/Dockerfile` e `proactive_worker/Dockerfile` |
 | Embeddings RAG | OpenAI text-embedding-3-small (1536d), sem fallback entre dimensoes |
 | Vector DB | Firestore Vector v2 (`conversation-memory-v2`, `agent-knowledge-v2`, `public-knowledge-v2`) |
 | Datastore | Firestore (coherence-ominichannel-fs) |
