@@ -22,8 +22,8 @@ def _pubsub_available() -> bool:
 
 
 DEFAULT_PROJECT = os.getenv("GCP_PROJECT", "coherence-ominichannel-fs")
-DEFAULT_TOPIC = os.getenv("WHATSAPP_PUBSUB_TOPIC", "whatsapp-messages")
-DEFAULT_DLQ_TOPIC = os.getenv("WHATSAPP_PUBSUB_DLQ", "whatsapp-messages-dlq")
+DEFAULT_TOPIC = os.getenv("WHATSAPP_PUBSUB_TOPIC", "chatbotwhatsapp-messages")
+DEFAULT_DLQ_TOPIC = os.getenv("WHATSAPP_PUBSUB_DLQ", "chatbotwhatsapp-dlq")
 
 
 class PubSubPublisher:

@@ -57,7 +57,7 @@ async def test_webhook_publishes_expected_attributes():
         await evolution_webhook(_request(VALID_PAYLOAD))
 
     _, kwargs = publisher.publish.call_args
-    assert kwargs["topic"] == "whatsapp-messages"
+    assert kwargs["topic"] == "chatbotwhatsapp-messages"
     assert kwargs["attributes"] == {
         "source": "evolution-webhook",
         "instance": "jennifer",

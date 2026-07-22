@@ -283,7 +283,7 @@ async def evolution_webhook(request: Request):
     try:
         message_id_published = publisher.publish(
             envelope,
-            topic="whatsapp-messages",
+            topic="chatbotwhatsapp-messages",
             attributes={
                 "source": "evolution-webhook",
                 "instance": envelope["instance"],
@@ -322,7 +322,7 @@ async def evolution_webhook(request: Request):
 
 @app.post("/pubsub/push")
 async def pubsub_push(request: Request):
-    """Pub/Sub push endpoint (whatsapp-messages).
+    """Pub/Sub push endpoint (chatbotwhatsapp-messages).
 
     Validates the Google-signed OIDC token, dedupes by message_id, and processes
     the payload via `orchestrator.orchestrate` exactly like a normal WhatsApp flow.
@@ -396,7 +396,7 @@ async def pubsub_push(request: Request):
         try:
             get_publisher().publish_dlq(
                 {"request_id": request_id, "payload": payload, "error": str(exc)},
-                attributes={"source": "whatsapp-messages", "reason": "exception"},
+                attributes={"source": "chatbotwhatsapp-messages", "reason": "exception"},
             )
         except Exception as pub_exc:
             logger.error("pubsub DLQ publish failed: %s", pub_exc)
