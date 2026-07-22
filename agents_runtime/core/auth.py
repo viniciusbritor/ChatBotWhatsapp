@@ -5,18 +5,18 @@ Accepts:
 - ?token=<SA_TOKEN> query string
 - ?token=<FIREBASE_JWT> query string (Portal integration)
 """
+import hmac
 import os
-import json
-import time
-import base64
 import logging
+from google.auth.transport.requests import Request as GoogleAuthRequest
+from google.oauth2 import id_token
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
 
-PROTECTED_PATHS = ("/admin", "/chat", "/proactive/send", "/version", "/pubsub")
-PUBLIC_PATHS = ("/webhook", "/healthz")
+PROTECTED_PATHS = ("/admin", "/chat", "/proactive/send", "/version", "/oauth/google")
+PUBLIC_PATHS = ("/webhook", "/healthz", "/oauth/callback", "/pubsub")
 FIREBASE_PROJECT = os.getenv("GCP_PROJECT", "coherence-ominichannel-fs")
 
 
@@ -32,48 +32,19 @@ def is_path_protected(path: str) -> bool:
     return any(path.startswith(p) for p in PROTECTED_PATHS)
 
 
-def _decode_jwt_payload(token: str) -> dict:
-    """Decode JWT payload without signature verification (Portal already validated)."""
-    try:
-        parts = token.split(".")
-        if len(parts) != 3:
-            return {}
-        payload_b64 = parts[1]
-        payload_b64 += "=" * (4 - len(payload_b64) % 4)
-        payload_bytes = base64.urlsafe_b64decode(payload_b64)
-        return json.loads(payload_bytes)
-    except Exception:
-        return {}
-
-
 def _is_valid_firebase_jwt(token: str) -> bool:
-    """Validate that the token looks like a valid Firebase JWT."""
-    if not token or len(token) < 50:
-        logger.warning(f"Firebase JWT rejected: too short ({len(token)})")
-        return False
-    payload = _decode_jwt_payload(token)
-    if not payload:
-        logger.warning("Firebase JWT rejected: empty payload")
+    if not token:
         return False
     try:
-        aud = payload.get("aud", "")
-        exp = payload.get("exp", 0)
-        now = int(time.time())
-        firebase_signer = payload.get("firebase", {}).get("sign_in_provider")
-        if aud != FIREBASE_PROJECT and "agents-runtime" not in aud and "coherence" not in aud:
-            logger.warning(f"Firebase JWT rejected: aud mismatch ({aud} not matching {FIREBASE_PROJECT})")
-            return False
-        if exp < now:
-            logger.warning(f"Firebase JWT rejected: expired (exp={exp} < now={now})")
-            return False
-        if firebase_signer is None:
-            logger.warning("Firebase JWT rejected: missing firebase.sign_in_provider")
-            return False
-        logger.info(f"Firebase JWT accepted for user: {payload.get('email', 'unknown')}")
-        return True
-    except Exception as e:
-        logger.warning(f"Firebase JWT rejected: {e}")
+        claims = id_token.verify_firebase_token(
+            token,
+            GoogleAuthRequest(),
+            audience=FIREBASE_PROJECT,
+        )
+    except Exception as exc:
+        logger.warning("firebase_jwt_rejected reason=%s", type(exc).__name__)
         return False
+    return bool(claims and claims.get("sub"))
 
 
 async def auth_middleware(request: Request, call_next):
@@ -112,11 +83,11 @@ async def auth_middleware(request: Request, call_next):
             content={"error": "unauthorized", "message": "Bearer token required"},
         )
 
-    if provided_token == expected_token:
+    if hmac.compare_digest(provided_token, expected_token):
         return await call_next(request)
 
     jwt_valid = _is_valid_firebase_jwt(provided_token)
-    logger.warning(f"Auth: SA mismatch, Firebase JWT valid={jwt_valid}, path={path}, token_len={len(provided_token)}")
+    logger.warning("auth_token_mismatch firebase_valid=%s path=%s", jwt_valid, path)
     if jwt_valid:
         return await call_next(request)
 
