@@ -16,14 +16,19 @@
 - Cloud Billing Budget API v1beta1: **desabilitada** no projeto
 - OAuth scopes do token: `cloud-platform` (largo, mas NAO inclui `cloud-billing`)
 - Conhecimento de custos pelo usuario: baseado em **contestacao** aberta com
-  suporte GCP (confirmado R$ 1.070,71 em vCPU/RAM ociosas)
+  suporte GCP (confirmado R$ 1.070,71 em vCPU/RAM ociosas) para o
+  **projeto `coherence-ominichannel-fs`** (case 73572220, atendente Don Don,
+  Google Cloud Billing Support, 22/07/2026 14:23 PDT).
 
-> **ATENCAO (correcao do usuario 22/07)**: os 4 orcamentos que listei
-> (`Alarme Lana 500`, `Lana Safety Limit`, `R$300 Alerta de orcamento mensal`,
-> `Alerta Firestore Coherence`) **pertencem ao projeto `brasil-ai`**, NAO ao
-> `coherence-ominichannel-fs`. O billing account `0182AB-52893A-9993BE`
-> ("projeto jennifer") e compartilhado entre os dois projetos, entao os
-> orcamentos aparecem na listagem mas nao refletem gasto do omnichannel.
+> **CORRECAO 22/07 (apos contestacao verificada)**: o agente Google
+> confirmou explicitamente que o custo excessivo foi no projeto
+> `coherence-ominichannel-fs` ("I can confirm that I see the surge in costs
+> associated with the Cloud Run services for Project Coherence Ominichannel").
+> A contestacao e deste projeto, NAO de `brasil-ai`. Os 4 orcamentos que
+> aparecem via API sao de `brasil-ai` mas NAO refletem o gasto do chatbot.
+> O billing account `0182AB-52893A-9993BE` e compartilhado entre os dois
+> projetos, o que explica a mistura. Apos o credito de R$ 1.070,71 ser
+> aplicado, o custo real do omnichannel precisa ser monitorado separadamente.
 
 ### 1.2. Acoes tomadas
 
@@ -71,33 +76,69 @@ opcoes sao:
 2. **Cloud Console Reports UI** (`https://console.cloud.google.com/billing/0182AB-52893A-9993BE/reports`)
 3. **Suporte GCP** (via ticket de billing - a contestation ja aberta)
 
-### 1.4. Orcamentos ativos (verificado via API)
+### 1.4. Custo por servico Cloud Run (estimado via logs 24h)
 
-**CORRECAO**: os 4 orcamentos que aparecem na API **pertencem ao projeto
-`brasil-ai`**, NAO ao `coherence-ominichannel-fs`. O billing account
-`0182AB-52893A-9993BE` ("projeto jennifer") e compartilhado entre os
-dois projetos, por isso a listagem atraves da API `billingAccounts/.../budgets`
-mistura orcamentos de ambos.
+Baseado em contagem de requisicoes via `run.googleapis.com/requests` (24h
+ate 22:50 BRT 22/07) e configs via `gcloud run services describe`.
 
-Lista bruta (sem filtro de projeto):
+| Servico | CPU | RAM | minScale | Requests 24h | Custo/dia estimado |
+|---|---|---|---|---|---|
+| **agents-runtime-test** | 2 | 2Gi | **1** | **44.197** | **~$7.90** (idle $3.46 + request compute $4.42) |
+| coherence-portal | 2 | 2Gi | 0 | 133 | ~$0 |
+| coherence-portal-test | 2 | 2Gi | 0 | 0 | $0 |
+| monitoria | 4 | 8Gi | 0 | 130 | ~$0.05 |
+| monitoria-cx | 2 | 2Gi | 0 | 0 | $0 |
+| monitoria-cx-v2 | 2 | 2Gi | 0 | 0 | $0 |
+| monitoria-test-env | 4 | 8Gi | 0 | 0 | $0 |
+| monitoria-whisper-worker | 4 | 4Gi | 0 | 0 | $0 |
+| monitoria-worker | 4 | 4Gi | 0 | 0 | $0 |
+| redirect-server | 1 | 512Mi | 0 | 0 | $0 |
+| whatsapp-agente | 1 | 1Gi | 0 | 0 | $0 |
+| **TOTAL** | | | | **44.460** | **~$7.95/dia (~$240/mes)** |
 
-```json
-[
-  {"displayName": "Alarme Lana 500", "amount": "R$ 500/month"},
-  {"displayName": "Lana Safety Limit", "amount": "R$ 50/month"},
-  {"displayName": "R$300 Alerta de orçamento mensal", "amount": "R$ 300/month"},
-  {"displayName": "Alerta Firestore Coherence", "amount": "R$ 10/month", "scope": "Firestore only"}
-]
-```
+### Descobertas criticas
 
-**Implicacao**: nao posso afirmar que o chatbotwhatsapp (omnichannel) esta
-estourando orcamento. Os orcamentos acima sao de `brasil-ai`. O custo
-reportado pelo usuario (R$ 100/dia) precisa ser **revisado** com filtro
-apenas no projeto `coherence-ominichannel-fs`.
+1. **44.197 requests em 24h em `agents-runtime-test`** e **440x mais** que o
+   esperado para um chatbot com ~100 msgs/dia. Provavel causa: Pub/Sub
+   retry loop das mensagens antigas (antes do Bloco A corrigir o 403).
+   Cada retry gera 1 request com custo de compute.
 
-A contestacao GCP confirmada (R$ 1.070,71) tambem precisa ser revalidada
-com o filtro correto. A contestacao pode ter sido aberta para o projeto
-errado (brasil-ai) em vez de omnichannel.
+2. **Custo atual do chatbot**: ~$7.95/dia = ~$240/mes (somando idle +
+   request compute de todos os servicos do projeto).
+
+3. **Vs. reportado** (~$100/dia = ~$3.000/mes): discrepancia de 12x.
+   Provavel causa: pico historico (CPU-THROTTLING: false ativo em julho)
+   que esta sendo contestado ($1.070,71). Apos contestacao ser aprovada,
+   custo volta para ~$240/mes.
+
+4. **Apenas `agents-runtime-test`** cobra idle ($3.46/dia). Todos os
+   outros tem `minScale: 0` (scale-to-zero).
+
+5. **Bot esta de fato recebendo requests pesadas** (44k/dia). Nao e
+   "tudo parado" como pode parecer. Mas a origem precisa ser investigada.
+
+## 1.5. Orcamentos ativos (verificado via API)
+
+Apos correcao do usuario 22/07: o billing account `0182AB-52893A-9993BE`
+e compartilhado entre `coherence-ominichannel-fs` e `brasil-ai`. A API
+retorna todos os orcamentos do account misturados, sem filtro de projeto.
+
+Os 4 orcamentos listados via API (`Alarme Lana 500`, `Lana Safety Limit`,
+`R$300 Alerta`, `Alerta Firestore Coherence`) pertencem ao `brasil-ai`,
+NAO ao `coherence-omnichannel-fs`. A contestacao GCP de R$ 1.070,71
+confirmada pelo atendente Don Don e **especificamente do projeto
+`coherence-ominichannel-fs`**, conforme case 73572220.
+
+**Implicacao para o chatbot (omnichannel)**:
+- A contestacao confirma que o gasto foi **interno** (configuracao de
+  CPU-THROTTLING: false em servicos Cloud Run)
+- O gasto ja foi reportado como R$ 1.070,71 e o credito de boa fe
+  esta em analise
+- Apos 32h (apos 22/07 22:23 BRT), o atendente Don Don enviara email
+  com o valor final aprovado
+- Enquanto isso, e necessario auditar cada Cloud Run do projeto
+  omnichannel para garantir que o CPU-THROTTLING esta correto
+  (ver Sessao 2 deste doc)
 
 ## 2. Papel da arquitetura (chatbot dentro do projeto GCP)
 
