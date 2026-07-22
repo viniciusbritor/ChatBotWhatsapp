@@ -6,6 +6,7 @@ Each tool has:
 - description: for LLM schema
 - parameters_schema: OpenAI-compatible JSON schema
 """
+import copy
 import logging
 from typing import Dict, Any, Callable, Awaitable
 
@@ -15,6 +16,11 @@ from tools import locomotion, youtube, group
 logger = logging.getLogger(__name__)
 
 ToolFn = Callable[..., Awaitable[Dict[str, Any]]]
+USER_SCOPED_TOOL_PREFIXES = ("calendar.", "drive.", "gmail.")
+
+
+def is_user_scoped_tool(tool_id: str) -> bool:
+    return tool_id.startswith(USER_SCOPED_TOOL_PREFIXES)
 
 
 async def _rag_search_knowledge(**kwargs):
@@ -403,10 +409,20 @@ def get_tool_schema(tool_id: str):
     """Get tool schema for LLM."""
     entry = TOOL_REGISTRY.get(tool_id)
     if entry:
+        parameters = copy.deepcopy(entry["parameters_schema"])
+        description = entry["description"]
+        if is_user_scoped_tool(tool_id):
+            parameters.get("properties", {}).pop("phone", None)
+            parameters["required"] = [
+                value for value in parameters.get("required", []) if value != "phone"
+            ]
+            description = description.replace(
+                " IMPORTANTE: sempre passe o telefone (phone) do usuario.", ""
+            ).replace(" Passe o phone do usuario.", "")
         return {
             "name": tool_id,
-            "description": entry["description"],
-            "parameters": entry["parameters_schema"],
+            "description": description,
+            "parameters": parameters,
         }
     return None
 

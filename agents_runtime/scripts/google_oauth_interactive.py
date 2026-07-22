@@ -1,5 +1,12 @@
 """Interactive Google OAuth flow - generates token with Calendar + Drive + Gmail scopes."""
-import json, os, tempfile, webbrowser, http.server, urllib.parse, requests, time
+import json
+import os
+import tempfile
+import webbrowser
+import http.server
+import urllib.parse
+import requests
+import time
 
 CLIENT_ID = "894828119087-goo6lcl6vgm5bdq5qgafscb8qbr4ueet.apps.googleusercontent.com"
 CLIENT_SECRET = "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"
@@ -46,10 +53,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
 print("=" * 60)
 print("GOOGLE OAUTH - GERAR TOKEN COM CALENDAR")
 print("=" * 60)
-print(f"\nAbrindo navegador para autorizacao...\n")
+print("\nAbrindo navegador para autorizacao...\n")
 print(f"Scopes: {', '.join(SCOPES)}")
-print(f"\nApos fazer login e autorizar, voce sera redirecionado")
-print(f"para uma pagina em branco dizendo 'Authorization received!'")
+print("\nApos fazer login e autorizar, voce sera redirecionado")
+print("para uma pagina em branco dizendo 'Authorization received!'")
 print(f"\nAguardando redirecionamento em http://localhost:{REDIRECT_PORT}...\n")
 
 webbrowser.open(auth_url)
@@ -63,7 +70,7 @@ if not auth_code:
     print("\nERRO: Nenhuma autorizacao recebida em 2 minutos.")
     exit(1)
 
-print(f"\nCodigo de autorizacao recebido! Trocando por token...")
+print("\nCodigo de autorizacao recebido! Trocando por token...")
 
 r = requests.post("https://oauth2.googleapis.com/token", data={
     "client_id": CLIENT_ID,
@@ -85,7 +92,7 @@ token_data = {
     "client_id": CLIENT_ID,
     "client_secret": CLIENT_SECRET,
     "scopes": SCOPES,
-    "expiry": (__import__("datetime").datetime.now(__import__("datetime").UTC) + 
+    "expiry": (__import__("datetime").datetime.now(__import__("datetime").UTC) +
                __import__("datetime").timedelta(seconds=tok.get("expires_in", 3600))).isoformat() + "Z",
 }
 
@@ -104,7 +111,7 @@ tmp = os.path.join(tempfile.gettempdir(), "google_oauth_final.json")
 with open(tmp, "w", encoding="utf-8") as f:
     json.dump(token_data, f, ensure_ascii=False)
 
-print(f"\nFazendo upload para GCP Secret Manager...")
+print("\nFazendo upload para GCP Secret Manager...")
 result = os.popen(f'gcloud secrets versions add google-oauth-token --data-file="{tmp}" --project=coherence-ominichannel-fs').read()
 print(result)
 os.unlink(tmp)
@@ -112,4 +119,4 @@ os.unlink(tmp)
 input("\nPRESSIONE ENTER para finalizar o token refresh manual (se aplicavel)")
 print("\n✅ Token atualizado com sucesso!")
 print("Para aplicar no Cloud Run, execute manualmente:")
-print(f"gcloud run services update agents-runtime-test --region=us-central1 --update-secrets='GOOGLE_OAUTH_TOKEN=google-oauth-token:latest'")
+print("gcloud run services update agents-runtime-test --region=us-central1 --update-secrets='GOOGLE_OAUTH_TOKEN=google-oauth-token:latest'")

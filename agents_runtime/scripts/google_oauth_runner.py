@@ -1,4 +1,11 @@
-import json, os, tempfile, http.server, urllib.parse, requests, time, sys
+import json
+import os
+import tempfile
+import http.server
+import urllib.parse
+import requests
+import time
+import sys
 
 CLIENT_ID = "894828119087-goo6lcl6vgm5bdq5qgafscb8qbr4ueet.apps.googleusercontent.com"
 CLIENT_SECRET = "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"
@@ -44,7 +51,7 @@ if not auth_code[0]:
     print("TIMEOUT: Nenhum code recebido.")
     sys.exit(1)
 
-print(f"\nCode recebido. Trocando por token...", flush=True)
+print("\nCode recebido. Trocando por token...", flush=True)
 r = requests.post("https://oauth2.googleapis.com/token", data={
     "client_id": CLIENT_ID,
     "client_secret": CLIENT_SECRET,

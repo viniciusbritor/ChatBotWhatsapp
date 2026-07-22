@@ -1,5 +1,7 @@
 """Fix BOM in serper-api-key secret."""
-import os, json, urllib.request
+import os
+import json
+import urllib.request
 
 PROJECT = "coherence-ominichannel-fs"
 SECRET = "serper-api-key"

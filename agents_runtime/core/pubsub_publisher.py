@@ -1,4 +1,3 @@
-import base64
 import json
 import logging
 import os
@@ -35,10 +34,11 @@ class PubSubPublisher:
         self._client = None
 
     def _ensure_client(self):
+        if self._client is not None:
+            return self._client
         if not _pubsub_available():
             raise RuntimeError("pubsub_v1 not available in this environment")
-        if self._client is None:
-            self._client = _pubsub_v1.PublisherClient()
+        self._client = _pubsub_v1.PublisherClient()
         return self._client
 
     def _topic_path(self, name: Optional[str] = None) -> str:
@@ -50,10 +50,10 @@ class PubSubPublisher:
 
     def publish(self, payload: Dict[str, Any], *, attributes: Optional[Dict[str, str]] = None, topic: Optional[str] = None) -> str:
         client = self._ensure_client()
-        data = base64.b64encode(json.dumps(payload, default=str).encode("utf-8")).decode("ascii")
+        data = json.dumps(payload, default=str, ensure_ascii=False).encode("utf-8")
         future = client.publish(
             self._topic_path(topic),
-            data=data.encode("ascii"),
+            data=data,
             **(attributes or {}),
         )
         try:

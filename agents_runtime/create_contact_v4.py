@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 db = firestore.Client(project='coherence-ominichannel-fs')
 
-# PHONE SEM o "+" (como o whatsapp-agente extrai)
+# PHONE SEM o "+" (como o webhook Evolution extrai)
 phone_no_plus = '5511966830020'
 phone_with_plus = '+5511966830020'
 

@@ -1,5 +1,12 @@
 """OAuth flow with generated self-signed cert for https://localhost:8080."""
-import json, os, tempfile, ssl, http.server, urllib.parse, requests, time, socket
+import json
+import os
+import tempfile
+import ssl
+import http.server
+import urllib.parse
+import requests
+import time
 
 CLIENT_ID = "894828119087-goo6lcl6vgm5bdq5qgafscb8qbr4ueet.apps.googleusercontent.com"
 CLIENT_SECRET = "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"
@@ -52,7 +59,7 @@ if not auth_code[0]:
     print("TIMEOUT", flush=True)
     exit(1)
 
-print(f"\nCode received. Exchanging for token...", flush=True)
+print("\nCode received. Exchanging for token...", flush=True)
 r = requests.post("https://oauth2.googleapis.com/token", data={
     "client_id": CLIENT_ID, "client_secret": CLIENT_SECRET,
     "code": auth_code[0], "redirect_uri": REDIRECT_URI, "grant_type": "authorization_code",

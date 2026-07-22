@@ -1,5 +1,6 @@
-"""Test NVIDIA models for best embedding.""" 
-import os, requests
+"""Test NVIDIA models for best embedding."""
+import os
+import requests
 api_key = os.popen("gcloud secrets versions access latest --secret=NVIDIA_API_KEY --project=coherence-ominichannel-fs").read().strip()
 tests = [
     ("nvidia/nv-embedqa-e5-v5", "passage"),

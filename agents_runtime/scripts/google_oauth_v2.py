@@ -1,5 +1,10 @@
 """Interactive Google OAuth v2 - gera token com escopos de Calendar + Drive + Gmail."""
-import json, os, tempfile, webbrowser, requests, urllib.parse
+import json
+import os
+import tempfile
+import webbrowser
+import requests
+import urllib.parse
 
 CLIENT_ID = "894828119087-goo6lcl6vgm5bdq5qgafscb8qbr4ueet.apps.googleusercontent.com"
 CLIENT_SECRET = "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"
@@ -76,7 +81,7 @@ tmp = os.path.join(tempfile.gettempdir(), "google_oauth_calendar.json")
 with open(tmp, "w", encoding="utf-8") as f:
     json.dump(token_data, f, ensure_ascii=False)
 
-print(f"\nFazendo upload para GCP Secret Manager...")
+print("\nFazendo upload para GCP Secret Manager...")
 result = os.popen(f'gcloud secrets versions add google-oauth-token --data-file="{tmp}" --project=coherence-ominichannel-fs').read()
 print(result)
 os.unlink(tmp)

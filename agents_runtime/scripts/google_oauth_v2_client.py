@@ -1,5 +1,11 @@
 """Google OAuth com client do token existente (projeto 180096224219)."""
-import json, os, tempfile, http.server, urllib.parse, requests, time
+import json
+import os
+import tempfile
+import http.server
+import urllib.parse
+import requests
+import time
 
 # Usando client do token_drive.json (que ja funcionou antes)
 CLIENT_ID = "180096224219-nn15kc103k1hni9u868i8d3qo1ihim32.apps.googleusercontent.com"
@@ -58,7 +64,7 @@ td = {
     "token_uri": "https://oauth2.googleapis.com/token",
     "client_id": CLIENT_ID, "client_secret": CLIENT_SECRET,
     "scopes": SCOPES,
-    "expiry": (__import__("datetime").datetime.now(__import__("datetime").UTC) + 
+    "expiry": (__import__("datetime").datetime.now(__import__("datetime").UTC) +
                __import__("datetime").timedelta(seconds=tok.get("expires_in", 3600))).isoformat() + "Z",
 }
 print(f"Access: {tok['access_token'][:20]}... Ref: {tok.get('refresh_token','')[:10]}...")

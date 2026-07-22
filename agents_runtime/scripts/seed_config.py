@@ -1,5 +1,4 @@
 """Seed config/, new agents, and new skills into Firestore (upsert mode)."""
-import io
 import os
 import sys
 

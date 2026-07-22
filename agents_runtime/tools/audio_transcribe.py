@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 import threading
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 from urllib.parse import urlparse
 
 import httpx

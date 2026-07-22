@@ -1,4 +1,8 @@
-import requests, json, datetime, tempfile, os
+import requests
+import json
+import datetime
+import tempfile
+import os
 data = json.load(open(r'C:\Users\vinic\.gemini\config\skills\google_calendar_manager\resources\token_drive.json'))
 r = requests.post('https://oauth2.googleapis.com/token', data={
     'client_id': data['client_id'],

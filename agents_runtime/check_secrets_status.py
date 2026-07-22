@@ -7,6 +7,8 @@ os.environ['PYTHONIOENCODING'] = 'utf-8'
 PROJECT = 'coherence-ominichannel-fs'
 
 # Secrets we care about for agents_runtime + whatsapp-agente
+# Secrets we care about for agents_runtime (whatsapp-agente was removed in 2026-07-21)
+# Secrets we care about for agents_runtime
 SECRETS_TO_CHECK = [
     'DEEPSEEK_API_KEY', 'NVIDIA_API_KEY', 'MINIMAX_API_KEY', 'MINIMAX_GROUP_ID',
     'SERPER_API_KEY', 'GOOGLE_OAUTH_TOKEN', 'EVOLUTION_API_KEY',

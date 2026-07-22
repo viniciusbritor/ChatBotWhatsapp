@@ -1,5 +1,6 @@
 """Create OAuth client for coherence-ominichannel-fs and run OAuth flow."""
-import json, os, tempfile, webbrowser, http.server, urllib.parse, requests, time, base64
+import os
+import requests
 
 PROJECT = "coherence-ominichannel-fs"
 SCOPES = [
@@ -25,7 +26,7 @@ r = requests.post(create_url, json=client_data, headers={
 
 if r.status_code == 200:
     client = r.json()
-    print(f"OAuth client created!")
+    print("OAuth client created!")
 elif r.status_code == 409:
     # Already exists, find it
     print("Client may already exist...")
@@ -39,7 +40,7 @@ list_url = f"https://oauth2.googleapis.com/v1/projects/{PROJECT}/oauthClients"
 r = requests.get(list_url, headers={"Authorization": f"Bearer {token}"})
 if r.status_code == 200:
     clients = r.json().get("oauthClients", [])
-    print(f"Existing OAuth clients:")
+    print("Existing OAuth clients:")
     for c in clients:
         print(f"  - {c.get('displayName')}: {c.get('name')}")
 else:

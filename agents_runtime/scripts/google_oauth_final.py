@@ -1,5 +1,12 @@
 """Google OAuth interativo - servidor local na porta 8088, timeout 120s."""
-import json, os, tempfile, http.server, urllib.parse, requests, time, threading, datetime
+import json
+import os
+import tempfile
+import http.server
+import urllib.parse
+import requests
+import time
+import datetime
 
 CLIENT_ID = "894828119087-goo6lcl6vgm5bdq5qgafscb8qbr4ueet.apps.googleusercontent.com"
 CLIENT_SECRET = "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"
@@ -47,7 +54,7 @@ auth_url = (
 )
 
 print(f"\nScopes: {', '.join(SCOPES)}")
-print(f"\n=== ABRA ESTE LINK NO NAVEGADOR ===")
+print("\n=== ABRA ESTE LINK NO NAVEGADOR ===")
 print(auth_url)
 print("======================================")
 print(f"\nServidor HTTP aguardando em http://localhost:{REDIRECT_PORT}")
@@ -64,7 +71,7 @@ if not auth_code:
     print("Nenhum code recebido em 120s.")
     exit(1)
 
-print(f"\nCode recebido! Trocando por token...")
+print("\nCode recebido! Trocando por token...")
 r = requests.post("https://oauth2.googleapis.com/token", data={
     "client_id": CLIENT_ID, "client_secret": CLIENT_SECRET,
     "code": auth_code, "redirect_uri": REDIRECT_URI, "grant_type": "authorization_code",
@@ -90,7 +97,7 @@ tmp = os.path.join(tempfile.gettempdir(), "google_oauth_calendar.json")
 with open(tmp, "w", encoding="utf-8") as f:
     json.dump(td, f, ensure_ascii=False)
 
-print(f"\nUploading to GCP Secret Manager...")
+print("\nUploading to GCP Secret Manager...")
 result = os.popen(f'gcloud secrets versions add google-oauth-token --data-file="{tmp}" --project=coherence-ominichannel-fs').read()
 print(result)
 os.unlink(tmp)

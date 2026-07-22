@@ -1,7 +1,7 @@
 """Correction tool - detects user corrections and applies patches after confirmation."""
 import os
 import logging
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)

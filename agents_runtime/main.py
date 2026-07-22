@@ -11,6 +11,7 @@ import os
 import json
 import logging
 import time
+from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import Any, Dict
 from fastapi import FastAPI, Request, HTTPException
@@ -19,6 +20,7 @@ from starlette.responses import RedirectResponse
 
 from core.auth import auth_middleware
 from core.delay_calculator import calculate_delay_ms
+from core.logging import configure_logging
 from core.masker import mask_pii
 from core import metrics
 from agent_loader import start_loader, stop_loader, list_agents, list_skills, list_tools, get_agent
@@ -34,7 +36,7 @@ class JSONResponse(_JSONResponse):
         return json.dumps(content, ensure_ascii=False, default=str).encode("utf-8")
 
 
-logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+configure_logging()
 logger = logging.getLogger(__name__)
 
 VERSION = "1.0.0"
@@ -246,14 +248,33 @@ async def evolution_webhook(request: Request):
     from core.evolution_webhook import extract_envelope
     from core.pubsub_publisher import get_publisher
 
+    webhook_started = time.monotonic()
     try:
         body = await request.json()
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"invalid_json: {e}")
+        logger.warning(
+            "webhook_invalid_json",
+            extra={"event_name": "webhook_invalid_json", "error_type": type(e).__name__},
+        )
+        raise HTTPException(status_code=400, detail="invalid_json")
+    if not isinstance(body, dict):
+        logger.warning(
+            "webhook_invalid_payload",
+            extra={"event_name": "webhook_invalid_payload", "payload_type": type(body).__name__},
+        )
+        raise HTTPException(status_code=422, detail="payload must be an object")
 
     envelope = extract_envelope(body)
     if envelope is None:
         event = body.get("event") or body.get("type") or ""
+        logger.info(
+            "webhook_ignored",
+            extra={
+                "event_name": "webhook_ignored",
+                "evolution_event": event,
+                "latency_ms": round((time.monotonic() - webhook_started) * 1000, 2),
+            },
+        )
         if event and event not in {"MESSAGES_UPSERT", "messages.upsert"}:
             return JSONResponse(content={"status": "ignored", "event": event})
         return JSONResponse(content={"status": "ignored", "reason": "filtered"})
@@ -269,9 +290,27 @@ async def evolution_webhook(request: Request):
             },
         )
     except Exception as exc:
-        logger.error("webhook publish failed: %s", exc)
-        raise HTTPException(status_code=500, detail=f"publish_failed: {exc}")
+        logger.error(
+            "webhook_publish_failed",
+            extra={
+                "event_name": "webhook_publish_failed",
+                "request_id": envelope["request_id"],
+                "error_type": type(exc).__name__,
+                "latency_ms": round((time.monotonic() - webhook_started) * 1000, 2),
+            },
+        )
+        raise HTTPException(status_code=503, detail="publish_failed")
 
+    logger.info(
+        "webhook_queued",
+        extra={
+            "event_name": "webhook_queued",
+            "request_id": envelope["request_id"],
+            "pubsub_message_id": message_id_published,
+            "instance": envelope["instance"],
+            "latency_ms": round((time.monotonic() - webhook_started) * 1000, 2),
+        },
+    )
     return JSONResponse(
         content={
             "queued": True,
@@ -297,7 +336,8 @@ async def pubsub_push(request: Request):
     from core.pubsub_publisher import get_publisher
 
     auth_header = request.headers.get("Authorization", "")
-    if not verify_pubsub_token(auth_header):
+    token_audience = str(request.url).split("?", 1)[0]
+    if not verify_pubsub_token(auth_header, audience=token_audience):
         raise HTTPException(status_code=401, detail="invalid_pubsub_token")
     try:
         body = await request.json()
@@ -316,8 +356,25 @@ async def pubsub_push(request: Request):
     request_id = envelope["message_id"]
 
     async def _process(p: Dict[str, Any]) -> Dict[str, Any]:
+        from core.evolution_client import send_text
+
         result = await orchestrate(p)
-        return {"status": "ok", "request_id": request_id, "result": result}
+        reply = result.get("reply", "")
+        if reply:
+            await send_text(
+                instance=p.get("instance", "jennifer"),
+                phone=p.get("phone", ""),
+                text=reply,
+                delay_ms=result.get("delay_ms", 0),
+                presence=result.get("presence", "composing"),
+                remote_jid=p.get("remote_jid", "") or (p.get("extra") or {}).get("remote_jid", ""),
+            )
+        return {
+            "status": "ok",
+            "request_id": request_id,
+            "delivered": bool(reply),
+            "result": result,
+        }
 
     try:
         result = await dispatch(payload, _process)
@@ -1091,7 +1148,7 @@ async def root_redirect(request: Request):
     })
 
 
-OAUTH_CLIENT_ID = os.getenv("OAUTH_CLIENT_ID", "894828119087-goo6lcl6vgm5bdq5qgafscb8qbr4ueet.apps.googleusercontent.com")
+OAUTH_CLIENT_ID = os.getenv("OAUTH_CLIENT_ID", "").strip()
 OAUTH_CLIENT_SECRET = (os.getenv("OAUTH_CLIENT_SECRET") or "").strip()
 OAUTH_SCOPES = [
     "https://www.googleapis.com/auth/calendar",
@@ -1100,19 +1157,30 @@ OAUTH_SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/gmail.send",
 ]
-OAUTH_REDIRECT_URI = "https://agents-runtime-test-c5nbfc5meq-uc.a.run.app/oauth/callback"
+OAUTH_REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI", "").strip()
+
+
+def _oauth_redirect_uri(request: Request) -> str:
+    return OAUTH_REDIRECT_URI or str(request.url_for("oauth_callback"))
 
 
 @app.get("/oauth/google")
 async def oauth_google(request: Request):
-    """Redirect to Google OAuth consent screen."""
     import urllib.parse
-    state = request.query_params.get("state", "")
-    if not state:
-        raise HTTPException(status_code=422, detail="state required (base64 phone)")
+    from core.oauth_per_user import create_oauth_state
+
+    phone = request.query_params.get("phone", "")
+    if not phone:
+        raise HTTPException(status_code=422, detail="phone required")
+    if not OAUTH_CLIENT_ID or not OAUTH_CLIENT_SECRET:
+        raise HTTPException(status_code=503, detail="oauth_not_configured")
+    try:
+        state = create_oauth_state(phone)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="invalid_phone")
     params = {
         "client_id": OAUTH_CLIENT_ID,
-        "redirect_uri": OAUTH_REDIRECT_URI,
+        "redirect_uri": _oauth_redirect_uri(request),
         "scope": " ".join(OAUTH_SCOPES),
         "response_type": "code",
         "access_type": "offline",
@@ -1125,54 +1193,59 @@ async def oauth_google(request: Request):
 
 @app.get("/oauth/callback")
 async def oauth_callback(request: Request):
-    """Handle OAuth callback, exchange code for token, save to Firestore."""
-    import base64
     import requests
+    from core.oauth_per_user import BRT, parse_oauth_state
+
     code = request.query_params.get("code", "")
     state = request.query_params.get("state", "")
     if not code:
         return HTMLResponse(content="<h2>Erro: codigo de autorizacao nao recebido</h2>", status_code=400)
-
-    phone = ""
-    try:
-        import base64
-        phone = base64.b64decode(state).decode()
-    except Exception:
-        pass
+    phone = parse_oauth_state(state)
+    if not phone:
+        return HTMLResponse(content="<h2>Erro: autorizacao expirada ou invalida</h2>", status_code=400)
+    if not OAUTH_CLIENT_ID or not OAUTH_CLIENT_SECRET:
+        return HTMLResponse(content="<h2>Erro: OAuth nao configurado</h2>", status_code=503)
 
     try:
-        r = requests.post("https://oauth2.googleapis.com/token", data={
+        response = requests.post("https://oauth2.googleapis.com/token", data={
             "client_id": OAUTH_CLIENT_ID,
             "client_secret": OAUTH_CLIENT_SECRET,
             "code": code,
-            "redirect_uri": OAUTH_REDIRECT_URI,
+            "redirect_uri": _oauth_redirect_uri(request),
             "grant_type": "authorization_code",
         }, timeout=15)
-        tok = r.json()
-        if "error" in tok:
-            return HTMLResponse(content=f"<h2>Erro ao obter token: {tok.get('error')}</h2>", status_code=500)
+        response.raise_for_status()
+        token_response = response.json()
+        if "error" in token_response or not token_response.get("access_token"):
+            return HTMLResponse(content="<h2>Erro ao obter autorizacao</h2>", status_code=502)
 
+        now_brt = datetime.now(BRT)
         token_data = {
-            "token": tok["access_token"],
-            "refresh_token": tok.get("refresh_token", ""),
+            "token": token_response["access_token"],
+            "refresh_token": token_response.get("refresh_token", ""),
             "token_uri": "https://oauth2.googleapis.com/token",
-            "client_id": OAUTH_CLIENT_ID,
-            "client_secret": OAUTH_CLIENT_SECRET,
             "scopes": OAUTH_SCOPES,
-            "expiry": str(__import__("datetime").datetime.now(__import__("datetime").timezone.utc).timestamp() + tok.get("expires_in", 3600)),
+            "expiry": str(time.time() + token_response.get("expires_in", 3600)),
+            "linked_at": now_brt.isoformat(),
         }
         from agent_loader import save_user
-        save_user(phone or "oauth-user", {
-            "phone": phone or "oauth-user",
+        saved = save_user(phone, {
+            "phone": phone,
             "google_oauth_token": token_data,
             "scopes": OAUTH_SCOPES,
-            "registered_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+            "google_oauth_linked_at": now_brt.isoformat(),
         })
+        if not saved:
+            return HTMLResponse(content="<h2>Erro ao salvar autorizacao</h2>", status_code=503)
         return HTMLResponse(content="""
         <html><body style="font-family:Inter,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;background:#f9fafb">
-        <div style="text-align:center"><h1 style="color:#16a34a">Vinculado com sucesso! 🎉</h1>
+        <div style="text-align:center"><h1 style="color:#16a34a">Vinculado com sucesso!</h1>
         <p style="color:#374151">Sua conta Google foi conectada. A Jennifer ja pode acessar sua agenda e emails.</p>
         <p style="color:#9ca3af;font-size:14px">Feche esta pagina e volte ao WhatsApp.</p></div></body></html>
         """)
-    except Exception as e:
-        return HTMLResponse(content=f"<h2>Erro: {e}</h2>", status_code=500)
+    except Exception as exc:
+        logger.error(
+            "oauth_callback_failed",
+            extra={"event_name": "oauth_callback_failed", "error_type": type(exc).__name__},
+        )
+        return HTMLResponse(content="<h2>Erro ao concluir autorizacao</h2>", status_code=502)

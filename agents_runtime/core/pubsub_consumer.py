@@ -1,9 +1,12 @@
 import base64
 import hashlib
-import json
 import logging
+import os
 import threading
 from typing import Any, Awaitable, Callable, Dict, Optional, Set
+
+from google.auth.transport.requests import Request as GoogleAuthRequest
+from google.oauth2 import id_token
 
 logger = logging.getLogger(__name__)
 
@@ -21,38 +24,35 @@ def _strip_bearer(token: str) -> str:
     return token
 
 
-def _decode_unverified(token: str) -> Dict[str, Any]:
-    try:
-        parts = token.split(".")
-        if len(parts) < 2:
-            return {}
-        data = parts[1]
-        data += "=" * (-len(data) % 4)
-        return json.loads(base64.urlsafe_b64decode(data.encode("utf-8")).decode("utf-8", errors="ignore"))
-    except Exception:
-        return {}
-
-
-def verify_pubsub_token(token: str) -> bool:
+def verify_pubsub_token(
+    token: str,
+    audience: Optional[str] = None,
+    service_account: Optional[str] = None,
+) -> bool:
     raw = _strip_bearer(token)
-    if not raw:
+    expected_audience = audience or os.getenv("PUBSUB_TOKEN_AUDIENCE", "")
+    expected_service_account = service_account or os.getenv("PUBSUB_PUSH_SERVICE_ACCOUNT", "")
+    if not raw or not expected_audience or not expected_service_account:
+        logger.warning("pubsub_token_rejected reason=missing_verification_config")
         return False
-    decoded = _decode_unverified(raw)
-    print(
-        "[pubsub-debug] keys="
-        f"{list(decoded.keys()) if isinstance(decoded, dict) else 'not-dict'}",
-        flush=True,
-    )
-    if not isinstance(decoded, dict):
-        return True
-    iss = decoded.get("iss")
-    email = str(decoded.get("email", ""))
-    aud = decoded.get("aud")
-    sub = decoded.get("sub")
-    print(
-        f"[pubsub-debug] iss={iss} email={email} aud={aud} sub={sub}",
-        flush=True,
-    )
+    try:
+        claims = id_token.verify_oauth2_token(
+            raw,
+            GoogleAuthRequest(),
+            audience=expected_audience,
+        )
+    except Exception as exc:
+        logger.warning("pubsub_token_rejected reason=%s", type(exc).__name__)
+        return False
+    issuer = claims.get("iss")
+    email = str(claims.get("email", ""))
+    email_verified = claims.get("email_verified") is True
+    if issuer not in {"accounts.google.com", "https://accounts.google.com"}:
+        logger.warning("pubsub_token_rejected reason=invalid_issuer")
+        return False
+    if not email_verified or email != expected_service_account:
+        logger.warning("pubsub_token_rejected reason=invalid_service_account")
+        return False
     return True
 
 
@@ -95,15 +95,24 @@ def parse_pubsub_push_body(body: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def mark_processed(message_id: str) -> None:
-    return None
+def _forget(message_id: str) -> None:
+    if not message_id:
+        return
+    digest = hashlib.sha256(message_id.encode("utf-8")).hexdigest()[:16]
+    with _seen_lock:
+        _seen_message_ids.discard(digest)
 
 
 async def dispatch(
     payload: Dict[str, Any],
     handler: Callable[[Dict[str, Any]], Awaitable[Optional[Dict[str, Any]]]],
 ) -> Optional[Dict[str, Any]]:
-    if not _dedupe(payload.get("message_id", "")):
-        logger.info("pubsub duplicate dropped: %s", payload.get("message_id", ""))
-        return {"status": "duplicate", "message_id": payload.get("message_id", "")}
-    return await handler(payload)
+    message_id = payload.get("message_id", "")
+    if not _dedupe(message_id):
+        logger.info("pubsub duplicate dropped: %s", message_id)
+        return {"status": "duplicate", "message_id": message_id}
+    try:
+        return await handler(payload)
+    except Exception:
+        _forget(message_id)
+        raise

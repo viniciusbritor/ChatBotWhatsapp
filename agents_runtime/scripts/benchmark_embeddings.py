@@ -1,5 +1,7 @@
 """Benchmark MiniMax vs NVIDIA embeddings."""
-import os, time, requests
+import os
+import time
+import requests
 
 txt = "Art. 121. Matar alguem: Pena - reclusao, de seis a vinte anos."
 txt_long = (txt + " ") * 8
