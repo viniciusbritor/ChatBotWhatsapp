@@ -1155,6 +1155,7 @@ OAUTH_SCOPES = [
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.readonly",
 ]
 OAUTH_REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI", "").strip()
 
