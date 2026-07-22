@@ -8,10 +8,14 @@
 
 - **Project:** `coherence-ominichannel-fs`
 - **Region:** `us-central1`
-- **Servicos Cloud Run (TEST):**
-  - `agents-runtime-test` (2Gi, min=0, max=3) — recebe webhook do Evolution, processa com LLM, retorna resposta
-  - `coherence-portal-test` (2Gi, existente) — UI do Portal
-  - ~~`whatsapp-agente-test`~~ (removido na Fase A 2026-07-21) — webhook consolidado em `agents-runtime`
+- **Servicos Cloud Run (DEV / TEST - Scale to Zero Mandatory):**
+  - `agents-runtime-test` (2Gi, min=0, max=3, cpu-throttling=true) — ambiente de dev do ChatBotWhatsapp (recebe webhook do Evolution em dev, processa com LLM, retorna resposta)
+  - `agents-runtime-prod` — **DELETADO (22/07/2026)** para eliminar duplicidades e custos
+  - `coherence-portal` (2Gi, min=0, cpu-throttling=true) — UI do Portal (PROD mobilizado, escala sob demanda)
+  - `coherence-portal-test` (2Gi, min=0, cpu-throttling=true) — UI do Portal em homologacao
+- **Governança de Custos (Guardrail 57):**
+  - É proibido usar `--no-cpu-throttling` (`CPU-THROTTLING: false`) ou `minScale > 0` em ambientes de desenvolvimento ou teste.
+  - Todos os serviços Cloud Run devem estar configurados com `minScale: 0` e `cpu-throttling: true` para zerar custos quando ociosos.
 - **Jobs Cloud Run:**
   - `ata-worker-test` (geracao de atas)
   - `proactive-worker-test` (mensagens proativas)
@@ -19,6 +23,7 @@
   - `whatsapp-messages` (webhook → agents-runtime, prod e test)
   - `whatsapp-messages-dlq` (DLQ para retries > 5)
   - `monitoria-whisper-jobs` (existente, eventual fallback audio)
+
 
 ## Arquitetura consolidada (2026-07-21)
 
@@ -507,6 +512,47 @@ Sintoma: prefetch retorna `None` para Calendar/Email/Drive.
 
 Verificar se `core.oauth_per_user.get_user_credentials(phone)` retorna
 `Credentials` valido. Logs do `_prefetch_*` devem mostrar `"Prefetch X failed: ..."`.
+
+### Pub/Sub retry policy (Guardrail 57 + 58)
+
+**Regra absoluta**: `/pubsub/push` **NUNCA** retorna HTTP 500 para evitar retry-storm.
+
+| Cenario | Resposta | delivered | Log |
+|---|---|---|---|
+| `send_text` ok | 200 | true | INFO |
+| `send_text` falha (Evolution offline) | **200** | false | WARNING `pubsub send_text_skipped` |
+| `phone` vazio (payload stale) | **200** | false | WARNING `pubsub reply_dropped_empty_phone` |
+| Orchestrator crasha / OOM | 500 | - | (retry legitimo) |
+
+**Por que 200 e nao 500**: Pub/Sub reentrega qualquer mensagem que recebe
+status 5xx. Se o Cloud Run retorna 500 (mesmo que por motivo justificado),
+o Pub/Sub reentrega ate 5 vezes, multiplicando custo por 5x. Para
+`send_text` ou payload invalido, nao ha beneficio de reentregar — a falha
+se repete identicamente.
+
+**Configuracao obrigatoria em toda subscription Pub/Sub**:
+
+```powershell
+gcloud pubsub subscriptions update <NAME> `
+    --dead-letter-topic=projects/coherence-ominichannel-fs/topics/whatsapp-messages-dlq `
+    --max-delivery-attempts=5
+```
+
+(Pub/Sub exige minimo 5; valor menor e rejeitado pela API.)
+
+**Diagnostico de custo suspeito**: se requests /pubsub/push > 200/dia
+para um chatbot com ~100 msgs/dia, ha retry-storm. Auditar:
+
+```powershell
+gcloud --project=coherence-ominichannel-fs logging read "resource.type=cloud_run_revision AND resource.labels.service_name=agents-runtime-test AND httpRequest.requestUrl:'/pubsub/push'" --limit=50000 --format='value(timestamp,httpRequest.status)' --freshness=24h | Measure-Object -Line
+```
+
+>2000 requests/dia = bug. Investigar logs WARNING `pubsub send_text_skipped` ou `pubsub reply_dropped_empty_phone`.
+
+**Caso real (22/07/2026)**: 9.071 requests /pubsub/push em 24h geraram
+~$0.91/dia SO em reentregas. Root cause: mensagens antigas (publicadas
+antes do OAuth per-user) reentregadas em loop. Fix: skip de send_text
+quando phone vazio + return 200 + log warning (commit `bdda61f`).
 
 ### Procedures externas (Fase F)
 
