@@ -1,4 +1,4 @@
-"""Main FastAPI application for agents_runtime.
+﻿"""Main FastAPI application for agents_runtime.
 
 Endpoints:
 - GET  /healthz       (public)
@@ -9,9 +9,12 @@ Endpoints:
 """
 import os
 import json
+import asyncio
+import hmac
 import logging
+import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 from typing import Any, Dict
 from fastapi import FastAPI, Request, HTTPException
@@ -164,24 +167,64 @@ async def chat(request: Request):
             from tools.audio_transcribe import (
                 AudioProcessingError,
                 AudioValidationError,
-                transcribe_base64,
-                transcribe_url,
+                transcribe_bytes,
+            )
+            from core.audio_transcribe import (
+                STT_PRIMARY,
+                transcribe_with_fallback,
             )
 
             mimetype = extra.get("audio_mimetype", "audio/ogg")
             if extra.get("audio_base64"):
-                transcript = await transcribe_base64(extra["audio_base64"], mimetype)
+                from tools.audio_transcribe import _decode_base64
+                audio_bytes = _decode_base64(extra["audio_base64"])
+
+                async def _run_primary():
+                    return await transcribe_bytes(audio_bytes, mimetype)
+
+                result = await transcribe_with_fallback(
+                    _run_primary,
+                    audio_bytes=audio_bytes,
+                    mimetype=mimetype,
+                    instance=body.get("instance", "jennifer"),
+                    consent=bool(extra.get("audio_consent_external")),
+                )
+                transcript = result["transcript"]
                 source = "base64"
+                extra["audio_provider"] = result.get("provider", STT_PRIMARY)
+                extra["audio_provider_reason"] = result.get("reason", "")
+                extra["audio_provider_latency_ms"] = result.get("latency_ms", 0)
             elif extra.get("audio_url"):
-                transcript = await transcribe_url(extra["audio_url"], mimetype)
+                from tools.audio_transcribe import _download_audio
+                audio_bytes = await _download_audio(extra["audio_url"])
+
+                async def _run_primary():
+                    return await transcribe_bytes(audio_bytes, mimetype)
+
+                result = await transcribe_with_fallback(
+                    _run_primary,
+                    audio_bytes=audio_bytes,
+                    mimetype=mimetype,
+                    instance=body.get("instance", "jennifer"),
+                    consent=bool(extra.get("audio_consent_external")),
+                )
+                transcript = result["transcript"]
                 source = "url"
+                extra["audio_provider"] = result.get("provider", STT_PRIMARY)
+                extra["audio_provider_reason"] = result.get("reason", "")
+                extra["audio_provider_latency_ms"] = result.get("latency_ms", 0)
             else:
                 raise AudioValidationError("audio_payload_missing")
             body["text"] = mask_pii(transcript)
             extra["audio_transcribed"] = True
             extra["audio_source"] = source
             body["extra"] = extra
-            logger.info("Audio transcribed locally: source=%s chars=%s", source, len(body["text"]))
+            logger.info(
+                "Audio transcribed: source=%s provider=%s chars=%s",
+                source,
+                extra.get("audio_provider"),
+                len(body["text"]),
+            )
         except (AudioValidationError, AudioProcessingError) as e:
             logger.warning("Audio transcription rejected: code=%s message_id=%s", str(e), body.get("message_id", ""))
             if not body.get("text"):
@@ -247,6 +290,7 @@ async def evolution_webhook(request: Request):
     """
     from core.evolution_webhook import extract_envelope
     from core.pubsub_publisher import get_publisher
+    from core.message_ledger import register_or_load, resolve_message_id
 
     webhook_started = time.monotonic()
     try:
@@ -279,6 +323,21 @@ async def evolution_webhook(request: Request):
             return JSONResponse(content={"status": "ignored", "event": event})
         return JSONResponse(content={"status": "ignored", "reason": "filtered"})
 
+    resolve_message_id(envelope)
+    message_id = envelope["message_id"]
+    ledger_snapshot = register_or_load(message_id, {"payload": envelope, **envelope})
+    if ledger_snapshot and ledger_snapshot.get("state") in {"response_ready", "delivered", "failed_terminal"}:
+        asyncio.create_task(_safe_mark_read(envelope))
+        logger.info(
+            "webhook_already_processed",
+            extra={
+                "event_name": "webhook_already_processed",
+                "message_id": message_id,
+                "ledger_state": ledger_snapshot.get("state"),
+            },
+        )
+        return JSONResponse(content={"status": "duplicate", "message_id": message_id})
+
     publisher = get_publisher()
     try:
         message_id_published = publisher.publish(
@@ -301,6 +360,8 @@ async def evolution_webhook(request: Request):
         )
         raise HTTPException(status_code=503, detail="publish_failed")
 
+    asyncio.create_task(_safe_mark_read(envelope))
+
     logger.info(
         "webhook_queued",
         extra={
@@ -320,20 +381,53 @@ async def evolution_webhook(request: Request):
     )
 
 
+async def _safe_mark_read(envelope: Dict[str, Any]) -> None:
+    """Best-effort Evolution read-receipt without blocking the webhook."""
+    try:
+        from core.evolution_client import mark_messages_read
+
+        remote_jid = envelope.get("remote_jid", "")
+        message_ids = []
+        explicit_id = envelope.get("message_id", "")
+        if explicit_id:
+            message_ids.append(explicit_id)
+        if not remote_jid or not message_ids:
+            return
+        await asyncio.wait_for(
+            mark_messages_read(envelope.get("instance", ""), remote_jid, message_ids, from_me=False),
+            timeout=5,
+        )
+        logger.info(
+            "evolution_mark_read_ok message_id=%s remote_jid=%s",
+            explicit_id,
+            remote_jid,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "evolution_mark_read_skipped message_id=%s error=%s",
+            envelope.get("message_id", ""),
+            type(exc).__name__,
+        )
+
+
 @app.post("/pubsub/push")
 async def pubsub_push(request: Request):
     """Pub/Sub push endpoint (chatbotwhatsapp-messages).
 
-    Validates the Google-signed OIDC token, dedupes by message_id, and processes
-    the payload via `orchestrator.orchestrate` exactly like a normal WhatsApp flow.
-    On retry exhaustion or validation failure, re-publishes to the DLQ topic.
+    Validates the Google-signed OIDC token, claims a ledger lease, and
+    processes the payload via ``orchestrator.orchestrate``. The ledger keeps
+    Pub/Sub idempotent across instances and retries; no manual DLQ publish is
+    performed (Pub/Sub's native DLQ policy handles exhaustion).
     """
     from core.pubsub_consumer import (
-        dispatch,
         parse_pubsub_push_body,
         verify_pubsub_token,
     )
-    from core.pubsub_publisher import get_publisher
+    from core.pubsub_dispatcher import (
+        TransientProcessingError,
+        dispatch_with_ledger,
+        record_delivery,
+    )
 
     auth_header = request.headers.get("Authorization", "")
     if not verify_pubsub_token(auth_header):
@@ -353,6 +447,7 @@ async def pubsub_push(request: Request):
         payload = envelope
 
     request_id = envelope["message_id"]
+    message_id = (payload.get("message_id") if isinstance(payload, dict) else None) or request_id
 
     async def _process(p: Dict[str, Any]) -> Dict[str, Any]:
         from core.evolution_client import send_text
@@ -361,6 +456,7 @@ async def pubsub_push(request: Request):
         reply = result.get("reply", "")
         phone = p.get("phone", "") or (p.get("extra") or {}).get("phone", "")
         delivered = False
+        delivery_error = ""
         if reply and phone:
             try:
                 await send_text(
@@ -373,6 +469,7 @@ async def pubsub_push(request: Request):
                 )
                 delivered = True
             except Exception as send_exc:
+                delivery_error = f"{type(send_exc).__name__}:{send_exc}"
                 logger.warning(
                     "pubsub send_text_skipped reason=%s phone_present=%s",
                     type(send_exc).__name__, bool(phone),
@@ -382,26 +479,38 @@ async def pubsub_push(request: Request):
                 "pubsub reply_dropped_empty_phone request_id=%s reply_len=%d",
                 request_id, len(reply),
             )
+
+        if message_id:
+            record_delivery(
+                message_id,
+                success=delivered,
+                error=delivery_error,
+            )
+
         return {
             "status": "ok",
             "request_id": request_id,
+            "message_id": message_id,
             "delivered": delivered,
+            "delivery_error": delivery_error,
             "result": result,
         }
 
     try:
-        result = await dispatch(payload, _process)
-    except Exception as exc:
-        logger.error("pubsub process failed: %s", exc)
-        try:
-            get_publisher().publish_dlq(
-                {"request_id": request_id, "payload": payload, "error": str(exc)},
-                attributes={"source": "chatbotwhatsapp-messages", "reason": "exception"},
-            )
-        except Exception as pub_exc:
-            logger.error("pubsub DLQ publish failed: %s", pub_exc)
-        return JSONResponse(status_code=500, content={"status": "error", "request_id": request_id})
-    return JSONResponse(content=result)
+        result = await dispatch_with_ledger(
+            {"data": json.dumps(payload, default=str), **payload},
+            _process,
+        )
+    except TransientProcessingError:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "transient_error", "request_id": request_id},
+        )
+    if isinstance(result, dict) and result.get("status") == "failed_terminal":
+        return JSONResponse(status_code=200, content=result)
+    if isinstance(result, dict) and result.get("status") in {"duplicate", "lease_busy", "dropped"}:
+        return JSONResponse(status_code=200, content=result)
+    return JSONResponse(content=result or {"status": "ok"})
 
 
 @app.post("/proactive/send")
@@ -452,6 +561,173 @@ async def admin_agents_post(request: Request):
         "agent_id": agent_id,
         "upserted": success,
     })
+
+
+def _bearer_token(request: Request) -> str:
+    auth = request.headers.get("Authorization", "")
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return ""
+
+
+def _authorise_admin(request: Request) -> bool:
+    from core.auth import _is_valid_firebase_jwt, get_sa_token
+
+    expected = get_sa_token()
+    token = _bearer_token(request)
+    if expected and token and hmac.compare_digest(token, expected):
+        return True
+    if token and _is_valid_firebase_jwt(token):
+        return True
+    return False
+
+
+@app.get("/admin/dashboard")
+async def admin_dashboard(request: Request):
+    """Render the Agentes Omnichannel control plane."""
+    from core.module_ui import render_dashboard
+
+    auth_token = _bearer_token(request)
+    return HTMLResponse(content=render_dashboard(COMMIT_SHA, DEPLOYED_AT, auth_token))
+
+
+@app.get("/admin/status")
+async def admin_status():
+    from core.audio_transcribe import fallback_stats
+
+    return JSONResponse(content={
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "kpis": [
+            {"label": "commit", "value": _short_sha(COMMIT_SHA)},
+            {"label": "deployed_at", "value": DEPLOYED_AT},
+            {"label": "stt_primary", "value": "whisper-local"},
+            {"label": "stt_fallback", "value": "gemini-2.5-flash"},
+        ],
+        "stt_fallback": fallback_stats(),
+    })
+
+
+@app.get("/admin/accounts")
+async def admin_accounts_list():
+    from agent_loader import _get_firestore_client
+
+    db = _get_firestore_client()
+    if db is None:
+        return JSONResponse(content={"accounts": []})
+    try:
+        rows = []
+        for doc in db.collection("whatsapp_accounts").stream():
+            data = doc.to_dict() or {}
+            data["id"] = doc.id
+            rows.append(data)
+        return JSONResponse(content={"accounts": rows})
+    except Exception as exc:
+        logger.warning("admin_accounts_list failed: %s", exc)
+        return JSONResponse(content={"accounts": []})
+
+
+@app.get("/admin/accounts/{account_id}")
+async def admin_accounts_get(account_id: str):
+    from agent_loader import _get_firestore_client
+
+    db = _get_firestore_client()
+    if db is None:
+        raise HTTPException(status_code=503, detail="firestore_unavailable")
+    doc = db.collection("whatsapp_accounts").document(account_id).get()
+    if not doc.exists:
+        raise HTTPException(status_code=404, detail="account_not_found")
+    payload = doc.to_dict() or {}
+    payload["id"] = doc.id
+    return JSONResponse(content={"account": payload})
+
+
+async def _write_account(account_id: str, body: Dict[str, Any]) -> bool:
+    from agent_loader import _get_firestore_client
+
+    db = _get_firestore_client()
+    if db is None:
+        return False
+    phone = re.sub(r"\D", "", str(body.get("owner_phone", "")))
+    payload = {
+        "name": str(body.get("name", "")).strip() or account_id,
+        "instance": str(body.get("instance", "")).strip(),
+        "owner_phone": phone,
+        "owner_uid": str(body.get("owner_uid", "")).strip() or phone,
+        "status": str(body.get("status", "active")),
+        "updated_at": datetime.now(timezone(timedelta(hours=-3))).isoformat(),
+    }
+    db.collection("whatsapp_accounts").document(account_id).set(payload, merge=True)
+    return True
+
+
+@app.post("/admin/accounts")
+async def admin_accounts_create(request: Request):
+    body = await request.json()
+    instance = str(body.get("instance", "")).strip()
+    if not instance:
+        raise HTTPException(status_code=422, detail="instance required")
+    account_id = instance
+    ok = await _write_account(account_id, body)
+    return JSONResponse(content={"status": "ok" if ok else "error", "account_id": account_id, "upserted": ok})
+
+
+@app.put("/admin/accounts/{account_id}")
+async def admin_accounts_update(account_id: str, request: Request):
+    body = await request.json()
+    ok = await _write_account(account_id, body)
+    return JSONResponse(content={"status": "ok" if ok else "error", "account_id": account_id, "upserted": ok})
+
+
+@app.get("/admin/owners")
+async def admin_owners_list():
+    from agent_loader import _get_firestore_client
+
+    db = _get_firestore_client()
+    if db is None:
+        return JSONResponse(content={"owners": []})
+    rows: list = []
+    try:
+        for doc in db.collection("whatsapp_accounts").stream():
+            data = doc.to_dict() or {}
+            rows.append({
+                "owner_uid": data.get("owner_uid") or data.get("owner_phone"),
+                "owner_phone": data.get("owner_phone"),
+                "display_name": data.get("name"),
+                "instance": data.get("instance"),
+            })
+    except Exception as exc:
+        logger.warning("admin_owners_list failed: %s", exc)
+    return JSONResponse(content={"owners": rows})
+
+
+@app.get("/admin/knowledge")
+async def admin_knowledge_documents(request: Request):
+    from agent_loader import _get_firestore_client
+    from core.rag import (
+        MEMORY_COLLECTION,
+        PRIVATE_COLLECTION,
+        SHARED_COLLECTION,
+    )
+
+    limit = min(int(request.query_params.get("limit", "10")), 50)
+    db = _get_firestore_client()
+    documents: list = []
+    if db is not None:
+        for collection in (PRIVATE_COLLECTION, SHARED_COLLECTION, MEMORY_COLLECTION):
+            try:
+                for doc in db.collection(collection).limit(limit).stream():
+                    data = doc.to_dict() or {}
+                    documents.append({
+                        "doc_id": doc.id,
+                        "title": data.get("source_title") or data.get("titulo") or doc.id,
+                        "text": (data.get("text_content") or data.get("conteudo") or data.get("text_masked") or "")[:500],
+                        "owner_id": data.get("owner_hash"),
+                        "collection": collection,
+                    })
+            except Exception as exc:
+                logger.warning("admin_knowledge_documents failed for %s: %s", collection, exc)
+    documents = documents[:limit]
+    return JSONResponse(content={"documents": documents, "limit": limit})
 
 
 @app.get("/admin/agents")
@@ -670,466 +946,6 @@ async def admin_dashboard_orchestration():
     })
 
 
-@app.get("/admin/dashboard/diagrama")
-async def admin_dashboard_diagrama(request: Request):
-    """Full dashboard with 3 tabs: Fluxo, Agentes, Gerenciar."""
-    token = request.query_params.get("token", "")
-    auth_param = f"?token={token}" if token else ""
-
-    html = f"""<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Agentes Omnichannel — Coherence</title>
-<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-<style>
-*{{margin:0;padding:0;box-sizing:border-box}}
-body{{font-family:Inter,-apple-system,sans-serif;background:#f9fafb;color:#171717;min-height:100vh}}
-.header{{background:#fff;border-bottom:1px solid #e5e7eb;padding:0 24px;height:56px;display:flex;align-items:center;gap:12px}}
-.header img{{height:28px}}
-.header .divider{{width:1px;height:20px;background:#d1d5db}}
-.header h1{{font-size:15px;font-weight:600;color:#374151}}
-.tabs{{display:flex;gap:0;background:#fff;border-bottom:1px solid #e5e7eb;padding:0 24px}}
-.tab{{padding:12px 20px;cursor:pointer;font-size:13px;font-weight:500;color:#6b7280;border-bottom:2px solid transparent;transition:all .2s}}
-.tab:hover{{color:#374151}}
-.tab.active{{color:#3b82f6;border-bottom-color:#3b82f6}}
-.tab-content{{display:none;padding:24px}}
-.tab-content.active{{display:block}}
-.card{{background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:20px;margin-bottom:16px;box-shadow:0 1px 2px rgba(0,0,0,0.04)}}
-.card h3{{font-size:14px;font-weight:600;color:#111827;margin-bottom:12px}}
-.mermaid-box{{overflow-x:auto}}
-.interaction-row{{display:flex;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid #f3f4f6;font-size:13px}}
-.interaction-row .step{{background:#dbeafe;color:#1d4ed8;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600}}
-.interaction-row .step.green{{background:#dcfce7;color:#166534}}
-.agent-card{{border-left:3px solid #3b82f6;margin-bottom:12px}}
-.agent-card .role{{font-size:11px;text-transform:uppercase;color:#6b7280;letter-spacing:.5px}}
-.agent-card .name{{font-size:15px;font-weight:600;color:#111827}}
-.agent-card .skills{{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}}
-.agent-card .skill-tag{{background:#ede9fe;color:#5b21b6;padding:2px 8px;border-radius:10px;font-size:11px}}
-.agent-card .tool-tag{{background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:10px;font-size:11px}}
-.form-group{{margin-bottom:12px}}
-.form-group label{{display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:4px}}
-.form-group input,.form-group textarea,.form-group select{{width:100%;padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;font-family:inherit}}
-.form-group textarea{{min-height:100px;resize:vertical}}
-.btn{{padding:8px 16px;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;border:none;transition:all .15s}}
-.btn-primary{{background:#3b82f6;color:#fff}}
-.btn-primary:hover{{background:#2563eb}}
-.btn-danger{{background:#ef4444;color:#fff;margin-left:8px}}
-.btn-danger:hover{{background:#dc2626}}
-.btn-sm{{padding:4px 10px;font-size:11px}}
-.grid2{{display:grid;grid-template-columns:1fr 1fr;gap:16px}}
-.loading{{text-align:center;color:#9ca3af;padding:40px;font-size:14px}}
-.error{{background:#fef2f2;color:#dc2626;padding:12px;border-radius:6px;font-size:13px}}
-.legend{{display:flex;gap:16px;margin-bottom:16px;font-size:12px}}
-.legend span{{display:flex;align-items:center;gap:6px}}
-.dot{{width:10px;height:10px;border-radius:50%}}
-.dot.blue{{background:#3b82f6}}
-.dot.green{{background:#22c55e}}
-.dot.gray{{background:#9ca3af}}
-</style>
-</head>
-<body>
-
-<div class="header">
-  <img src="https://coherence-portal-test-c5nbfc5meq-uc.a.run.app/logo-top-v2.png" alt="Coherence" onerror="this.style.display='none'">
-  <div class="divider"></div>
-  <h1>Agentes Omnichannel</h1>
-</div>
-
-<div class="tabs">
-  <div class="tab active" onclick="switchTab('fluxo')">Fluxo de Orquestração</div>
-  <div class="tab" onclick="switchTab('agentes')">Agentes & Skills</div>
-  <div class="tab" onclick="switchTab('gerenciar')">Gerenciar</div>
-  <div class="tab" onclick="switchTab('usuarios')">Usuários</div>
-  <div class="tab" onclick="switchTab('grupos')">Grupos</div>
-</div>
-
-<div id="tab-fluxo" class="tab-content active">
-  <div class="legend">
-    <span><span class="dot blue"></span> Agente acionado</span>
-    <span><span class="dot green"></span> Resultado final</span>
-    <span><span class="dot gray"></span> Passo intermediário</span>
-  </div>
-  <div id="fluxo-content" class="loading">Carregando fluxo de orquestração...</div>
-</div>
-
-<div id="tab-agentes" class="tab-content">
-  <div id="agentes-content" class="loading">Carregando agentes...</div>
-</div>
-
-<div id="tab-gerenciar" class="tab-content">
-  <div class="grid2">
-    <div class="card">
-      <h3>Criar / Editar Agente</h3>
-      <div class="form-group"><label>Selecionar Agente Existente</label><select id="agent-select" onchange="loadAgentForEdit()"><option value="">-- Novo Agente --</option></select></div>
-      <div style="display:flex;gap:8px;margin-bottom:12px">
-        <button class="btn btn-primary btn-sm" onclick="newAgentForm()">Novo Agente</button>
-        <button class="btn btn-danger btn-sm" id="btn-delete-agent" onclick="deleteAgent()" style="display:none">Excluir</button>
-      </div>
-      <div class="form-group"><label>ID do Agente</label><input id="agent-id" placeholder="ex: manager-calendar"></div>
-      <div class="form-group"><label>Nome</label><input id="agent-name" placeholder="Calendar Manager"></div>
-      <div class="form-group"><label>Role</label><select id="agent-role"><option value="orchestrator">Orchestrator</option><option value="manager">Manager</option><option value="specialist">Specialist</option></select></div>
-      <div class="form-group"><label>Modelo</label><select id="agent-model"><option value="deepseek-v4-flash">DeepSeek V4 Flash</option><option value="deepseek-v4-pro">DeepSeek V4 Pro</option></select></div>
-      <div class="form-group"><label>System Prompt</label><textarea id="agent-prompt" placeholder="System prompt do agente..." style="min-height:120px"></textarea></div>
-      <div class="form-group"><label>Skills (IDs separados por vírgula)</label><input id="agent-skills" placeholder="skill-motivacao,skill-busca-contexto"></div>
-      <button class="btn btn-primary" onclick="saveAgent()">Salvar Agente</button>
-      <div id="agent-msg" style="margin-top:8px;font-size:12px"></div>
-    </div>
-    <div>
-      <div class="card">
-        <h3>Criar / Editar Skill</h3>
-        <div class="form-group"><label>ID da Skill</label><input id="skill-id" placeholder="ex: skill-motivacao"></div>
-        <div class="form-group"><label>Nome</label><input id="skill-name" placeholder="Motivacao pre-reuniao"></div>
-        <div class="form-group"><label>Conteúdo (Markdown)</label><textarea id="skill-content" placeholder="Conteudo da skill em markdown..." style="min-height:80px"></textarea></div>
-        <button class="btn btn-primary" onclick="saveSkill()">Salvar Skill</button>
-        <div id="skill-msg" style="margin-top:8px;font-size:12px"></div>
-      </div>
-      <div class="card" id="skills-list-card">
-        <h3>Skills Existentes</h3>
-        <div id="skills-list" class="loading" style="padding:10px">Carregando...</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<div id="tab-usuarios" class="tab-content">
-  <div class="card">
-    <h3>Vincular Conta Google</h3>
-    <p style="font-size:13px;color:#6b7280;margin-bottom:12px">Autorize a Jennifer a acessar seu Calendar, Drive e Gmail. Cada pessoa tem seu proprio token.</p>
-    <div class="form-group"><label>Seu telefone com DDI (WhatsApp)</label><input id="user-phone" placeholder="5511999999999"></div>
-    <p style="font-size:11px;color:#9ca3af;margin-top:4px">Formato: DDI + DDD + numero. Ex: 5511966830020 (55 = Brasil)</p>
-    <button class="btn btn-primary" onclick="startOAuth()">🔑 Vincular Agenda / Email / Drive</button>
-    <div id="oauth-msg" style="margin-top:8px;font-size:12px"></div>
-  </div>
-  <div class="card">
-    <h3>Usuários Cadastrados</h3>
-    <div id="usuarios-content" class="loading">Carregando...</div>
-  </div>
-</div>
-
-<div id="tab-grupos" class="tab-content">
-  <div class="card">
-    <h3>Meus Grupos</h3>
-    <p style="font-size:13px;color:#6b7280;margin-bottom:12px">Gerencie em quais grupos a Jennifer pode acessar seus dados (Drive, Calendar, Email).</p>
-    <div class="form-group">
-      <label>Seu telefone (com DDI)</label>
-      <input id="group-phone" placeholder="5511999999999" style="width:280px">
-      <button class="btn btn-primary" onclick="loadMeusGrupos()">Buscar Meus Grupos</button>
-    </div>
-    <div id="grupos-content" style="margin-top:12px;font-size:13px;color:#9ca3af">Informe seu telefone e clique em Buscar.</div>
-  </div>
-</div>
-
-<script>
-const AUTH = '{auth_param}';
-const BASE = '';
-
-async function api(path) {{
-  const sep = path.includes('?') ? '&amp;' : '';
-  const url = BASE + path + (AUTH ? sep + AUTH.substring(1) : '');
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(r.status);
-  return r.json();
-}}
-
-async function apiPost(path, body) {{
-  const sep = path.includes('?') ? '&amp;' : '';
-  const url = BASE + path + (AUTH ? sep + AUTH.substring(1) : '');
-  const r = await fetch(url, {{ method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify(body) }});
-  return r.json();
-}}
-
-async function apiDelete(path) {{
-  const url = BASE + path + AUTH;
-  const r = await fetch(url, {{ method:'DELETE' }});
-  return r.json();
-}}
-
-function switchTab(name) {{
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-  const idx = name==='fluxo'?1:name==='agentes'?2:name==='gerenciar'?3:4;
-  document.querySelector(`.tab:nth-child(${{idx}})`).classList.add('active');
-  document.getElementById('tab-'+name).classList.add('active');
-  if (name==='fluxo') loadFluxo();
-  if (name==='agentes') loadAgentes();
-  if (name==='gerenciar') {{ loadSkillsList(); loadAgentSelect(); }}
-  if (name==='usuarios') loadUsuarios();
-}}
-
-async function loadFluxo() {{
-  try {{
-    const data = await api('/admin/dashboard/orchestration');
-    const interactions = data.interactions || [];
-    const last = interactions[0] || {{}};
-    const lastPath = last.path || [];
-    const activeNodes = lastPath.map(p => p.agent||p.agent_id||p.phase||'').filter(Boolean);
-    const lastModel = lastPath.slice(-1)[0]?.model || '';
-
-    let arch = `flowchart TB
-subgraph WHATSAPP["WhatsApp"]
-    USER["Usuario / Grupos"]
-end
-subgraph PROXY["Whatsapp-Agente"]
-    EVO["Evolution API"]
-    WEBHOOK["POST /webhook\\nG1-G6 guardrails"]
-end
-subgraph ORCHESTRATOR["Jennifer Orchestrator\\nMiniMax M3"]
-    INTENT["detect_intent"]
-    ROUTE["resolve_agent"]
-end
-subgraph MANAGERS["4 Managers internos"]
-    CAL["Calendar\\nlist, create, update"]
-    DRV["Drive\\nsearch, upload, list"]
-    EML["Email\\nsearch, send"]
-    WEB["Web\\nSerper search"]
-end
-subgraph LLMS["LLM Cascade sem Gemini"]
-    MMHS["1. MiniMax M2.7 Highspeed"]
-    MM["2. MiniMax M3"]
-    DS["3. DeepSeek V4 Flash"]
-end
-
-USER --> EVO --> WEBHOOK --> ORCHESTRATOR
-ORCHESTRATOR --> INTENT --> ROUTE
-ROUTE -->|"calendar"| CAL
-ROUTE -->|"drive"| DRV
-ROUTE -->|"email"| EML
-ROUTE -->|"web"| WEB
-CAL --> MMHS
-DRV --> MMHS
-EML --> MMHS
-WEB --> MMHS
-MMHS -->|"fallback"| MM -->|"fallback"| DS
-
-style ORCHESTRATOR fill:#3b82f6,color:#fff
-style MMHS fill:#22c55e,color:#fff
-style WEBHOOK fill:#f59e0b,color:#fff`;
-
-    document.getElementById('fluxo-content').innerHTML = `
-      <div class="card">
-        <div class="mermaid-box"><div class="mermaid">${{arch}}</div></div>
-      </div>
-      <div class="card"><h3>Últimas Interações</h3>
-        ${{interactions.length===0 ? '<p style="color:#9ca3af;font-size:13px">Nenhuma interacao registrada.</p>' : interactions.map((ix,idx) => `
-          <div class="interaction-row">
-            <span style="color:#9ca3af;min-width:20px">#${{idx+1}}</span>
-            <span style="flex:1;font-weight:500">${{ix.text_preview||''}}</span>
-            <span class="step green">${{(ix.path||[]).slice(-1)[0]?.agent_id||'?'}}</span>
-            <span style="color:#9ca3af;font-size:11px">${{(ix.path||[]).slice(-1)[0]?.model||''}}</span>
-          </div>`).join('')}}
-      </div>`;
-    setTimeout(() => {{
-      if (window.mermaid) mermaid.initialize({{startOnLoad:true, theme:'neutral'}});
-    }}, 100);
-  }} catch(e) {{
-    document.getElementById('fluxo-content').innerHTML = `<div class="error">Erro: ${{e.message}}</div>`;
-  }}
-}}
-
-async function loadAgentes() {{
-  try {{
-    const agents = (await api('/admin/agents')).agents || [];
-    const skills = (await api('/admin/skills')).skills || [];
-    const skillMap = {{}};
-    skills.forEach(s => skillMap[s.id] = s);
-    document.getElementById('agentes-content').innerHTML = agents.map(a => `
-      <div class="card agent-card">
-        <div class="role">${{a.role}}</div>
-        <div class="name">${{a.name}} <span style="font-weight:400;font-size:12px;color:#9ca3af">(${{a.id}})</span></div>
-        <div style="font-size:12px;color:#6b7280;margin-top:4px">Modelo: ${{a.model||'-'}} ${{a.model_escalation?'| Escalação: '+a.model_escalation:''}}</div>
-        <div style="font-size:12px;color:#6b7280">Ativo: ${{a.enabled?'Sim':'Não'}} | Thinking: ${{a.thinking||'disabled'}}</div>
-        <div class="skills">
-          ${{(a.skills||[]).map(sid => `<span class="skill-tag">${{skillMap[sid]?.name||sid}}</span>`).join('')}}
-          ${{(a.tools||[]).map(tid => `<span class="tool-tag">${{tid}}</span>`).join('')}}
-        </div>
-        ${{(a.delegates_to||[]).length ? `<div style="font-size:11px;color:#9ca3af;margin-top:4px">Delega para: ${{a.delegates_to.join(', ')}}</div>` : ''}}
-      </div>`).join('');
-    if (agents.length===0) document.getElementById('agentes-content').innerHTML = '<p style="color:#9ca3af">Nenhum agente carregado.</p>';
-  }} catch(e) {{
-    document.getElementById('agentes-content').innerHTML = `<div class="error">Erro: ${{e.message}}</div>`;
-  }}
-}}
-
-async function loadSkillsList() {{
-  try {{
-    const skills = (await api('/admin/skills')).skills || [];
-    document.getElementById('skills-list').innerHTML = skills.map(s => `
-      <div style="padding:6px 0;border-bottom:1px solid #f3f4f6;font-size:13px">
-        <span style="font-weight:600">${{s.name}}</span>
-        <span style="color:#9ca3af;margin-left:8px">(${{s.id}})</span>
-      </div>`).join('') || '<span style="color:#9ca3af">Nenhuma skill cadastrada.</span>';
-  }} catch(e) {{}}
-}}
-
-var agentDataForEdit = null;
-
-async function loadAgentSelect() {{
-  try {{
-    const agents = (await api('/admin/agents')).agents || [];
-    const sel = document.getElementById('agent-select');
-    sel.innerHTML = '<option value="">-- Novo Agente --</option>';
-    agents.forEach(a => {{
-      const opt = document.createElement('option');
-      opt.value = a.id;
-      opt.textContent = a.name + ' (' + a.id + ')';
-      sel.appendChild(opt);
-    }});
-    agentDataForEdit = agents;
-  }} catch(e) {{}}
-}}
-
-function loadAgentForEdit() {{
-  const sel = document.getElementById('agent-select');
-  const id = sel.value;
-  if (!id) {{ newAgentForm(); return; }}
-  const agent = agentDataForEdit.find(a => a.id === id);
-  if (!agent) return;
-  document.getElementById('agent-id').value = agent.id || '';
-  document.getElementById('agent-name').value = agent.name || '';
-  document.getElementById('agent-role').value = agent.role || 'specialist';
-  document.getElementById('agent-model').value = agent.model || 'deepseek-v4-flash';
-  document.getElementById('agent-prompt').value = agent.system_prompt || '';
-  document.getElementById('agent-skills').value = (agent.skills||[]).join(', ');
-  document.getElementById('btn-delete-agent').style.display = 'inline-block';
-  document.getElementById('agent-msg').innerHTML = '';
-}}
-
-function newAgentForm() {{
-  document.getElementById('agent-select').value = '';
-  document.getElementById('agent-id').value = '';
-  document.getElementById('agent-name').value = '';
-  document.getElementById('agent-role').value = 'specialist';
-  document.getElementById('agent-model').value = 'deepseek-v4-flash';
-  document.getElementById('agent-prompt').value = '';
-  document.getElementById('agent-skills').value = '';
-  document.getElementById('btn-delete-agent').style.display = 'none';
-  document.getElementById('agent-msg').innerHTML = '';
-}}
-
-async function saveAgent() {{
-  const body = {{
-    id: document.getElementById('agent-id').value.trim(),
-    name: document.getElementById('agent-name').value.trim(),
-    role: document.getElementById('agent-role').value,
-    model: document.getElementById('agent-model').value,
-    system_prompt: document.getElementById('agent-prompt').value.trim(),
-    skills: document.getElementById('agent-skills').value.split(',').map(s=>s.trim()).filter(Boolean),
-    tools: [],
-    instances: ['jennifer'],
-    enabled: true,
-    thinking: 'disabled',
-  }};
-  if (!body.id) {{ document.getElementById('agent-msg').innerHTML = '<span style="color:#dc2626">Preencha o ID</span>'; return; }}
-  try {{
-    const r = await apiPost('/admin/agents', body);
-    document.getElementById('agent-msg').innerHTML = r.upserted
-      ? '<span style="color:#16a34a">Agente salvo com sucesso!</span>'
-      : '<span style="color:#dc2626">Falha ao salvar</span>';
-  }} catch(e) {{
-    document.getElementById('agent-msg').innerHTML = `<span style="color:#dc2626">Erro: ${{e.message}}</span>`;
-  }}
-}}
-
-async function deleteAgent() {{
-  const id = document.getElementById('agent-id').value.trim();
-  if (!id) return;
-  if (!confirm(`Excluir agente "${{id}}"?`)) return;
-  try {{
-    await apiDelete('/admin/agents/'+id);
-    document.getElementById('agent-msg').innerHTML = '<span style="color:#16a34a">Agente excluído!</span>';
-    newAgentForm();
-    loadAgentSelect();
-  }} catch(e) {{
-    document.getElementById('agent-msg').innerHTML = `<span style="color:#dc2626">Erro: ${{e.message}}</span>`;
-  }}
-}}
-
-async function saveSkill() {{
-  const body = {{
-    id: document.getElementById('skill-id').value.trim(),
-    name: document.getElementById('skill-name').value.trim(),
-    content: document.getElementById('skill-content').value.trim(),
-  }};
-  if (!body.id) {{ document.getElementById('skill-msg').innerHTML = '<span style="color:#dc2626">Preencha o ID</span>'; return; }}
-  try {{
-    const r = await apiPost('/admin/skills', body);
-    document.getElementById('skill-msg').innerHTML = r.upserted
-      ? '<span style="color:#16a34a">Skill salva!</span>'
-      : '<span style="color:#dc2626">Falha ao salvar</span>';
-    loadSkillsList();
-  }} catch(e) {{
-    document.getElementById('skill-msg').innerHTML = `<span style="color:#dc2626">Erro: ${{e.message}}</span>`;
-  }}
-}}
-
-function startOAuth() {{
-  const phone = document.getElementById('user-phone').value.trim();
-  if (!phone) {{ document.getElementById('oauth-msg').innerHTML = '<span style="color:#dc2626">Informe seu telefone</span>'; return; }}
-  if (!phone.startsWith('55')) {{ document.getElementById('oauth-msg').innerHTML = '<span style="color:#dc2626">Inclua o DDI do Brasil (55). Ex: 55119XXXXXXXX</span>'; return; }}
-  if (phone.length < 10) {{ document.getElementById('oauth-msg').innerHTML = '<span style="color:#dc2626">Numero muito curto. Use DDI + DDD + numero completo</span>'; return; }}
-  document.getElementById('oauth-msg').innerHTML = '<span style="color:#3b82f6">Redirecionando para o Google...</span>';
-  const state = btoa(phone);
-  window.location.href = '/oauth/google?state=' + encodeURIComponent(state);
-}}
-
-async function loadUsuarios() {{
-  try {{
-    const data = await api('/admin/users');
-    const users = data.users || [];
-    if (users.length===0) {{
-      document.getElementById('usuarios-content').innerHTML = '<p style="color:#9ca3af;font-size:13px">Nenhum usuario cadastrado. Use o formulario acima para vincular sua conta Google.</p>';
-      return;
-    }}
-    document.getElementById('usuarios-content').innerHTML = users.map(u => `
-      <div style="padding:8px 0;border-bottom:1px solid #f3f4f6;font-size:13px;display:flex;justify-content:space-between;align-items:center">
-        <div>
-          <span style="font-weight:600">${{u.display_name||u.phone||'?'}}</span>
-          <span style="color:#9ca3af;margin-left:8px">(${{u.phone}})</span>
-        </div>
-        <span style="color:${{u.google_oauth_token?'#16a34a':'#9ca3af'}};font-size:12px">${{u.google_oauth_token?'Conectado':'Pendente'}}</span>
-      </div>`).join('');
-  }} catch(e) {{}}
-}}
-
-async function loadMeusGrupos() {{
-  const phone = document.getElementById('group-phone').value.trim();
-  if (!phone) {{ document.getElementById('grupos-content').innerHTML = '<span style="color:#dc2626">Informe seu telefone</span>'; return; }}
-  document.getElementById('grupos-content').innerHTML = '<span style="color:#3b82f6">Buscando...</span>';
-  try {{
-    const data = await api('/admin/groups?phone=' + encodeURIComponent(phone));
-    const groups = data.groups || [];
-    if (groups.length===0) {{
-      document.getElementById('grupos-content').innerHTML = '<p style="color:#9ca3af">Voce nao esta em nenhum grupo com a Jennifer. Entre em contato pelo WhatsApp.</p>';
-      return;
-    }}
-    document.getElementById('grupos-content').innerHTML = groups.map(g => `
-      <div style="padding:10px 0;border-bottom:1px solid #f3f4f6;font-size:13px;display:flex;justify-content:space-between;align-items:center">
-        <div>
-          <span style="font-weight:600">${{g.name||g.group_jid}}</span>
-          <span style="color:#9ca3af;margin-left:8px">(${{g.members_count||0}} membros)</span>
-        </div>
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px">
-          <input type="checkbox" ${{g.confirmed?'checked':''}} onchange="toggleGroupConfirm('${{g.group_jid}}', '${{phone}}', this.checked)">
-          Permitir acesso
-        </label>
-      </div>`).join('');
-  }} catch(e) {{ document.getElementById('grupos-content').innerHTML = '<span style="color:#dc2626">Erro: '+e.message+'</span>'; }}
-}}
-
-async function toggleGroupConfirm(groupJid, phone, checked) {{
-  try {{
-    await apiPost('/admin/groups/confirm', {{group_jid: groupJid, phone: phone, confirmed: checked}});
-    document.getElementById('grupos-content').innerHTML += '<div style="color:#16a34a;font-size:12px;margin-top:6px">Permissao '+(checked?'concedida':'revogada')+' com sucesso!</div>';
-  }} catch(e) {{ alert('Erro: '+e.message); }}
-}}
-
-loadFluxo();
-</script>
-</body></html>"""
-    return HTMLResponse(content=html)
-
-
 @app.post("/admin/playground")
 async def admin_playground(request: Request):
     """Test a message in isolated environment (Portal Playground)."""
@@ -1145,18 +961,17 @@ async def admin_cache_stats():
 
 @app.get("/")
 async def root_redirect(request: Request):
-    """Redirect root to orchestration dashboard, preserving Firebase token."""
-    token = request.query_params.get("token", "")
-    if token:
-        return RedirectResponse(url=f"/admin/dashboard/diagrama?token={token}")
+    """Return the service metadata. The Portal opens ``/admin/dashboard`` directly."""
     return JSONResponse(content={
         "service": "agents_runtime",
         "version": VERSION,
         "endpoints": {
             "health": "/healthz",
-            "dashboard": "/admin/dashboard/diagrama",
+            "dashboard": "/admin/dashboard",
             "orchestration": "/admin/dashboard/orchestration",
             "agents": "/admin/agents",
+            "accounts": "/admin/accounts",
+            "status": "/admin/status",
         },
     })
 
@@ -1166,10 +981,10 @@ OAUTH_CLIENT_SECRET = (os.getenv("OAUTH_CLIENT_SECRET") or "").strip()
 OAUTH_SCOPES = [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/calendar.events",
-    "https://www.googleapis.com/auth/drive",
-    "https://www.googleapis.com/auth/gmail.modify",
-    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/drive.readonly",
     "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send",
 ]
 OAUTH_REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI", "").strip()
 

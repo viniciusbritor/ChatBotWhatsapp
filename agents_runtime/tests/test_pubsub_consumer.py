@@ -127,7 +127,7 @@ def test_parse_pubsub_push_body_accepts_flat_and_invalid_data():
 
 def test_dedupe_accepts_first_and_rejects_duplicate():
     _seen_message_ids.clear()
-    assert _dedupe("") is True
+    assert _dedupe("") is False
     assert _dedupe("DEDUPE_001") is True
     assert _dedupe("DEDUPE_001") is False
 
@@ -141,25 +141,44 @@ def test_dedupe_enforces_memory_limit(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_dispatch_returns_handler_result_and_drops_duplicate():
-    _seen_message_ids.clear()
+async def test_dispatch_returns_handler_result_and_drops_duplicate(monkeypatch):
+    def _fake_register(message_id, envelope):
+        envelope["state"] = "processing"
+        return envelope
+
+    def _fake_claim(message_id):
+        return {"state": "processing", "lease_expires_at": 9999999999}
+
+    monkeypatch.setattr("core.pubsub_dispatcher.register_or_load", _fake_register)
+    monkeypatch.setattr("core.pubsub_dispatcher.claim", _fake_claim)
+    monkeypatch.setattr("core.pubsub_dispatcher.mark_response", lambda *_a, **_kw: None)
+    monkeypatch.setattr("core.pubsub_dispatcher.is_terminal", lambda snapshot: snapshot.get("state") == "response_ready")
     handler = AsyncMock(return_value={"status": "ok"})
     payload = {"message_id": "DISPATCH_001"}
     first = await dispatch(payload, handler)
+    handler.assert_awaited_once()
+    handler.reset_mock()
+
+    # Simulate a second push that already finds the message in a terminal state
+    def _fake_register_terminal(message_id, envelope):
+        envelope["state"] = "response_ready"
+        return envelope
+
+    monkeypatch.setattr("core.pubsub_dispatcher.register_or_load", _fake_register_terminal)
     second = await dispatch(payload, handler)
-    assert first == {"status": "ok"}
-    assert second == {"status": "duplicate", "message_id": "DISPATCH_001"}
-    handler.assert_awaited_once_with(payload)
+    assert second["status"] == "duplicate"
+    assert second["message_id"] == "DISPATCH_001"
+    assert second["ledger_state"] == "response_ready"
+    handler.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_dispatch_forgets_failed_message_for_retry():
-    _seen_message_ids.clear()
+async def test_dispatch_forgets_failed_message_for_retry(monkeypatch):
+    monkeypatch.setattr("core.pubsub_dispatcher.register_or_load", lambda *_a, **_kw: None)
+    monkeypatch.setattr("core.pubsub_dispatcher.claim", lambda *_a, **_kw: {"state": "processing"})
     payload = {"message_id": "RETRY_001"}
     failing = AsyncMock(side_effect=RuntimeError("offline"))
-    with pytest.raises(RuntimeError, match="offline"):
-        await dispatch(payload, failing)
-    succeeding = AsyncMock(return_value={"status": "ok"})
-    result = await dispatch(payload, succeeding)
-    assert result == {"status": "ok"}
-    succeeding.assert_awaited_once_with(payload)
+    result = await dispatch(payload, failing)
+    assert result["status"] == "failed_terminal"
+    assert result["message_id"] == "RETRY_001"
+    assert result["error"]

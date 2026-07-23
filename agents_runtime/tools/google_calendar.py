@@ -3,7 +3,11 @@
 Auth: per-user OAuth via core.oauth_per_user.get_user_credentials.
 The phone parameter is mandatory (Fase D); the global GOOGLE_OAUTH_TOKEN
 fallback was removed.
+
+Owner-only: Calendar access is restricted to the phone bound to the Evolution
+instance.
 """
+import functools
 import logging
 from typing import Optional, List, Dict, Any
 
@@ -61,12 +65,36 @@ def _format_event(event: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _owner_guard(capability: str):
+    from core.owner import deny_if_not_owner, resolve_owner
+
+    def decorator(func):
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            # Tool signatures always start with ``phone``; fall back to positional
+            # args when callers (e.g. the orchestrator) invoke with kwargs only.
+            phone = kwargs.get("phone")
+            if not phone and args:
+                phone = args[0]
+            phone = str(phone or "")
+            instance = str(kwargs.get("instance", "") or kwargs.get("_instance", ""))
+            resolution = resolve_owner(instance, fallback_phone=phone) if instance else None
+            denial = deny_if_not_owner(resolution, phone, capability)
+            if denial is not None:
+                return denial
+            return await func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
+@_owner_guard("calendar.list")
 async def list_events(
     phone: str,
     time_min: str,
     time_max: str,
     calendar_id: str = DEFAULT_CALENDAR_ID,
     max_results: int = 50,
+    instance: str = "",
 ) -> Dict[str, Any]:
     """List calendar events between time_min and time_max.
 
@@ -101,6 +129,7 @@ async def list_events(
         return {"events": [], "count": 0, "error": str(e)}
 
 
+@_owner_guard("calendar.create")
 async def create_event(
     phone: str,
     start: str,
@@ -110,22 +139,9 @@ async def create_event(
     attendees: Optional[List[str]] = None,
     location: Optional[str] = None,
     calendar_id: str = DEFAULT_CALENDAR_ID,
+    instance: str = "",
 ) -> Dict[str, Any]:
-    """Create a new calendar event.
-
-    Args:
-        phone: User phone for per-user OAuth token (mandatory, Fase D).
-        start: ISO 8601 datetime
-        end: ISO 8601 datetime
-        summary: Event title
-        description: Event description
-        attendees: List of email addresses
-        location: Event location
-        calendar_id: Calendar to add event to
-
-    Returns:
-        {"event": {...}} on success or {"error": str}
-    """
+    """Create a new calendar event."""
     try:
         service = _get_service(phone)
         event_body = {
@@ -144,30 +160,21 @@ async def create_event(
         return {"event": _format_event(created)}
     except HttpError as e:
         logger.error(f"Calendar create_event error: {e}")
-        return {"error": str(e)}
+        return {"event": None, "error": str(e)}
 
 
+@_owner_guard("calendar.update")
 async def update_event(
     phone: str,
     event_id: str,
     calendar_id: str = DEFAULT_CALENDAR_ID,
+    instance: str = "",
     **kwargs,
 ) -> Dict[str, Any]:
-    """Update an existing event.
-
-    Args:
-        phone: User phone for per-user OAuth token (mandatory, Fase D).
-        event_id: Event ID to update
-        calendar_id: Calendar containing the event
-        **kwargs: Fields to update (start, end, summary, description, location, attendees)
-
-    Returns:
-        {"event": {...}} or {"error": str}
-    """
+    """Update an existing calendar event."""
     try:
         service = _get_service(phone)
         existing = service.events().get(calendarId=calendar_id, eventId=event_id).execute()
-
         for key, value in kwargs.items():
             if key in ("start", "end") and value:
                 existing[key] = {"dateTime": value}
@@ -175,60 +182,43 @@ async def update_event(
                 existing[key] = [{"email": e} for e in value]
             elif value is not None:
                 existing[key] = value
-
         updated = service.events().update(calendarId=calendar_id, eventId=event_id, body=existing).execute()
         return {"event": _format_event(updated)}
     except HttpError as e:
         logger.error(f"Calendar update_event error: {e}")
-        return {"error": str(e)}
+        return {"event": None, "error": str(e)}
 
 
+@_owner_guard("calendar.delete")
 async def delete_event(
     phone: str,
     event_id: str,
     calendar_id: str = DEFAULT_CALENDAR_ID,
+    instance: str = "",
 ) -> Dict[str, Any]:
-    """Delete a calendar event.
-
-    Args:
-        phone: User phone for per-user OAuth token (mandatory, Fase D).
-        event_id: Event ID to delete
-        calendar_id: Calendar containing the event
-
-    Returns:
-        {"deleted": True} or {"error": str}
-    """
+    """Delete a calendar event."""
     try:
         service = _get_service(phone)
         service.events().delete(calendarId=calendar_id, eventId=event_id).execute()
         return {"deleted": True, "event_id": event_id}
     except HttpError as e:
         logger.error(f"Calendar delete_event error: {e}")
-        return {"error": str(e)}
+        return {"deleted": False, "error": str(e)}
 
 
+@_owner_guard("calendar.freebusy")
 async def freebusy(
     phone: str,
     time_min: str,
     time_max: str,
     calendars: Optional[List[str]] = None,
+    instance: str = "",
 ) -> Dict[str, Any]:
-    """Check free/busy status for calendars.
-
-    Args:
-        phone: User phone for per-user OAuth token (mandatory, Fase D).
-        time_min: ISO 8601 datetime
-        time_max: ISO 8601 datetime
-        calendars: List of calendar IDs (default: ["primary"])
-
-    Returns:
-        {"busy": [{"start": ..., "end": ...}, ...], "calendars": [...]}
-    """
+    """Check free/busy status for calendars."""
     try:
         service = _get_service(phone)
         if not calendars:
             calendars = [DEFAULT_CALENDAR_ID]
-
         body = {
             "timeMin": time_min,
             "timeMax": time_max,

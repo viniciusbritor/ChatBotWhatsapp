@@ -3,7 +3,11 @@
 Auth: per-user OAuth via core.oauth_per_user.get_user_credentials.
 The phone parameter is mandatory (Fase D); the global GOOGLE_OAUTH_TOKEN
 fallback was removed.
+
+Owner-only: Drive access is restricted to the phone bound to the Evolution
+instance. Any other phone is denied with an ``owner_only_capability`` error.
 """
+import functools
 import logging
 from typing import Optional, Dict, Any
 
@@ -15,7 +19,10 @@ import io
 
 logger = logging.getLogger(__name__)
 
-SCOPES = ["https://www.googleapis.com/auth/drive"]
+SCOPES = [
+    "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/drive.readonly",
+]
 _OMNICHANNEL_FOLDER_NAME = "Omnichannel"
 _ATAS_SUBFOLDER = "Atas"
 
@@ -54,12 +61,34 @@ def _format_file(file: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _owner_guard(capability: str):
+    from core.owner import deny_if_not_owner, resolve_owner
+
+    def decorator(func):
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            phone = kwargs.get("phone")
+            if not phone and args:
+                phone = args[0]
+            phone = str(phone or "")
+            instance = str(kwargs.get("instance", "") or kwargs.get("_instance", ""))
+            resolution = resolve_owner(instance, fallback_phone=phone) if instance else None
+            denial = deny_if_not_owner(resolution, phone, capability)
+            if denial is not None:
+                return denial
+            return await func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
+@_owner_guard("drive.search")
 async def search_files(
     phone: str,
     query: str,
     folder_id: Optional[str] = None,
     mime_type: Optional[str] = None,
     max_results: int = 20,
+    instance: str = "",
 ) -> Dict[str, Any]:
     """Search for files in Drive.
 
@@ -94,12 +123,14 @@ async def search_files(
         return {"files": [], "count": 0, "error": str(e)}
 
 
+@_owner_guard("drive.upload")
 async def upload_file(
     phone: str,
     folder_id: str,
     filename: str,
     content: str,
     mime_type: str = "text/plain",
+    instance: str = "",
 ) -> Dict[str, Any]:
     """Upload a file to Drive folder.
 
@@ -135,10 +166,12 @@ async def upload_file(
         return {"error": str(e)}
 
 
+@_owner_guard("drive.list")
 async def list_folder(
     phone: str,
     folder_id: str = "root",
     max_results: int = 50,
+    instance: str = "",
 ) -> Dict[str, Any]:
     """List contents of a folder.
 
@@ -169,10 +202,12 @@ async def list_folder(
         return {"files": [], "count": 0, "error": str(e)}
 
 
+@_owner_guard("drive.create_folder")
 async def create_folder(
     phone: str,
     name: str,
     parent_id: Optional[str] = None,
+    instance: str = "",
 ) -> Dict[str, Any]:
     """Create a folder.
 
@@ -199,7 +234,8 @@ async def create_folder(
         return {"error": str(e)}
 
 
-async def find_omnichannel_atas_folder(phone: str) -> Dict[str, Any]:
+@_owner_guard("drive.find_omnichannel_atas")
+async def find_omnichannel_atas_folder(phone: str, instance: str = "") -> Dict[str, Any]:
     """Find the Omnichannel/Atas/ folder, creating if missing.
 
     Args:

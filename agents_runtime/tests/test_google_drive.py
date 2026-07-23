@@ -4,7 +4,31 @@ from unittest.mock import patch, MagicMock
 
 
 @pytest.fixture
-def mock_drive_service():
+def mock_firestore(monkeypatch):
+    fake_db = MagicMock()
+    docs = [{"owner_phone": PHONE, "owner_uid": PHONE, "instance": "jennifer"}]
+
+    class _FC:
+        def where(self, *_a, **_k):
+            return self
+
+        def limit(self, *_a, **_k):
+            return self
+
+        def stream(self):
+            items = list(docs)
+            for item in items:
+                captured = item
+                yield MagicMock(to_dict=lambda c=captured: c, id=captured["instance"])
+
+    fake_db.collection.return_value = _FC()
+    monkeypatch.setattr("agent_loader._get_firestore_client", lambda: fake_db)
+    monkeypatch.setattr("core.owner._get_firestore_client", lambda: fake_db)
+    return fake_db
+
+
+@pytest.fixture
+def mock_drive_service(mock_firestore):
     with patch("tools.google_drive._get_service") as mock:
         service = MagicMock()
         mock.return_value = service
@@ -24,7 +48,7 @@ class TestSearchFiles:
                 {"id": "f2", "name": "Ata 2026-07-12.md", "mimeType": "text/markdown"},
             ]
         }
-        result = await search_files(PHONE, "Ata")
+        result = await search_files(PHONE, "Ata", instance="jennifer")
         assert result["count"] == 2
         assert "Ata" in result["files"][0]["name"]
 
@@ -37,7 +61,7 @@ class TestUploadFile:
             "id": "new1", "name": "test.md", "mimeType": "text/markdown",
             "webViewLink": "https://drive.google.com/file/d/new1",
         }
-        result = await upload_file(PHONE, "folder1", "test.md", "# Content")
+        result = await upload_file(PHONE, "folder1", "test.md", "# Content", instance="jennifer")
         assert "file" in result
         assert result["file"]["name"] == "test.md"
 
@@ -52,7 +76,7 @@ class TestListFolder:
                 {"id": "f2", "name": "Subfolder", "mimeType": "application/vnd.google-apps.folder"},
             ]
         }
-        result = await list_folder(PHONE, "parent_folder")
+        result = await list_folder(PHONE, "parent_folder", instance="jennifer")
         assert result["count"] == 2
 
 
@@ -63,7 +87,7 @@ class TestCreateFolder:
         mock_drive_service.files().create().execute.return_value = {
             "id": "new_folder", "name": "NewFolder", "mimeType": "application/vnd.google-apps.folder",
         }
-        result = await create_folder(PHONE, "NewFolder", parent_id="parent")
+        result = await create_folder(PHONE, "NewFolder", parent_id="parent", instance="jennifer")
         assert "folder" in result
         assert result["folder"]["name"] == "NewFolder"
 
@@ -76,14 +100,14 @@ class TestFindOmnichannelAtas:
             {"files": [{"id": "omni_id"}]},
             {"files": [{"id": "atas_id"}]},
         ]
-        result = await find_omnichannel_atas_folder(PHONE)
+        result = await find_omnichannel_atas_folder(PHONE, instance="jennifer")
         assert result["folder_id"] == "atas_id"
 
     @pytest.mark.asyncio
     async def test_omnichannel_not_found(self, mock_drive_service):
         from tools.google_drive import find_omnichannel_atas_folder
         mock_drive_service.files().list().execute.return_value = {"files": []}
-        result = await find_omnichannel_atas_folder(PHONE)
+        result = await find_omnichannel_atas_folder(PHONE, instance="jennifer")
         assert "error" in result
 
 

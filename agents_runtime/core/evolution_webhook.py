@@ -109,12 +109,17 @@ def extract_envelope(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if not instance:
         return None
 
+    from core.message_ledger import deterministic_request_id
+
+    request_id = message_id or deterministic_request_id(
+        instance, remote_jid, str(data.get("messageTimestamp") or "")
+    )
     return {
-        "request_id": message_id or f"webhook-{os.urandom(8).hex()}",
+        "request_id": request_id,
         "instance": instance,
         "phone": phone,
         "remote_jid": remote_jid,
-        "message_id": message_id,
+        "message_id": message_id or request_id,
         "sender_name": sender_name or "user",
         "text": text,
         "extra": extra,

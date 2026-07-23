@@ -192,19 +192,24 @@ def test_invalid_payload_returns_none():
     assert extract_envelope({}) is None
 
 
-def test_missing_message_id_generates_request_id():
+def test_missing_message_id_generates_deterministic_id():
     payload = {
         "event": "MESSAGES_UPSERT",
         "instance": "jennifer",
         "data": {
             "key": {"remoteJid": "5511966830020@s.whatsapp.net", "fromMe": False},
             "message": {"conversation": "sem id"},
+            "messageTimestamp": 1700000000,
         },
     }
     envelope = extract_envelope(payload)
     assert envelope is not None
-    assert envelope["message_id"] == ""
-    assert envelope["request_id"].startswith("webhook-")
+    assert envelope["message_id"]
+    assert envelope["message_id"] == envelope["request_id"]
+    assert not envelope["message_id"].startswith("webhook-")
+    # Deterministic: same input -> same id
+    second = extract_envelope(payload)
+    assert second["message_id"] == envelope["message_id"]
 
 
 def test_extract_message_id_helper():

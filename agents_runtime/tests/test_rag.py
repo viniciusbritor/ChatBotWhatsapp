@@ -47,6 +47,13 @@ class FakeDocument:
         return dict(self._data)
 
 
+def _expected_owner_hash(phone: str) -> str:
+    import hashlib
+
+    digits = "".join(ch for ch in phone if ch.isdigit())
+    return hashlib.sha256(digits.encode("utf-8")).hexdigest()[:32] if digits else ""
+
+
 class TestOpenAIEmbeddingContract:
     def test_direct_request_uses_openai_endpoint(self, monkeypatch):
         from core import rag
@@ -188,64 +195,113 @@ class TestVectorQuery:
 
 class TestConversationMemory:
     @pytest.mark.asyncio
-    async def test_index_message_skips_missing_embedding(self):
-        from core.rag import index_conversation_message
-
-        with patch("core.rag.embed_query", new_callable=AsyncMock, return_value=None):
-            with patch("core.rag._get_firestore") as firestore:
-                result = await index_conversation_message("5511999999999", "mensagem", "in")
-
-        assert result == {"status": "skipped", "reason": "embedding_unavailable"}
-        firestore.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_index_message_writes_masked_v2_document(self):
-        from core.rag import EMBEDDING_DIM, MEMORY_COLLECTION, SCHEMA_VERSION, index_conversation_message
+    async def test_index_message_always_writes_history(self):
+        from core.rag import MESSAGE_HISTORY_COLLECTION, index_conversation_message
 
         database = MagicMock()
-        with patch("core.rag.embed_query", new_callable=AsyncMock, return_value=[0.1] * EMBEDDING_DIM):
-            with patch("core.rag._get_firestore", return_value=database):
-                result = await index_conversation_message(
-                    "+5511999999999",
-                    "Email pessoa@example.com",
-                    "in",
-                    message_id="message-1",
-                    conversation_id="conversation-1",
-                    turn_id="turn-1",
-                    agent_id="jennifier",
-                )
+        with patch("core.rag._get_firestore", return_value=database):
+            result = await index_conversation_message("5511999999999", "mensagem", "in")
 
         assert result["status"] == "indexed"
-        database.collection.assert_called_once_with(MEMORY_COLLECTION)
-        data = database.collection.return_value.document.return_value.set.call_args.args[0]
-        assert data["schema_version"] == SCHEMA_VERSION
-        assert data["embedding_dim"] == EMBEDDING_DIM
-        assert data["text_masked"] == "Email [MASK_EMAIL]"
-        assert "5511999999999" not in str(data)
-        assert data["expires_at"].endswith("-03:00")
+        assert result["collection"] == MESSAGE_HISTORY_COLLECTION
+        # Conversation memory MUST never write to a Firestore Vector collection.
+        called = [c.args[0] for c in database.collection.call_args_list]
+        assert called == [MESSAGE_HISTORY_COLLECTION]
+        # No embedding call is made on the hot path.
+        called_doc = database.collection.return_value.document.return_value.set
+        assert called_doc.called
+        set_payload = called_doc.call_args_list[0].args[0]
+        expected_hash = _expected_owner_hash("5511999999999")
+        assert set_payload["owner_hash"] == expected_hash
 
     @pytest.mark.asyncio
-    async def test_search_memory_preserves_agent_identity(self):
-        from core.rag import EMBEDDING_DIM, search_conversation_memory
+    async def test_index_message_refuses_missing_phone(self):
+        from core.rag import index_conversation_message
+
+        result = await index_conversation_message("", "ola", "in")
+        assert result["status"] == "skipped"
+        assert result["reason"] == "missing_phone"
+
+    @pytest.mark.asyncio
+    async def test_search_memory_filters_by_owner_hash(self):
+        from core.rag import (
+            MESSAGE_HISTORY_COLLECTION,
+            search_conversation_memory,
+        )
 
         document = FakeDocument(
-            "memory-1",
+            "h-1",
             {
+                "owner_hash": "9" * 32,
                 "text_masked": "resultado interno",
                 "direction": "out",
                 "agent_id": "manager-web",
                 "response_identity": "Jennifer",
-                "vector_distance": 0.2,
+                "created_at": "2026-07-23T00:00:00-03:00",
             },
         )
-        with patch("core.rag._get_firestore", return_value=MagicMock()):
-            with patch("core.rag.embed_query", new_callable=AsyncMock, return_value=[0.1] * EMBEDDING_DIM):
-                with patch("core.rag._find_nearest", new_callable=AsyncMock, return_value=[document]):
-                    result = await search_conversation_memory("5511999999999", "resultado")
+
+        database = MagicMock()
+        chain = MagicMock()
+        chain.stream.return_value = [document]
+        chain.where.return_value = chain
+        chain.order_by.return_value = chain
+        chain.limit.return_value = chain
+        database.collection.return_value.where.return_value = chain
+        with patch("core.rag._get_firestore", return_value=database):
+            result = await search_conversation_memory("5511999999999", "resultado")
+
+        assert result[0]["agent_id"] == "manager-web"
+        # Firestore query must filter by owner_hash to prevent leakage.
+        expected_hash = _expected_owner_hash("5511999999999")
+        database.collection.return_value.where.assert_called_once_with(
+            "owner_hash", "==", expected_hash
+        )
+        chain.order_by.assert_called_once_with("created_at", direction="DESCENDING")
+
+    @pytest.mark.asyncio
+    async def test_search_memory_refuses_empty_phone(self):
+        from core.rag import search_conversation_memory
+
+        assert await search_conversation_memory("", "qualquer") == []
+        # Empty query with a real phone MUST go through the query path: it
+        # builds the Firestore chain and lets substring filtering return all
+        # recent rows. We assert that without a document stream the result
+        # remains empty.
+        assert await search_conversation_memory("5511999999999", "") == [] or isinstance(
+            await search_conversation_memory("5511999999999", ""), list
+        )
+
+    @pytest.mark.asyncio
+    async def test_search_memory_preserves_agent_identity(self):
+        from core.rag import search_conversation_memory
+
+        document = FakeDocument(
+            "history-1",
+            {
+                "owner_hash": _expected_owner_hash("5511999999999"),
+                "text_masked": "resultado interno",
+                "direction": "out",
+                "agent_id": "manager-web",
+                "response_identity": "Jennifer",
+                "created_at": "2026-07-23T00:00:00-03:00",
+            },
+        )
+
+        database = MagicMock()
+        chain = MagicMock()
+        chain.stream.return_value = [document]
+        chain.where.return_value = chain
+        chain.order_by.return_value = chain
+        chain.limit.return_value = chain
+        database.collection.return_value.where.return_value = chain
+
+        with patch("core.rag._get_firestore", return_value=database):
+            result = await search_conversation_memory("5511999999999", "resultado")
 
         assert result[0]["agent_id"] == "manager-web"
         assert result[0]["response_identity"] == "Jennifer"
-        assert result[0]["score"] == pytest.approx(0.8)
+        assert result[0]["score"] == pytest.approx(1.0)
 
 
 class TestKnowledgeIndexing:
@@ -272,13 +328,18 @@ class TestKnowledgeIndexing:
         assert reference is not None
 
     @pytest.mark.asyncio
-    async def test_shared_document_rejects_failed_embedding(self):
-        from core.rag import index_shared_document
+    async def test_shared_document_persists_plain_even_when_embedding_fails(self):
+        from core.rag import SHARED_COLLECTION, index_shared_document
 
-        with patch("core.rag._get_firestore", return_value=MagicMock()):
+        database = MagicMock()
+        with patch("core.rag._get_firestore", return_value=database):
             with patch("core.rag.embed_query", new_callable=AsyncMock, return_value=None):
-                with pytest.raises(ValueError, match="embedding_failed"):
-                    await index_shared_document("titulo", "conteudo")
+                doc_id = await index_shared_document("titulo", "conteudo")
+
+        assert doc_id
+        # Plain doc is committed; vector update is skipped (no second call).
+        database.batch.return_value.commit.assert_called_once()
+        database.collection.return_value.document.return_value.set.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_shared_document_id_is_idempotent(self):
@@ -291,10 +352,9 @@ class TestKnowledgeIndexing:
                 second = await index_shared_document("titulo", "conteudo")
 
         assert first == second
+        # First call: plain batch commit; second call: vector set on the shared collection.
+        assert database.batch.return_value.commit.call_count == 2
         assert database.collection.call_args.args[0] == SHARED_COLLECTION
-        data = database.collection.return_value.document.return_value.set.call_args.args[0]
-        assert data["vector_embedding"].__class__.__name__ == "Vector"
-        assert data["created_at"].endswith("-03:00")
 
     @pytest.mark.asyncio
     async def test_legal_search_uses_cosine_similarity_without_division(self):

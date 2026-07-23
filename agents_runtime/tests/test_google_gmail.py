@@ -4,7 +4,31 @@ from unittest.mock import patch, MagicMock
 
 
 @pytest.fixture
-def mock_gmail_service():
+def mock_firestore(monkeypatch):
+    fake_db = MagicMock()
+    docs = [{"owner_phone": PHONE, "owner_uid": PHONE, "instance": "jennifer"}]
+
+    class _FC:
+        def where(self, *_a, **_k):
+            return self
+
+        def limit(self, *_a, **_k):
+            return self
+
+        def stream(self):
+            items = list(docs)
+            for item in items:
+                captured = item
+                yield MagicMock(to_dict=lambda c=captured: c, id=captured["instance"])
+
+    fake_db.collection.return_value = _FC()
+    monkeypatch.setattr("agent_loader._get_firestore_client", lambda: fake_db)
+    monkeypatch.setattr("core.owner._get_firestore_client", lambda: fake_db)
+    return fake_db
+
+
+@pytest.fixture
+def mock_gmail_service(mock_firestore):
     with patch("tools.google_gmail._get_service") as mock:
         service = MagicMock()
         mock.return_value = service
@@ -35,7 +59,7 @@ class TestSearchMessages:
                 "mimeType": "text/plain",
             },
         }
-        result = await search_messages(PHONE, "subject:reuniao")
+        result = await search_messages(PHONE, "subject:reuniao", instance="jennifer")
         assert result["count"] >= 1
         assert result["messages"][0]["from"] == "joao@example.com"
 
@@ -43,7 +67,7 @@ class TestSearchMessages:
     async def test_search_messages_empty(self, mock_gmail_service):
         from tools.google_gmail import search_messages
         mock_gmail_service.users().messages().list().execute.return_value = {"messages": []}
-        result = await search_messages(PHONE, "subject:naoexiste")
+        result = await search_messages(PHONE, "subject:naoexiste", instance="jennifer")
         assert result["count"] == 0
 
 
@@ -59,7 +83,7 @@ class TestGetThread:
                  "payload": {"headers": [{"name": "Subject", "value": "Re: Test"}], "mimeType": "text/plain", "body": {"data": "aGk="}}},
             ]
         }
-        result = await get_thread(PHONE, "t1")
+        result = await get_thread(PHONE, "t1", instance="jennifer")
         assert result["count"] == 2
 
 
@@ -70,7 +94,7 @@ class TestSendMessage:
         mock_gmail_service.users().messages().send().execute.return_value = {
             "id": "sent1", "threadId": "t1",
         }
-        result = await send_message(PHONE, "to@example.com", "Subject", "Body text")
+        result = await send_message(PHONE, "to@example.com", "Subject", "Body text", instance="jennifer")
         assert "message" in result
         assert result["message"]["to"] == "to@example.com"
 
@@ -80,7 +104,7 @@ class TestSendMessage:
         mock_gmail_service.users().messages().send().execute.return_value = {
             "id": "sent2", "threadId": "t2",
         }
-        result = await send_message(PHONE, "to@example.com", "Subject", "<h1>HTML</h1>", html=True)
+        result = await send_message(PHONE, "to@example.com", "Subject", "<h1>HTML</h1>", html=True, instance="jennifer")
         assert "message" in result
 
 

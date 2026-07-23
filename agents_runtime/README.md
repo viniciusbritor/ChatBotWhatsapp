@@ -1,197 +1,103 @@
-# 🟢 Jennifer — Modulo `omnichannel-agentes` no Coherence Portal
+# Jennifer — `agents_runtime`
 
-**Status:** Fases corretivas 3, 4 e 5 validadas localmente na branch `test` | **212 testes passando, 9 ignorados**
+Runtime FastAPI do modulo **Agentes Omnichannel**. Recebe mensagens do
+WhatsApp via Evolution, orquestra capacidades (Gmail/Drive/Calendar/RAG) com
+autorização por proprietário e mantém o plano de controle do modulo em
+`/admin/dashboard`.
 
-Plataforma multi-agente WhatsApp com Jennifer como assistente corporativa.
+> **Última atualização:** 2026-07-22 — arquitetura mínima, ledger Pub/Sub,
+> tick azul, owner-only Google, fallback STT controlado.
+> Suite local: **329 passed, 10 skipped** (5,16 s).
 
----
+## Estrutura
 
-## 📁 Estrutura dos Repos
+```
+agents_runtime/
+  main.py                       # FastAPI: webhook, /pubsub/push, /admin/*
+  orchestrator.py                # Jennifer: roteamento + LLM + tools
+  agent_loader.py                # Snapshot agents/skills/tools do Firestore
+  core/
+    auth.py                      # Bearer SA / Firebase JWT
+    message_ledger.py            # Ledger Firestore para idempotência
+    pubsub_dispatcher.py         # Lease + retry control
+    pubsub_publisher.py          # publish chatbotwhatsapp-messages
+    pubsub_consumer.py           # shim de compatibilidade (usa dispatcher)
+    evolution_client.py          # sendText + markMessagesAsRead
+    evolution_webhook.py         # normalizador do envelope
+    audio_transcribe.py          # Whisper + fallback Gemini controlado
+    owner.py / owner_guard.py    # guard Gmail/Drive/Calendar
+    module_ui.py                 # plano de controle /admin/dashboard
+    rag.py                       # OpenAI embeddings + busca por owner
+    secrets.py / masker.py / logging.py / ...
+  tools/
+    google_gmail.py / google_drive.py / google_calendar.py
+    audio_transcribe.py / web_search.py / locomotion.py / nickname.py / ...
+  scripts/
+    ingest_owner_knowledge.py    # carga de livros/editais via GCS
+    seed_initial_data.py / check_lgpd_compliance.py / migrate_rag_v2.py
+  tests/                         # 36 arquivos, 329 passed
+  cloudbuild-test.yaml
+  Dockerfile
+```
 
-| Repo | Localização | Foco |
-|---|---|---|
-| `Coherence_Portal` | `C:\Users\vinic\workspace_antigravity\Coherence_Portal\` | UI gestão (`/admin/agents/*`) + proxy backend |
-| `WhatsappAgente` | `C:\Users\vinic\workspace_antigravity\WhatsappAgente\` | Thin proxy Evolution → agents_runtime |
-| `ChatBotWhatsapp/agents_runtime` | `C:\Users\vinic\workspace_antigravity\ChatBotWhatsapp\agents_runtime\` | Runtime principal (LLM, tools, RAG, audio) |
+A documentação canônica vive em `docs/` na raiz do repositório.
+`agents_runtime/docs/` foi removido por ser cópia desatualizada.
 
----
-
-## 🎯 O Que Jennifer Faz
-
-- ✅ Responde mensagens WhatsApp (texto + áudio com Whisper)
-- ✅ Delega para 4 managers (calendar, drive, email, web) + 4 specialists (intimacy, learning, morality, ata-generator)
-- ✅ Cascata LLM: MiniMax M2.7 Highspeed → MiniMax M3 → DeepSeek V4 Flash, sem Gemini
-- ✅ RAG jurídico v2: MiniMax embo-01 1536d + Firestore Vector nativo
-- ✅ Inventário operacional determinístico e identidade externa Jennifer
-- ✅ Proatividade calibrada (2/dia, 5 global, 8 camadas anti-spam, 7 comandos)
-- ✅ LGPD: masker PII, TTL 90d incluindo memória vetorial, exportação e exclusão
-- ✅ Memória vetorial por owner hash, conversa, mensagem, turno e agente
-- ✅ Apelidos com consentimento (built-in + aprendizado)
-
----
-
-## 🔑 Números Importantes
-
-| Item | Valor |
-|---|---|
-| **Seu número pessoal (master/owner)** | `+5511966830020` |
-| **Número do chatbot Jennifer (instance)** | `+5511917389901` |
-| **IP Evolution (antigo)** | `34.39.162.165` |
-| **IP Evolution (novo)** | `34.95.181.124` |
-| **Domínio Evolution** | `https://evolution.coherenceai.com.br` |
-| **GCP project** | `coherence-ominichannel-fs` (Portal + agents_runtime) |
-| **GCP project (Evolution)** | `whatsapp-server-fs` |
-
----
-
-## ⚡ Quick Start Local na Branch Test
-
-Os testes unitários e de integração simulada rodam localmente. Firestore Vector real, reindexação e WhatsApp exigem o ambiente GCP de teste.
+## Quick start
 
 ```bash
-cd ChatBotWhatsapp/agents_runtime
-pip install -r requirements.txt
+cd agents_runtime
+pip install -r requirements.txt -r requirements-dev.txt
 pytest -q tests/
-python scripts/migrate_rag_v2.py --dry-run
+ruff check core/ main.py orchestrator.py agent_loader.py tool_registry.py
+python scripts/check_lgpd_compliance.py
 ```
 
-## 🧪 Como Testar no GCP Test Environment
+Para validar Pub/Sub real use `RUN_PUBSUB_E2E=1 pytest tests/integration/test_pubsub_e2e.py`.
 
-1. Push para branch `test` dispara Cloud Build
-2. Cloud Build faz deploy em `agents-runtime-test` (Cloud Run)
-3. Smoke test contra URL real:
-   ```bash
-   curl https://agents-runtime-test-XXX-uc.a.run.app/healthz
-   ```
-4. Teste end-to-end via WhatsApp (Evolution Manager → Jennifer → resposta)
+## Pipeline
 
-Para logs detalhados, use `gcloud logs read` ou Cloud Console.
-
----
-
-## 🚀 Deploy no Ambiente GCP Test
-
-### Pré-requisitos
-- `gcloud` CLI autenticado
-- Repositórios git remotos configurados
-- Cloud Build triggers criados para branch `test`
-
-### Passo a passo
-
-```bash
-# 1. Upload de secrets
-export DEEPSEEK_API_KEY="sk-..."
-export NVIDIA_API_KEY="nvapi-..."
-export MINIMAX_API_KEY="eyJ..."
-export MINIMAX_GROUP_ID="..."
-export SERPER_API_KEY="..."
-export GOOGLE_OAUTH_TOKEN="$(cat token.json)"
-
-cd ChatBotWhatsapp/agents_runtime
-./scripts/upload_all_secrets.sh
-
-# 2. Push código (cada repo)
-./scripts/deploy_all.sh
-# Cloud Build dispara automaticamente
-
-# 3. Configurar Cloud Scheduler (ver scripts/deploy_cloud_run.md)
-
-# 4. Registrar módulo no Portal
-TOKEN=$(gcloud auth print-identity-token)
-curl -X POST https://coherence-portal-test/api/admin/modules/omnichannel-agentes \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{"name":"Agentes Omnichannel","url":"https://agents-runtime-test-XXX.run.app","icon":"Bot"}'
+```
+Celular
+  ↕ WhatsApp
+Evolution API
+  ↕ POST /webhook (markMessagesAsRead async)
+agents-runtime-test
+  ↕ publish chatbotwhatsapp-messages
+Pub/Sub + DLQ nativa
+  ↕ push /pubsub/push (claim no ledger Firestore)
+  ↕ Whisper local → Gemini 2.5 Flash (somente sob consentimento)
+  ↕ LLM cascade MiniMax M2.7 Highspeed → M3 → DeepSeek V4 Flash
+  ↕ Tools Google (somente telefone do proprietário)
+Evolution /message/sendText
+  ↕ resposta + tick azul
+Celular
 ```
 
-Ver checklist completo: `scripts/DEPLOY_CHECKLIST.md`
+## Endpoints
 
----
+- `POST /webhook` — entrada do Evolution.
+- `POST /pubsub/push` — push subscription (OIDC + ledger).
+- `POST /chat` — proxy interno usado pelos workers e pelo playground.
+- `GET /admin/dashboard` — plano de controle do módulo (Bearer ou Firebase).
+- `GET /admin/accounts`, `POST /admin/accounts`, `PUT /admin/accounts/{id}`
+- `GET /admin/agents`, `POST /admin/agents`, `DELETE /admin/agents/{id}`
+- `GET /admin/skills`, `POST /admin/skills`
+- `GET /admin/tools`, `POST /admin/tools`
+- `GET /admin/owners`, `GET /admin/knowledge`, `GET /admin/status`
+- `GET /admin/users`, `POST /admin/register-user`
+- `GET /admin/groups`, `POST /admin/groups/confirm`
+- `POST /oauth/google`, `GET /oauth/callback`
 
-## 📊 Custos Mensais (~$17/mês = ~R$ 87)
+## Custos
 
-| Componente | Custo |
-|---|---|
-| agents-runtime-test (2Gi, min=0) | $5 |
-| whatsapp-agente-test (1Gi, min=0) | $3 |
-| coherence-portal-test (já existe) | $5 |
-| ata-worker + proactive-worker + lgpd-cleanup | $2 |
-| LLM (DeepSeek cascata) | $0.20 |
-| LLM proativo | $0.30 |
-| Serper (com cache 24h) | $0.50 |
-| Áudio + Scheduler + Firestore | $0.55 |
+`agents-runtime-test` (2 vCPU, 2 GiB, min=0, max=3, cpu-throttling): ~$5/mês.
+LLM cascade, Whisper e Pub/Sub geram custo variável conforme o tráfego.
 
----
+## Próximos passos
 
-## 🎯 Comandos Proativos (você pode usar)
-
-| Comando | Efeito |
-|---|---|
-| `Jennifer, silêncio` | Proatividade off |
-| `Jennifer, modo zen` | Reduz frequência em 50% |
-| `Jennifer, modo turbo` | Aumenta frequência (até 2/dia) |
-| `Jennifer, só emergências` | Só situações críticas |
-| `Jennifer, retomar` | Volta ao normal |
-| `Jennifer, grupo off` | Desativa proatividade em grupo |
-| `Jennifer, grupo on` | Reativa proatividade em grupo |
-
----
-
-## 🧪 Testes
-
-```bash
-cd ChatBotWhatsapp/agents_runtime
-pytest -q tests/
-```
-
-Resultado local em 18/07/2026: **212 passed, 9 skipped**.
-
-Gates por fase:
-
-- Fase 3 RAG: 16 testes específicos.
-- Fase 4 inventário e orquestração: 41 testes específicos.
-- Fase 5 áudio e provider: 30 testes específicos.
-
-O Cloud Build repete `pytest -q tests/` antes do build e deploy.
-
----
-
-## 📞 Próximo Passo Imediato
-
-**Se você tem credenciais GCP ativas:**
-```bash
-# Configure git remotes:
-cd ChatBotWhatsapp/agents_runtime && git remote add origin <URL>
-cd ../../WhatsappAgente && git remote add origin <URL>
-cd ../../Coherence_Portal && git remote add origin <URL>
-
-# Push + deploy:
-cd ../ChatBotWhatsapp/agents_runtime
-./scripts/deploy_all.sh
-
-# Upload secrets:
-./scripts/upload_all_secrets.sh
-```
-
-**Se NÃO tem credenciais GCP:**
-- Use `./scripts/dev.sh up` para testar local
-- Deploy fica para quando você configurar credenciais
-
----
-
-## 📚 Documentação
-
-- [PLAN_OMNICHANNEL_AGENTES.md](../docs/PLAN_OMNICHANNEL_AGENTES.md) — plano completo e fases corretivas
-- [ARQUITETURA.md](../docs/ARQUITETURA.md) — arquitetura global
-- [HARNESS.md](../docs/HARNESS.md) — operação global
-- [GUARDRAILS.md](../docs/GUARDRAILS.md) — regras inegociáveis
-- [DIARIO_BORDO.md](../docs/DIARIO_BORDO.md) — histórico consolidado
-- [docs/ARQUITETURA.md](docs/ARQUITETURA.md) — arquitetura do runtime
-- [docs/HARNESS.md](docs/HARNESS.md) — harness do runtime
-- [docs/DIARIO_BORDO.md](docs/DIARIO_BORDO.md) — diário do runtime
-- [MODULE_INTEGRATION_AGENTES.md](../Coherence_Portal/docs/MODULE_INTEGRATION_AGENTES.md) — contrato Portal ↔ agents_runtime
-- [scripts/DEPLOY_CHECKLIST.md](scripts/DEPLOY_CHECKLIST.md) — checklist final deploy
-- [scripts/deploy_cloud_run.md](scripts/deploy_cloud_run.md) — comandos Cloud Scheduler
-
----
-
-**Implementação:** 13/07/2026 | **Owner:** Vinicius | **Versão:** 1.0.0-test
+- Rotacionar credenciais expostas no commit `ad6399a`.
+- Drenar backlog legado com `gcloud pubsub subscriptions seek agents-runtime-consumer --time=<deploy_ts>`.
+- Backfill de embeddings para a nova coleção `agent-knowledge-v2` por
+  `owner_id`.
+- Excluir o proxy `WhatsappAgente` e o serviço `whatsapp-agente-test`.

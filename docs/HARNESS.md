@@ -20,28 +20,31 @@
   - `ata-worker-test` (geracao de atas)
   - `proactive-worker-test` (mensagens proativas)
 - **Pub/Sub topics:**
-  - `whatsapp-messages` (webhook → agents-runtime, prod e test)
-  - `whatsapp-messages-dlq` (DLQ para retries > 5)
-  - `monitoria-whisper-jobs` (existente, eventual fallback audio)
+  - `chatbotwhatsapp-messages` (webhook → agents-runtime; unico topico ativo)
+  - `chatbotwhatsapp-dlq` (DLQ nativa para retries > 5)
+  - `whatsapp-messages` / `whatsapp-messages-dlq` (legado; service `whatsapp-agente` foi deletado em 23/07/2026 — topicos podem ser removidos na proxima janela)
 
 
-## Arquitetura consolidada (2026-07-21)
+## Arquitetura consolidada (2026-07-22)
 
-O projeto `viniciusbritor/ChatBotWhatsapp` contém **apenas** o serviço de agentes. O proxy Evolution foi consolidado dentro do próprio `agents-runtime` via endpoint `POST /webhook` que publica no Pub/Sub `whatsapp-messages`. A pipeline ponta-a-ponta é:
+O projeto `viniciusbritor/ChatBotWhatsapp` contém **apenas** o serviço de agentes. O proxy Evolution foi consolidado dentro do próprio `agents-runtime` via endpoint `POST /webhook` que publica no Pub/Sub `chatbotwhatsapp-messages`. A idempotencia e feita por ledger Firestore (`message-processing/{message_id}`) e o retry do Pub/Sub e 503-only. A pipeline ponta-a-ponta e:
 
 ```
 Celular
-  ↕ (áudio/texto)
+  ↕ (audio/texto)
 Evolution API (projeto EvolutionWhatsapp, repo separado)
   ↕ (webhook POST https://agents-runtime-test-...a.run.app/webhook)
 agents-runtime-test (Cloud Run, projeto ChatBotWhatsapp)
-  ↕ (POST /webhook → publish whatsapp-messages)
-Pub/Sub whatsapp-messages
+  - webhook valida payload, sintetiza message_id deterministico,
+    registra no ledger e marca mensagem como lida na Evolution
+  ↕ (POST /webhook → publish chatbotwhatsapp-messages)
+Pub/Sub chatbotwhatsapp-messages
   ↕ (push subscription agents-runtime-consumer → /pubsub/push)
-agents-runtime-test (POST /pubsub/push, dedupe, orchestrate)
-  ↕ (Whisper + LLM cascade)
-Evolution /message/sendText
-  ↕ (resposta)
+agents-runtime-test (POST /pubsub/push, ledger claim, orchestrate)
+  ↕ (Whisper local; fallback Gemini 2.5 Flash somente sob consentimento)
+  ↕ (LLM cascade MiniMax M2.7 Highspeed → M3 → DeepSeek V4 Flash)
+Evolution /message/sendText + /chat/markMessagesAsRead
+  ↕ (resposta + tick azul)
 Celular
 ```
 
@@ -49,14 +52,24 @@ Os repos `viniciusbritor/EvolutionWhatsapp` (hospeda o Evolution API) e `viniciu
 
 ## CI/CD (Cloud Build triggers)
 
-| Trigger | Repo | Branch | Build config | Service Account |
-|---|---|---|---|---|
-| `deploy-agents-runtime-test` | ChatBotWhatsapp | `^test$` | `agents_runtime/cloudbuild-test.yaml` | `894828119087-compute@developer.gserviceaccount.com` (compute default) |
-| `deploy-agents-runtime-prod` | ChatBotWhatsapp | `^main$` | `agents_runtime/cloudbuild.yaml` | (compute default) |
-| `EvolutionWhatsapp-test` | EvolutionWhatsapp | `^test$` | (do repo EvolutionWhatsapp) | (compute default) |
-| `EvolutionWhatsapp-prod` | EvolutionWhatsapp | `^main$` | (do repo EvolutionWhatsapp) | (compute default) |
-| `deploy-whatsapp-agente-*` | **deletado 2026-07-21** (proxy consolidado em `agents-runtime`) | — | — | — |
-| `chatbotwhatsapp-test` | **deletado 2026-07-21** (duplicado de `deploy-agents-runtime-test`) | — | — | — |
+> **Modo operacional vigente (23/07/2026):** todos os triggers do projeto
+> ChatBotWhatsapp estão **desabilitados**. Builds e deploys do módulo são
+> iniciados manualmente pelo operador após validação local. A reativação de
+> qualquer trigger desta tabela exige justificativa registrada em
+> `docs/DIARIO_BORDO.md`.
+
+| Trigger | Repo | Branch | Build config | Service Account | Status |
+|---|---|---|---|---|---|
+| `deploy-agents-runtime-test` | ChatBotWhatsapp | `^test$` | `agents_runtime/cloudbuild-test.yaml` | `admin-omnichannel@coherence-ominichannel-fs.iam.gserviceaccount.com` | **desabilitado** |
+| `EvolutionWhatsapp-test` | EvolutionWhatsapp | `^test$` | (do repo EvolutionWhatsapp) | (compute default) | monitorar |
+| `EvolutionWhatsapp-prod` | EvolutionWhatsapp | `^main$` | (do repo EvolutionWhatsapp) | (compute default) | monitorar |
+| `deploy-monitoria-whisper-worker` | `Monitoria_Chamadas` | `^test$` | (externo, fora de escopo) | (externo) | **não modificar** |
+| `deploy-monitoria-worker-prod` | `Monitoria_Chamadas` | `^main$` | (externo, fora de escopo) | (externo) | **não modificar** |
+| `deploy-monitoria-prod` | `Monitoria_Chamadas` | `^main$` | (externo, fora de escopo) | (externo) | **não modificar** |
+
+> ⚠️ **Repositórios de Monitoria fora de escopo.** Não tocar nos triggers
+> de `Monitoria_Chamadas`; mudanças precisam passar pela coordenação do
+> respectivo repositório.
 
 ## Variaveis de Ambiente
 
@@ -119,8 +132,12 @@ RAG_EMBEDDING_MODEL: "text-embedding-3-small"
 RAG_EMBEDDING_DIM: "1536"
 RAG_EMBEDDING_BASE_URL: "https://api.openai.com/v1/embeddings"
 RAG_SCHEMA_VERSION: "2"
-RAG_MEMORY_COLLECTION: "conversation-memory-v2"
+# Historico de mensagens SEMPRE em Firestore plain (sem embedding).
+RAG_MESSAGE_HISTORY_COLLECTION: "message-history"
+RAG_MESSAGE_HISTORY_RETENTION_DAYS: "365"
+# Firestore Vector: SOMENTE para documentos (livros, editais, publico).
 RAG_PRIVATE_COLLECTION: "agent-knowledge-v2"
+RAG_COLLECTIVE_COLLECTION: "collective-knowledge-v2"
 RAG_SHARED_COLLECTION: "public-knowledge-v2"
 RAG_RETENTION_DAYS: "90"
 
@@ -189,69 +206,65 @@ chmod +x scripts/upload_secrets.sh
 
 ## Cloud Scheduler (Triggers)
 
-| Job | Frequencia | Acao |
-|---|---|---|
-| `ata-worker-trigger` | `*/10 * * * *` | Chama `ata-worker-test` |
-| `proactive-worker-events-trigger` | `*/15 * * * *` | Chama `proactive-worker-test` (eventos Calendar) |
-| `proactive-worker-topics-trigger` | `0 8 * * 2,5` | Chama `proactive-worker-test` (terca + sexta 8h BRT) |
-| `ping-agents-runtime` | `*/5 * * * *` | GET `/healthz` em agents-runtime-test |
-| `ping-whatsapp-agente` | `*/5 * * * *` | GET `/healthz` em whatsapp-agente-test |
-| `group-sync-trigger` | `0 */6 * * *` | Sincroniza membros dos grupos via Evolution API |
-| `proactive-weekly-eval` | `0 20 * * 0` | Auto-avaliacao semanal (domingo 20h BRT) |
-| `history-cleanup` | `0 3 * * *` | Limpa historico e `conversation-memory-v2` expirados ha mais de 90 dias |
+> ⚠️ Todas as triggers abaixo foram **pausadas** em 23/07/2026 para
+> evitar execuções caras durante a fase de estabilização. A reativação
+> é responsabilidade do operador após validação local. Triggers legadas
+> `ping-whatsapp-agente`, `agents-runtime-ping` e qualquer referência
+> ao serviço `whatsapp-agente-test` foram **removidas** (o serviço
+> legado foi deletado).
+
+| Job | Frequencia original | Acao | Status atual |
+|---|---|---|---|
+| `ata-worker-trigger` | `*/10 * * * *` | Chama `ata-worker-test` | pausado |
+| `proactive-worker-events-trigger` | `*/15 * * * *` | Chama `proactive-worker-test` (eventos Calendar) | pausado |
+| `proactive-worker-topics-trigger` | `0 8 * * 2,5` | Chama `proactive-worker-test` (terca + sexta 8h BRT) | pausado |
+| `ping-agents-runtime` | `*/5 * * * *` | GET `/healthz` em agents-runtime-test | pausado |
+| `ping-whatsapp-agente` | `*/5 * * * *` | GET `/healthz` em whatsapp-agente-test | **deletado** (serviço removido) |
+| `group-sync-trigger` | `0 */6 * * *` | Sincroniza membros dos grupos via Evolution API | pausado |
+| `proactive-weekly-eval` | `0 20 * * 0` | Auto-avaliacao semanal (domingo 20h BRT) | pausado |
+| `history-cleanup` | `0 3 * * *` | Limpa historico e `conversation-memory-v2` expirados ha mais de 90 dias | pausado |
 
 ## Estrutura de Diretorios
 
 ```
 ChatBotWhatsapp/
-├── docs/                              # este workspace
-│   ├── PLAN_OMNICHANNEL_AGENTES.md   # plano consolidado
-│   ├── ARQUITETURA.md
-│   ├── HARNESS.md                    # este arquivo
-│   ├── GUARDRAILS.md
-│   └── DIARIO_BORDO.md
-└── agents_runtime/                    # PROJETO NOVO (Fase 1+)
-    ├── main.py
-    ├── orchestrator.py
+├── docs/                              # documentacao canonica (raiz)
+│   ├── ARQUITETURA.md                 # visao geral
+│   ├── HARNESS.md                     # este arquivo
+│   ├── GUARDRAILS.md                  # regras inegociaveis
+│   ├── DIARIO_BORDO.md                # historico cronologico
+│   ├── PRIVACIDADE.md                 # politica LGPD
+│   └── TERMOS.md                      # termos de uso
+└── agents_runtime/                    # runtime FastAPI
+    ├── main.py                        # webhook / /pubsub/push / /admin/*
+    ├── orchestrator.py                # roteamento Jennifer
+    ├── agent_loader.py                # snapshot Firestore
     ├── core/
-    │   ├── llm_provider.py
-    │   ├── escalation.py
-    │   ├── masker.py
-    │   ├── delay_calculator.py
-    │   ├── proactive_gate.py
     │   ├── auth.py
-    │   └── rag.py
+    │   ├── evolution_client.py        # sendText + markMessagesAsRead
+    │   ├── evolution_webhook.py        # extrator canonico
+    │   ├── message_ledger.py           # idempotencia Firestore
+    │   ├── pubsub_dispatcher.py        # lease + retry transitorio
+    │   ├── pubsub_publisher.py         # publish chatbotwhatsapp-messages
+    │   ├── pubsub_consumer.py          # shim de compatibilidade
+    │   ├── audio_transcribe.py         # Whisper + Gemini fallback
+    │   ├── owner.py / owner_guard.py  # guard Gmail/Drive/Calendar
+    │   ├── module_ui.py                # painel /admin/dashboard
+    │   ├── rag.py                      # embeddings OpenAI
+    │   ├── llm_provider.py
+    │   ├── oauth_per_user.py           # tokens OAuth Google
+    │   ├── masker.py / logging.py / secrets.py / ...
     ├── tools/
-    │   ├── google_calendar.py
-    │   ├── google_drive.py
-    │   ├── google_gmail.py
-    │   ├── web_search.py
-    │   ├── nickname.py
-    │   ├── correction.py
-    │   ├── proactive.py
-    │   ├── group.py
-    │   ├── audio_transcribe.py
-    │   └── ata_helper.py
-    ├── ata_worker/
-    ├── proactive_worker/
-    ├── docs/
-    │   ├── ARQUITETURA.md
-    │   ├── HARNESS.md
-    │   ├── GUARDRAILS.md
-    │   ├── DIARIO_BORDO.md
-    │   └── MODULE_INTEGRATION.md
-    ├── tests/
-    ├── scripts/
-    │   ├── upload_secrets.sh
-    │   ├── seed_legal_knowledge.py
-    │   └── sync_group_members.py
-    ├── data/
-    │   └── nicknames.json
-    ├── requirements.txt
-    ├── Dockerfile
-    ├── cloudbuild.yaml
-    └── .env.runtime.test.yaml
+    │   ├── google_gmail.py / google_drive.py / google_calendar.py
+    │   ├── audio_transcribe.py / web_search.py / nickname.py ...
+    ├── ata_worker/  proactive_worker/
+    ├── tests/   scripts/   Dockerfile   cloudbuild-test.yaml
+    └── requirements.txt
 ```
+
+> A copia em `agents_runtime/docs/` foi removida em 22/07/2026 para
+> eliminar fonte única de verdade desatualizada. Documentação canônica
+> fica somente em `docs/` na raiz.
 
 ## Como Executar e Testar
 
@@ -300,17 +313,57 @@ pytest -q tests/
 
 Resultado local da Fase 5 em 18/07/2026: 30 testes especificos e 212 testes totais passaram; 9 foram ignorados. O teste integrado com audio real do WhatsApp permanece como smoke test do ambiente implantado.
 
-### Deploy Cloud Run (TEST)
+### Deploy Cloud Run (TEST) — modo manual
+
+> ⚠️ Trigger `deploy-agents-runtime-test` está **desabilitado**. Builds
+> são iniciados manualmente pelo operador. A seção abaixo é o **único**
+> fluxo aprovado.
+
+Pré-condições:
+
+1. Ter `gcloud auth login` feito e projeto
+   `coherence-ominichannel-fs` selecionado.
+2. Estar em branch `test` local sem mudanças não commitadas.
+3. Ter rodado `scripts/check_lgpd_compliance.py`, `ruff` e `pytest` com
+   0 falhas.
+
+Comandos (na raiz do repositório `C:\Users\vinic\workspace_antigravity\ChatBotWhatsapp`):
 
 ```bash
+gcloud config set project coherence-ominichannel-fs
+
+# 1. Lint + tests + gate (precisa estar verde)
 cd agents_runtime
+pip install -q -r requirements.txt -r requirements-dev.txt
+python scripts/check_lgpd_compliance.py
+ruff check core/ main.py orchestrator.py agent_loader.py tool_registry.py
+pytest -q tests/
+
+# 2. Commit e push
+cd ..
 git checkout test
 git add -A
-git commit -m "feat(phase-N): ..."
+git commit -m "feat(scope): ..."
 git push origin test
-# Cloud Build dispara automaticamente
+
+# 3. Build MANUAL (substitui o trigger desabilitado)
+gcloud builds submit \
+  --config=agents_runtime/cloudbuild-test.yaml \
+  --substitutions=COMMIT_SHA=$(git rev-parse --short HEAD),SHORT_SHA=$(git rev-parse --short HEAD) \
+  --project=coherence-ominichannel-fs \
+  --region=us-central1
+
+# 4. Acompanhar
 gcloud builds list --project=coherence-ominichannel-fs --limit=1
+gcloud run services describe agents-runtime-test \
+  --region=us-central1 --project=coherence-ominichannel-fs
 ```
+
+> Se for necessário reativar o trigger:
+> `gcloud builds triggers update deploy-agents-runtime-test
+> --project=coherence-ominichannel-fs
+> --no-validate-trigger --update-fingerprint=$(gcloud builds triggers describe deploy-agents-runtime-test --project=coherence-ominichannel-fs --format='value(fingerprint)')`
+> (somente registrar justificativa em `DIARIO_BORDO.md`).
 
 ### Smoke Test
 
@@ -459,33 +512,41 @@ pytest -q                                  # backend
 - **Cloud Run:** `--set-secrets` em `cloudbuild.yaml` referencia segredos do Secret Manager
 - **Nunca:** hardcoded keys em código (regra global + GUARDRAILS)
 
-### Lista de secrets ativos (junho/2026)
+### Lista de secrets ativos (23/07/2026)
 
 | Secret | Consumer | Status |
 |---|---|---|
-| `DEEPSEEK_API_KEY` | `agents-runtime`, `ata-worker`, `proactive-worker` | ativo |
-| `NVIDIA_API_KEY` | `agents-runtime` (fallback cascade) | ativo |
-| `MINIMAX_API_KEY` | `agents-runtime` (fallback cascade) | ativo |
 | `OPENAI_API_KEY` | `agents-runtime` (embeddings RAG) | ativo |
-| `agents-runtime-sa-token` | `agents-runtime` (Cloud Run identity) | ativo |
-| `OAUTH_CLIENT_SECRET` | `agents-runtime` (OAuth per-user, Fase D) | ativo |
-| `OAUTH_STATE_SECRET` | `agents-runtime` (HMAC state, Fase D) | ativo |
+| `agents-runtime-url` | marcado para revisao (Cloud Run identity) | ativo |
+| `OAUTH_CLIENT_SECRET` | `agents-runtime` (OAuth per-user) | ativo |
+| `OAUTH_STATE_SECRET` | `agents-runtime` (HMAC state) | ativo |
 | `COHERENCE_18_PLUS_OAUTH_CLIENT_ID` | `agents-runtime` (OAuth per-user) | ativo |
 | `COHERENCE_18_PLUS_OAUTH_CLIENT_SECRET` | `agents-runtime` (OAuth per-user) | ativo |
-| `PROACTIVE_WORKER_PHONES` | `proactive-worker` (CSV de telefones, Fase D) | ativo |
-| `ATA_WORKER_PHONES` | `ata-worker` (CSV de telefones, Fase D) | ativo |
-| `evolution-api-key` | `agents-runtime` (envio de mensagens, Fase C) | ativo |
+| `PROACTIVE_WORKER_PHONES` | `proactive-worker` (CSV) | ativo |
+| `ATA_WORKER_PHONES` | `ata-worker` (CSV) | ativo |
+| `evolution-api-key` | `agents-runtime` (envio de mensagens) | **necessita key real** (nao foi exposta) |
 | `google-maps-api-key` | `agents-runtime` (locomotion tool) | ativo |
 | `youtube-api-key` | `agents-runtime` (youtube tool) | ativo |
 | `serper-api-key` | `agents-runtime` (web search) | ativo |
+| `GEMINI_API_KEY` | `agents-runtime` (fallback STT somente sob consentimento) | ativo |
+| `DEEPSEEK_API_KEY` | LLM cascade (1º recurso apos MiniMax M2.7) | **versao bloqueada — aguardando nova key** |
+| `MINIMAX_API_KEY` | LLM cascade (MiniMax-M2.7 highspeed → M3) | **versao bloqueada — aguardando nova key** |
+| `NVIDIA_API_KEY` | cascade LLM (legado) | **versao bloqueada — aguardando nova key** |
+| `agents-runtime-sa-token` | Bearer SA | **versao bloqueada — aguardando nova key** |
 
-### Lista de secrets orfaos (cleanup pendente, Fase F)
+> ⚠️ As chaves com "versao bloqueada" foram desabilitadas no
+> Secret Manager após o commit `0a3d6ed` ter exposto o conteúdo
+> em `secret_*.txt` e `sa_token.txt` no historico do Git. Para
+> reativar, adicione uma nova versao e (se quiser a versao antiga
+> tambem) execute `gcloud secrets versions enable N --secret=…`.
+
+### Lista de secrets orfaos (cleanup pendente)
 
 | Secret | Motivo | Procedure |
 |---|---|---|
-| `whatsapp-agente-url` | URL do `whatsapp-agente-test` (proxy deletado na Fase A) | `docs/fases/fase_F/cleanup_secrets.md` |
-| `agents-runtime-sa-token-clean` | Duplicata de `agents-runtime-sa-token` (refresh ja existe no codigo) | `docs/fases/fase_F/cleanup_secrets.md` |
-| `google-oauth-token` | OAuth global removido na Fase D | `docs/fases/fase_F/cleanup_secrets.md` (referencia) |
+| `whatsapp-agente-url` | URL do `whatsapp-agente` (servico legacy deletado em 23/07/2026) | `gcloud secrets delete whatsapp-agente-url --project=coherence-ominichannel-fs` (proxima janela) |
+| `agents-runtime-sa-token-clean` | Duplicata de `agents-runtime-sa-token` | `gcloud secrets delete agents-runtime-sa-token-clean …` (proxima janela) |
+| `google-oauth-token` | OAuth global removido na Fase D | deletar quando seguro |
 
 ### Troubleshooting OAuth per-user
 

@@ -33,14 +33,14 @@ class TestChatAudioRoute:
             "metadata": {"agent_id": "jennifier"},
         }
         with patch(
-            "tools.audio_transcribe.transcribe_base64",
+            "tools.audio_transcribe.transcribe_bytes",
             new_callable=AsyncMock,
             return_value="Email pessoa@example.com",
-        ) as base64_stt:
+        ) as bytes_stt:
             with patch(
-                "tools.audio_transcribe.transcribe_url",
+                "tools.audio_transcribe._download_audio",
                 new_callable=AsyncMock,
-            ) as url_stt:
+            ) as download:
                 with patch(
                     "main.orchestrate", new_callable=AsyncMock, return_value=response_payload
                 ) as orchestrate:
@@ -49,8 +49,8 @@ class TestChatAudioRoute:
         sent_body = orchestrate.await_args.args[0]
         assert sent_body["text"] == "Email [MASK_EMAIL]"
         assert sent_body["extra"]["audio_source"] == "base64"
-        base64_stt.assert_awaited_once()
-        url_stt.assert_not_awaited()
+        bytes_stt.assert_awaited_once()
+        download.assert_not_awaited()
         assert json.loads(response.body)["reply"] == "Recebido"
 
     @pytest.mark.asyncio
@@ -66,22 +66,27 @@ class TestChatAudioRoute:
             },
         }
         with patch(
-            "tools.audio_transcribe.transcribe_base64", new_callable=AsyncMock
-        ) as base64_stt:
+            "tools.audio_transcribe.transcribe_bytes", new_callable=AsyncMock
+        ) as bytes_stt:
             with patch(
-                "tools.audio_transcribe.transcribe_url",
+                "tools.audio_transcribe._download_audio",
                 new_callable=AsyncMock,
-                return_value="mensagem por voz",
-            ) as url_stt:
+                return_value=b"audio-bytes",
+            ) as download:
                 with patch(
-                    "main.orchestrate",
+                    "tools.audio_transcribe.transcribe_bytes",
                     new_callable=AsyncMock,
-                    return_value={"reply": "ok", "metadata": {}},
-                ) as orchestrate:
-                    await chat(request_with_body(body))
+                    return_value="mensagem por voz",
+                ) as bytes_stt:
+                    with patch(
+                        "main.orchestrate",
+                        new_callable=AsyncMock,
+                        return_value={"reply": "ok", "metadata": {}},
+                    ) as orchestrate:
+                        await chat(request_with_body(body))
 
-        base64_stt.assert_not_awaited()
-        url_stt.assert_awaited_once()
+        download.assert_awaited_once()
+        bytes_stt.assert_awaited_once()
         assert orchestrate.await_args.args[0]["text"] == "mensagem por voz"
 
     @pytest.mark.asyncio
@@ -94,7 +99,7 @@ class TestChatAudioRoute:
             "extra": {"has_audio": True, "audio_base64": "invalid"},
         }
         with patch(
-            "tools.audio_transcribe.transcribe_base64",
+            "tools.audio_transcribe.transcribe_bytes",
             new_callable=AsyncMock,
             side_effect=AudioValidationError("audio_base64_invalid"),
         ):
@@ -117,7 +122,7 @@ class TestChatAudioRoute:
             "extra": {"has_audio": True, "audio_base64": "invalid"},
         }
         with patch(
-            "tools.audio_transcribe.transcribe_base64",
+            "tools.audio_transcribe.transcribe_bytes",
             new_callable=AsyncMock,
             side_effect=AudioValidationError("audio_base64_invalid"),
         ):

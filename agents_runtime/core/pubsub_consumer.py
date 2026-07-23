@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 _seen_message_ids: Set[str] = set()
 _seen_lock = threading.RLock()
-_SEEN_MAX = 10000
+_SEEN_MAX = 5000
 
 
 def _strip_bearer(token: str) -> str:
@@ -57,8 +57,9 @@ def verify_pubsub_token(
 
 
 def _dedupe(message_id: str) -> bool:
+    """In-process fast path. The ledger remains the source of truth."""
     if not message_id:
-        return True
+        return False
     digest = hashlib.sha256(message_id.encode("utf-8")).hexdigest()[:16]
     with _seen_lock:
         if digest in _seen_message_ids:
@@ -68,7 +69,7 @@ def _dedupe(message_id: str) -> bool:
             overflow = len(_seen_message_ids) - _SEEN_MAX
             for _ in range(overflow):
                 _seen_message_ids.pop()
-        return True
+    return True
 
 
 def parse_pubsub_push_body(body: Dict[str, Any]) -> Dict[str, Any]:
@@ -107,12 +108,7 @@ async def dispatch(
     payload: Dict[str, Any],
     handler: Callable[[Dict[str, Any]], Awaitable[Optional[Dict[str, Any]]]],
 ) -> Optional[Dict[str, Any]]:
-    message_id = payload.get("message_id", "")
-    if not _dedupe(message_id):
-        logger.info("pubsub duplicate dropped: %s", message_id)
-        return {"status": "duplicate", "message_id": message_id}
-    try:
-        return await handler(payload)
-    except Exception:
-        _forget(message_id)
-        raise
+    """Compatibility wrapper around the new ledger-based dispatch."""
+    from core.pubsub_dispatcher import dispatch_with_ledger
+
+    return await dispatch_with_ledger(payload, handler)

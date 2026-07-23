@@ -1153,3 +1153,55 @@ Pipeline pronto para commit, push e smoke real.
 
 ### Status
 Suite verde na branch `test`. Proximo: commit, push, acompanhar Cloud Build e executar smoke real `/admin/agents/status` e `/admin/agents/{id}/status`.
+## 22/07/2026 BRT — Contencao da tempestade Pub/Sub + simplificacao
+
+### Escopo
+- Substitui o dedupe em memoria por um **ledger Firestore** (`core/message_ledger.py`) com lease de 120 s e renovacao automatica. Cada mensagem passa por `register_or_load -> claim -> dispatch -> mark_response/mark_delivered`.
+- `core/pubsub_dispatcher.py` substitui a publicacao manual na DLQ: o Pub/Sub nativo absorve retries. Falhas terminais retornam 200 com `status: failed_terminal`; falhas transitorias retornam 503 para reentrega.
+- `core/evolution_webhook.py` agora sintetiza `message_id` deterministico quando Evolution omite `key.id`, garantindo que retried webhooks colapsem na mesma entrada do ledger.
+- `core/evolution_client.py` adicionou `mark_messages_read` (Evolution v2) e `_safe_mark_read` em `/webhook` aplica o tick azul automatico. Timeout de 5 s; falha no tick nao bloqueia o webhook nem republica.
+- `core/owner.py` + `core/owner_guard.py` resolvem o proprietario da instancia Evolution e guardam Gmail/Drive/Calendar para que apenas o telefone autorizado execute essas capacidades. Todos os decorators `_owner_guard(...)` foram aplicados em `tools/google_*`.
+- Escopos OAuth reduzidos: `drive.file + drive.readonly` (sem `drive` full), `gmail.readonly + gmail.send` (sem `gmail.modify`).
+- Audio agora passa por `core/audio_transcribe.transcribe_with_fallback`: Whisper local sempre; Gemini 2.5 Flash somente em falha tecnica com consentimento (`STT_FALLBACK_CONSENT` ou `extra.audio_consent_external=true`) e limite diario configuravel.
+- `core/module_ui.py` substitui o HTML legado por um painel limpo com autenticacao por `Authorization: Bearer` e os blocos `?token=` foram removidos. Novos endpoints administrativos: `/admin/accounts`, `/admin/owners`, `/admin/knowledge`, `/admin/status`, `/admin/dashboard`.
+- Limpeza operacional: `secret_*.txt`, `sa_token*.txt`, `update_real_secrets.py` e `whatsapp_agente_pubsub_reference.py` removidos do repositorio.
+
+### Testes
+- `pytest -q tests/`: **329 passed, 10 skipped** em 5,16 s.
+- `ruff check core/ main.py orchestrator.py agent_loader.py tool_registry.py`: 0 erros.
+- `python scripts/check_lgpd_compliance.py`: LGPD compliance checks passed.
+
+### Status
+Branch `test` pronta para deploy do fix do Pub/Sub. Apos deploy, executar `gcloud pubsub subscriptions seek agents-runtime-consumer --time=<deploy_ts>` para drenar backlog antigo, conforme autorizado.
+
+### Pendencias
+- Rotacao das credenciais expostas antes do proximo deploy.
+- Backfill de embeddings sob o novo `owner_hash`.
+- Remocao completa do proxy `WhatsappAgente`.
+- Atualizar `agents_runtime/README.md` com a nova contagem de testes.
+
+## 23/07/2026 BRT — Firestore plain obrigatorio + historico por owner_hash
+
+### Escopo
+- `core/rag.py`: `index_conversation_message` agora grava **sempre** em Firestore plain (`message-history/{history_id}`) com `owner_hash = sha256(digits)[:32]`. Firestore Vector e restrito a documentos (livros, editais, coletivo, publico).
+- `core/rag.py`: `search_conversation_memory` le plain Firestore filtrando `where("owner_hash", ==, _owner_hash(phone))` + `order_by("created_at", DESC)`. Embedding foi removido do hot path.
+- `core/rag.py`: rejeicao explicita quando `phone` chega vazio (`status: skipped, reason: missing_phone`) para impedir mistura entre contas em grupos sem sender.
+- `scripts/ingest_collective_memory.py`: grava em `collective-knowledge-v2` plain como base; embedding fica como bonus opcional.
+- Scripts `scripts/backfill_owner_embeddings.py`, `scripts/ingest_collective_memory.py` e ajustes em `scripts/ingest_owner_knowledge.py` para gravar plain-first.
+- `cloudbuild-test.yaml` e `cloudbuild.yaml`: envs atualizados para `RAG_MESSAGE_HISTORY_COLLECTION` e `RAG_COLLECTIVE_COLLECTION`.
+- Documentos canonicos (`docs/ARQUITETURA.md`, `docs/HARNESS.md`, `docs/GUARDRAILS.md`, `docs/DIARIO_BORDO.md`): nova topologia Firestore plain vs vector.
+
+### Testes
+- `pytest -q tests/`: **331 passed, 10 skipped** em 5,06 s.
+- `ruff check core/ main.py orchestrator.py agent_loader.py tool_registry.py`: All checks passed.
+- `python scripts/check_lgpd_compliance.py`: LGPD compliance checks passed.
+
+### Resultado operacional
+- Cada interacao do chat e armazenada em Firestore comum (`message-history`) com chave `owner_hash` derivada do telefone. Isolamento por proprietario e por conta.
+- `agent-knowledge-v2`, `collective-knowledge-v2` e `public-knowledge-v2` continuam sendo o destino de livros, editais e informacao publica; recebem embedding OpenAI apenas na ingestao.
+- O sistema continua sem build automatico: `deploy-agents-runtime-test` segue desabilitado ate o operador reativa-lo apos validar este lote localmente.
+
+### Pendencias externas apos esta entrega
+- Reativar o trigger apos o commit + push (verificando que `gcloud builds list` mostra SUCCESS).
+- Decidir sobre o destino da colecao legada `conversation-memory-v2` (continuar vazia, renomear, ou remover).
+- Backfill da memoria coletiva inicial (ex.: manual de onboarding).

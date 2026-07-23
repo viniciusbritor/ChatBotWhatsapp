@@ -123,20 +123,39 @@ async def test_message_id_indexed_in_rag_after_audio_pipeline():
 
 
 @pytest.mark.asyncio
-async def test_audio_retry_does_not_duplicate_index():
+async def test_audio_retry_does_not_duplicate_index(monkeypatch):
     from core.pubsub_consumer import dispatch
+    from unittest.mock import AsyncMock
 
-    calls = 0
+    handler = AsyncMock(return_value={"status": "ok"})
 
-    async def handler(payload):
-        nonlocal calls
-        calls += 1
-        return {"status": "ok"}
+    def _register(message_id, envelope):
+        envelope["state"] = "processing"
+        return envelope
+
+    def _claim(message_id):
+        return {"state": "processing", "lease_expires_at": 9999999999}
+
+    monkeypatch.setattr("core.pubsub_dispatcher.register_or_load", _register)
+    monkeypatch.setattr("core.pubsub_dispatcher.claim", _claim)
+    monkeypatch.setattr("core.pubsub_dispatcher.mark_response", lambda *_a, **_kw: None)
+    monkeypatch.setattr("core.pubsub_dispatcher.is_terminal", lambda snapshot: snapshot.get("state") == "response_ready")
 
     payload = {"message_id": "AUD_DEDUPE_B6_001", "phone": "5511966830020", "text": "oi"}
-    for _ in range(3):
-        await dispatch(payload, handler)
-    assert calls == 1
+    first = await dispatch(payload, handler)
+    assert first["status"] == "ok"
+    handler.assert_awaited_once()
+    handler.reset_mock()
+
+    def _register_terminal(message_id, envelope):
+        envelope["state"] = "response_ready"
+        return envelope
+
+    monkeypatch.setattr("core.pubsub_dispatcher.register_or_load", _register_terminal)
+    second = await dispatch(payload, handler)
+    assert second["status"] == "duplicate"
+    assert second["message_id"] == "AUD_DEDUPE_B6_001"
+    handler.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -169,7 +188,7 @@ async def test_audio_transcription_substitutes_text_preserving_message_id():
             "audio_mimetype": "audio/ogg",
         },
     }
-    with patch("tools.audio_transcribe.transcribe_base64", new=AsyncMock(return_value="oi tudo bem")):
+    with patch("tools.audio_transcribe.transcribe_bytes", new=AsyncMock(return_value="oi tudo bem")):
         with patch("main.orchestrate", new=AsyncMock(return_value={"reply": "ok", "metadata": {}})) as orchestrate:
             await chat(_request(body))
 

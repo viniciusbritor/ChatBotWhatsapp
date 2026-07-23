@@ -106,15 +106,20 @@ class TestAudioFailureAudit:
         }
 
         with patch(
-            "tools.audio_transcribe.transcribe_url",
+            "tools.audio_transcribe.transcribe_bytes",
             new_callable=AsyncMock,
             side_effect=RuntimeError("whisper oom"),
         ):
             with patch(
-                "main.index_audio_failure_for_audit",
-                new=AsyncMock(return_value={"status": "indexed"}),
-            ) as audit_mock:
-                response = await chat(_request_with_body(body))
+                "tools.audio_transcribe._download_audio",
+                new_callable=AsyncMock,
+                return_value=b"audio-bytes",
+            ):
+                with patch(
+                    "main.index_audio_failure_for_audit",
+                    new=AsyncMock(return_value={"status": "indexed"}),
+                ) as audit_mock:
+                    response = await chat(_request_with_body(body))
 
         import json
         payload = json.loads(response.body)

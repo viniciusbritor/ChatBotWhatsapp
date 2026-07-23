@@ -3,8 +3,12 @@
 Auth: per-user OAuth via core.oauth_per_user.get_user_credentials.
 The phone parameter is mandatory (Fase D); the global GOOGLE_OAUTH_TOKEN
 fallback was removed.
+
+Owner-only: Gmail access is restricted to the phone bound to the Evolution
+instance. Any other phone is denied with an ``owner_only_capability`` error.
 """
 import base64
+import functools
 import logging
 from typing import Optional, List, Dict, Any
 
@@ -78,11 +82,34 @@ def _format_message(msg: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _owner_guard(capability: str):
+    """Allow only the owner phone to invoke Gmail capabilities."""
+    from core.owner import deny_if_not_owner, resolve_owner
+
+    def decorator(func):
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            phone = kwargs.get("phone")
+            if not phone and args:
+                phone = args[0]
+            phone = str(phone or "")
+            instance = str(kwargs.get("instance", "") or kwargs.get("_instance", ""))
+            resolution = resolve_owner(instance, fallback_phone=phone) if instance else None
+            denial = deny_if_not_owner(resolution, phone, capability)
+            if denial is not None:
+                return denial
+            return await func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
+@_owner_guard("gmail.search")
 async def search_messages(
     phone: str,
     query: str,
     max_results: int = 10,
     label_ids: Optional[List[str]] = None,
+    instance: str = "",
 ) -> Dict[str, Any]:
     """Search Gmail messages.
 
@@ -120,9 +147,11 @@ async def search_messages(
         return {"messages": [], "count": 0, "error": str(e)}
 
 
+@_owner_guard("gmail.thread")
 async def get_thread(
     phone: str,
     thread_id: str,
+    instance: str = "",
 ) -> Dict[str, Any]:
     """Get all messages in a thread.
 
@@ -143,6 +172,7 @@ async def get_thread(
         return {"messages": [], "count": 0, "error": str(e)}
 
 
+@_owner_guard("gmail.send")
 async def send_message(
     phone: str,
     to: str,
@@ -150,6 +180,7 @@ async def send_message(
     body: str,
     thread_id: Optional[str] = None,
     html: bool = False,
+    instance: str = "",
 ) -> Dict[str, Any]:
     """Send an email.
 

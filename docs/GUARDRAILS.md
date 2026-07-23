@@ -1,225 +1,149 @@
 # Guardrails e Regras Inegociáveis — ChatBotWhatsapp
 
-> Este arquivo dita as regras DURAS que todos os agentes IA devem obedecer neste projeto.
+> Regras DURAS que todos os agentes IA e humanos devem obedecer neste projeto.
+> Última atualização: **2026-07-22**.
 
-> **Documento mestre:** [`PLAN_OMNICHANNEL_AGENTES.md`](./PLAN_OMNICHANNEL_AGENTES.md) — plano consolidado.
+## 1. Segurança
 
-## Restricoes Severas (O que NUNCA fazer)
+- **Nenhuma chave de API** hardcoded em código, scripts, documentação ou
+  contexto Docker. Use `core.secrets.get_secret()` ou env var injetada via
+  Secret Manager. As credenciais expostas no commit `ad6399a` foram removidas e
+  precisam ser rotacionadas antes do próximo deploy.
+- **Upload de secrets**: APENAS `gcloud secrets versions add`. Nunca `versions
+  update` (bug 12/07/2026 corrompeu chave DeepSeek).
+- **Sem Gemini API** para inferência LLM fora do fallback STT. STT Gemini só é
+  acionado para transcrição quando Whisper falha tecnicamente **e** há
+  consentimento registrado.
+- **`agents_runtime` não expõe Swagger público** (`/docs`, `/redoc`,
+  `/openapi.json` proibidos).
+- **`/admin/*`, `/chat`, `/proactive/send` exigem Bearer SA token ou Firebase
+  ID token**. `/admin/dashboard` aceita Authorization header.
+- **Tokens não trafegam em query string**. O `?token=` antigo foi removido do
+  UI e do middleware.
+- **Webhook aceita apenas payload Evolution válido**; filtros aplicam
+  Evolution event, broadcast, fromMe e MIME.
 
-### Seguranca
-1. **Nenhuma chave de API** hardcoded em código. Sempre via `secrets_manager.get_secret()` ou env var.
-2. **Upload de secrets**: usar APENAS `gcloud secrets versions add`, NUNCA `versions update` (bug de encoding 12/07/2026 corrompeu chave DeepSeek).
-3. **Sem Gemini API** (Vertex AI ou AI Studio) para inferência. Embeddings via MiniMax embo-01 (NAO Vertex AI text-embedding-005).
-4. **agents_runtime NAO expoe Swagger publico** (`/docs`, `/redoc`, `/openapi.json` proibidos).
-5. **`/admin/*`, `/chat`, `/proactive/send` exigem Bearer SA token**. Sem excecao.
-6. **Sem UI propria em agents_runtime** — toda gestao via Portal com Firebase JWT + super-admin.
+## 2. Privacidade (LGPD)
 
-### Privacidade (LGPD)
-7. **LGPD masker obrigatorio** antes de qualquer envio para LLM externo (DeepSeek, NVIDIA, MiniMax).
-8. **PII patterns mascarados**: CPF, RG, telefone, email, cartao, CNPJ.
-9. **TTL de 90 dias** para `contatos/{phone}/historico`. Summary agregado permanece.
-10. **Audit log LGPD** (SHA-256 do conteúdo) em `audit/` — retencao 5 anos.
-11. **Opt-in duplo** para proatividade: usuario deve consentir explicitamente.
-12. **Sem mencao a dados sensiveis** em mensagens proativas.
-13. **RAG so indexa legislacao/codigo** (nao jurisprudencia com partes identificadas).
+- **LGPD masker** (`core.masker.mask_pii`) é obrigatório antes de enviar
+  texto para qualquer LLM externo.
+- PII mascarado: CPF, RG, telefone, email, cartão, CNPJ.
+- **TTL de 90 dias** para `conversation-memory-v2` e históricos de
+  `contatos/{phone}`.
+- **Audit log** em `audit/` (truncado SHA-256) com retenção de 5 anos.
+- **Opt-in duplo** para proatividade; sem menção a dados sensíveis em
+  mensagens proativas.
+- **RAG só indexa legislação/código** com mascaramento aplicado.
+- **Documentos vetoriais** devem conter `embedding_model`, `embedding_dim`,
+  `schema_version`, `created_at` e `expires_at`.
+- **Exclusão de conta** remove `usuarios`, `contatos`, `apelidos_custom`,
+  `pending-actions`, vetores privados e audit trail conforme
+  `core/lgpd.py`.
 
-### Proatividade (Calibrada)
-14. **Max 2 mensagens proativas por dia por contato**.
-15. **Max 5 mensagens proativas por dia GLOBALMENTE**.
-16. **Cooldown de 12 horas** entre mensagens proativas para o mesmo contato.
-17. **Quiet hours 21h-9h BRT** — zero proatividade.
-18. **Relevance minima 0.75** (LLM classifica).
-19. **Auto-pausa 7 dias** se user nao responder 3 proativas seguidas.
-20. **Max 5 proativas/semana por contato**.
+## 3. Proatividade
 
-### Codigo e Operacao
-21. **Sem `$` solto** no código ou em mensagens formatadas (LaTeX conflict). Usar `USD`/`BRL` ou `dolares`/`reais`.
-22. **Sem comentarios no código** (regra global).
-23. **5 tentativas por ERRO especifico** antes de parar e reportar.
-24. **Documentar ANTES de implementar** — 4 docs mandatorios atualizados por fase.
-25. **Hot-reload obrigatorio** — toda alteracao de agente/skill/tool deve propagar em <= 2min sem rebuild.
-26. **Mudanca de embedding model** requer re-indexacao completa + flag `embedding_model` no doc para identificar epoca.
-27. **Firestore Vector v2 usa somente OpenAI text-embedding-3-small 1536d** — fallback de outro modelo ou dimensao na mesma collection e proibido.
-28. **Collections vetoriais possuem nome fixo** — isolamento por `owner_hash`; telefone cru nunca integra nome de collection.
-29. **Todo documento vetorial** exige `embedding_model`, `embedding_dim`, `schema_version`, `created_at` e campo tipado `Vector`.
-30. **Memoria vetorial privada** armazena apenas texto mascarado e possui expiracao de 90 dias.
-31. **Whisper background load** obrigatorio (evita cold start penalty para texto).
-32. **Status de agentes e deterministico** — consultas operacionais nunca chamam LLM, web search ou todos os agentes.
-33. **`healthy` exige sucesso recente** — agente sem execucao ou probe valido recebe `unverified`.
-34. **Managers sao internos** — `response_identity` externa e sempre Jennifer; IDs tecnicos ficam apenas na metadata protegida.
-35. **Confirmacao exige `pending_action`** — "sim", "pode" e equivalentes nao autorizam nenhuma acao sem estado tipado vigente.
-36. **Idempotencia usa `message_id`** — proibido reutilizar resposta apenas por telefone e texto.
-37. **Reload e atomico** — falha parcial preserva o ultimo snapshot valido e remocoes do Firestore saem do cache.
-38. **Audio STT usa Whisper local** — Gemini, Vertex AI e AI Studio sao proibidos no caminho de audio.
-39. **Base64 e o transporte canonico** — URL e fallback controlado por HTTPS, allowlist e protecao SSRF.
-40. **Audio possui limites duros** — tamanho maximo configurado e duracao maxima de 5 minutos.
-41. **Transcricao e mascarada antes da orquestracao** — audio, base64 e texto cru nunca entram em logs.
-42. **Webhook Evolution e unico** (Fase A 2026-07-21) — `POST /webhook` do `agents-runtime` e o unico entry point de mensagens WhatsApp. Proibido criar proxies externos ou duplicatas.
-43. **Extrator canonico de payload Evolution** (Fase A 2026-07-21) — toda alteracao no formato do payload Evolution passa por `core/evolution_webhook.py:extract_envelope`. Nenhum codigo fora desse modulo filtra ou normaliza mensagens WhatsApp.
-44. **`/webhook` nao exige autenticacao** (Fase A 2026-07-21) — rota publica chamada pela Evolution API. Filtros anti-spam (fromMe, broadcast, instance vazia) sao obrigatorios como compensacao.
+- Máx. 2 mensagens proativas/dia por contato.
+- Máx. 5 mensagens proativas/dia globalmente.
+- Cooldown de 12 h entre mensagens proativas para o mesmo contato.
+- Quiet hours 21h–9h BRT — zero proatividade.
+- Relevance mínima 0,75.
+- Auto-pausa 7 dias se o usuário não responder 3 proativas seguidas.
+- Máx. 5 proativas/semana por contato.
 
-45. **Falha de transcricao nao descarta a mensagem** — quando nao existe texto alternativo, indexar somente marcador mascarado de auditoria no RAG; nunca armazenar audio bruto, URL ou transcricao parcial.
-46. **Fallback de `message_id` e observavel sem PII** — emitir WARN com `owner_hash`, instancia e indicador de nao idempotencia; telefone bruto e proibido no log.
-47. **OAuth e per-user** (Fase C 2026-07-21) — `core.oauth_per_user.get_valid_user_token` e a fonte canonica de access_token; o secret global `google-oauth-token` e legado e sera removido quando todos os managers (`manager-calendar`, `manager-drive`, `manager-email`) consumirem `core/oauth_per_user.py`. Estado assinado via HMAC (`OAUTH_STATE_SECRET`) com TTL de 600s.
-53. **`phone` obrigatorio nos managers** (Fase D 2026-07-21) — `tools/google_calendar.py`, `tools/google_drive.py` e `tools/google_gmail.py` rejeitam chamada sem `phone` nao vazio (`RuntimeError("phone_required_for_*_oauth")`). O fallback global `core.secrets.get_secret("GOOGLE_OAUTH_TOKEN")` foi removido do codigo de producao. Workers (`ata_worker`, `proactive_worker`) iteram por usuario via `ATA_WORKER_PHONES` / `PROACTIVE_WORKER_PHONES` (CSV) ou pela collection `usuarios/` com `google_oauth_token` setado.
-54. **Privacy-guard automatico** (Fase E 2026-07-21) — `orchestrator.py` invoca `agent-privacy-guard` automaticamente quando intent pessoal (`is_calendar`/`is_drive`/`is_email`) e mensagem em grupo (`@g.us`). Membro nao confirmado gera `pending_action: group_consent` (TTL 300s); usuario nao registrado recebe link do Portal. Coberto por `tests/test_orchestrator.py::TestPrivacyGuard` (4 cenarios).
-55. **Worker deploy exige Dockerfile auditavel** (Fase E 2026-07-21) — `scripts/check_lgpd_compliance.py` exige `Dockerfile`, `ata_worker/Dockerfile` e `proactive_worker/Dockerfile` no `REQUIRED_FILES`. Job `proactive-worker-test` NAO consulta mais `google-oauth-token`; mantem apenas `DEEPSEEK_API_KEY` e `AGENTS_RUNTIME_SA_TOKEN`.
-56. **Cleanup post-merge documentado** (Fase F 2026-07-21) — apos merge de `test` em `main`, executar procedures em `docs/fases/fase_F/`: deletar secrets orfaos (`whatsapp-agente-url`, `agents-runtime-sa-token-clean`, `google-oauth-token`), deletar pasta local `WhatsappAgente/`, arquivar ou deletar repo `viniciusbritor/WhatsappAgente` no GitHub, configurar OAuth Client no Google Cloud Console e executar fluxo manual para `+5511966830020`. Ate a conclusao desses passos, o sistema permanece em estado de transicao.
-57. **Anti-retry-storm no Pub/Sub push** (2026-07-22) — `agents_runtime/main.py:/pubsub/push` NUNCA retorna HTTP 500 para evitar loop infinito de reentrega Pub/Sub. Regras obrigatorias:
-   - **Resposta sempre 200** (ack Pub/Sub) para qualquer falha de negocio (phone vazio, send_text falhou, OAuth expirado). Payload retornado: `{"status":"ok","delivered":false,...}` com logs WARNING estruturados para observabilidade.
-   - **DLQ obrigatorio** em toda subscription Pub/Sub: `whatsapp-messages-dlq` com `--max-delivery-attempts=5` (minimo do Pub/Sub; Pub/Sub rejeita valores <5). Mensagens que esgotam 5 tentativas vao para DLQ para inspecao manual.
-   - **Nunca retornar 500** sem justificativa explicita de retry (ex: orchestrator crash, OOM, deploy incompleto). Se o retry for legitimo, documentar em `docs/HARNESS.md` secao "Pub/Sub retry policy".
-   - **Custo por request Pub/Sub**: ~$0.0001 + compute (CPU+RAM). Retry-storm de 9k requests/dia gera ~$1/dia SO em reentregas. Bloquear este caminho e obrigatorio antes de qualquer deploy em producao.
-   - **Test obrigatorio** em `tests/test_main_pubsub.py::test_pubsub_push_delivery_failure_does_not_retry_to_avoid_storm` valida o comportamento 200 (nao 500) em falha de send_text.
-   - **Causa raiz historica** (commit `bdda61f`): mensagens antigas com `phone` vazio reentregadas em loop infinito geraram 9.071 requests/24h. Fix: skip de send_text quando phone vazio + log warning + return 200.
-58. **Cloud Run billing safety** (2026-07-22) — qualquer configuracao que possa gerar custo recorrente sem controle de servico deve ser auditada:
-   - **min-instances > 0** em servicos de dev/test e PROIBIDO sem justificativa documentada (exceto producao com alerta de budget ativo). Custo idle: ~$0.0001/segundo/vCPU = ~$3.46/dia para 2vCPU+2GiB 24/7.
-   - **CPU-THROTTLING: false** (--no-cpu-throttling) e PROIBIDO em dev/test. Cada instancia cobra CPU continuamente mesmo idle.
-   - **maxScale** deve ser definido explicitamente (default e 100 = risco de bill shock).
-   - **Subscriptions Pub/Sub** sem DLQ + max-delivery-attempts e PROIBIDO (causa retry-storm). Toda subscription precisa de DLQ.
-   - **Audit obrigatorio** antes de qualquer deploy: rodar `gcloud run services describe --format="value(spec.template.metadata.annotations[autoscaling.knative.dev/minScale],spec.template.metadata.annotations[autoscaling.knative.dev/maxScale])" --region=us-central1` e auditar.
-   - **Caso real de billing** (22/07/2026): R$ 1.070,71 em 30 dias de CPU ociosa por CPU-THROTTLING: false em 3 servicos Cloud Run. Contestacao GCP aberta (case 73572220, projeto coherence-ominichannel-fs, atendente Don Don).
-57. **Guardrail de Custos Cloud Run (Scale-to-Zero Mandatorio)** (2026-07-22) — E estritamente PROIBIDO fazer deploy de qualquer servico Cloud Run com `minScale > 0` ou `--no-cpu-throttling` (`CPU-THROTTLING: false`) em ambientes de desenvolvimento, teste ou homologacao. Todos os deploys automatizados via CI/CD e comandos manuais devem impor explicitamente `--min-instances=0` e `--cpu-throttling`. Alteracoes em producao exigem verificacao previa de custos.
+## 4. Pub/Sub (regra nova pós-44k)
 
-48. **Logs estruturados em BRT** (Fase C 2026-07-21) — todo log de producao usa `core.logging.JsonFormatter`, com timestamp `America/Sao_Paulo` em milissegundos e campos extras fora do whitelist padrao do `logging.LogRecord`.
-49. **Cliente Evolution canonico** (Fase C 2026-07-21) — toda chamada de envio de mensagem para a Evolution API passa por `core.evolution_client.send_text`. Proibido chamar `httpx`/`requests` direto para `https://evolution.coherenceai.com.br`.
-50. **Gate local zero warning** (Fase C 2026-07-21) — `pytest -q tests/` deve retornar zero `failed`, zero `error` e zero warning do projeto. DeprecationWarning de `google._upb._message` (third-party protobuf) e filtrado via `pyproject.toml` por estar fora do codigo do projeto.
-51. **Cascata LLM inicia no MiniMax-M2.7-highspeed** (Fase C 2026-07-21) — a ordem canonica do cascade em `core/llm_provider.py` e `minimax-hs -> minimax -> deepseek`. Alterar a ordem exige atualizacao dos testes de cascade e aprovacao explicita no `DIARIO_BORDO`.
-52. **`tzdata` obrigatorio em dev/test** (Fase C 2026-07-21) — `ZoneInfo("America/Sao_Paulo")` precisa de `tzdata` em runners Linux e Windows sem timezone local. A dependencia esta em `requirements-dev.txt`.
+- Um único tópico (`chatbotwhatsapp-messages`) + uma assinatura
+  (`agents-runtime-consumer`) + DLQ nativa (`chatbotwhatsapp-dlq`).
+- Idempotência obrigatória via ledger `message-processing` no Firestore.
+- Handler deve retornar:
+  - **200** para mensagem já processada, falha permanente ou sucesso.
+  - **503** somente em falha transitória (timeout, OOM, infra).
+- Publicação manual na DLQ foi removida.
+- Mensagens com `message_id` vazio recebem ID determinístico baseado em
+  `(instance, remote_jid, publish_time)` antes de qualquer publicação.
+- ACK deadline configurado em 60 s para tolerar Whisper + LLM.
 
-## Regras de Ouro (O que SEMPRE fazer)
+## 5. WhatsApp
 
-### Persona
-1. **Jennifer e assistente corporativa** — tom profissional + humor leve + leve flirt motivacional. Zero linguagem explicita.
-2. **Mensagens curtas** (max 4 linhas), exceto atas ou instrucoes.
-3. **Portugues brasileiro**, fuso `America/Sao_Paulo`.
-4. **1-2 emojis** por mensagem.
-5. **Typing effect sempre**: `delay_ms = min(0.6 x palavras x 1000, 15000)`.
+- Tick azul (`markMessagesAsRead`) é chamado automaticamente para todo webhook
+  válido. Falha no tick vira métrica mas nunca bloqueia o webhook.
+- Tick não bloqueia nem repete o webhook: timeout máximo 5 s, sem retry.
+- Remetente precisa coincidir com `owner_phone` da instância Evolution para
+  acessar Gmail, Drive ou Calendar.
 
-### Proatividade (Anti-Desagrado)
-6. **Templates PROIBIDOS** (hard block no orchestrator):
-   - "Oi, tudo bem?" sem contexto
-   - "Senti sua falta"
-   - Elogios forcados ("Voce e incrivel!")
-   - Memes/piadas aleatorias
-   - Mensagens motivacionais genericas
-   - "Bom dia!" sem motivo
-7. **Comandos do usuario** (afetam modo proativo):
-   - `Jennifer, silencio` → para TUDO
-   - `Jennifer, modo zen` → reduz 50%
-   - `Jennifer, modo turbo` → ate cap 2/dia
-   - `Jennifer, so emergencias` → so criticas
-   - `Jennifer, retomar` → normal
-   - `Jennifer, grupo off/on` → toggle grupo
-8. **Auto-avaliacao semanal** (domingo 20h BRT): ajusta thresholds baseado em engagement.
-9. **Em grupo**: mensagem GERAL visivel a todos (sem @mention obrigatoria).
-10. **Triggers permitidos**: Calendar 1h antes + follow-up 1-2h + topicos 2x/semana + aniversario.
+## 6. Áudio
 
-### Memoria
-11. **Apelidos com consentimento**: perguntar 1x "Posso te chamar de X?" e respeitar a resposta.
-12. **Nunca inventar apelido** — usar apenas do dict built-in (200+ nomes BR) ou perguntar.
-13. **Iteracao de contato por NOME** (preferred_name se consentiu, senao display_name), internamente por phone.
-14. **Auto-aprendizado exige confirmacao** no chat antes de aplicar patch em system_prompt.
-15. **WhatsApp webhook DEVE processar grupos** (`@g.us`) — mudanca do comportamento atual.
-16. **Mensagem de boas-vindas obrigatoria** ao entrar em grupo (1x).
-17. **Proatividade em grupo = sempre permitida** apos entrada (sem opt-in extra).
-18. **LGPD em grupos** — masker antes de exibir nome/mencao de outros membros.
+- Whisper local é o caminho padrão; download valida host, MIME, tamanho
+  (25 MB), duração (5 min) e ausência de redirecionamento.
+- Fallback Gemini 2.5 Flash só dispara quando Whisper falha tecnicamente **e**
+  `STT_FALLBACK_CONSENT=true` ou `extra.audio_consent_external=true`.
+- Limite diário do fallback: 20 chamadas (`STT_FALLBACK_DAILY_LIMIT`).
+- Áudio bruto nunca é persistido; temporários são apagados em `finally`.
+- Transcrição é mascarada antes de qualquer embedding ou LLM.
 
-### LLM
-19. **Cascata obrigatoria**: DeepSeek V4 Flash → NVIDIA NIM → MiniMax M3.
-20. **Escalacao Flash → Pro por heuristica** (threshold -2 default).
-21. **Static-first prompts** para otimizar cache automatico do DeepSeek.
-22. **Thinking desabilitado por padrao** (opt-in por agente via `thinking: enabled` no Firestore).
-23. **Fallback gracioso** quando todos provedores LLM falham (mensagem + log).
+## 7. Firestore Vector vs Firestore plain
 
-### Audio
-24. **Whisper self-hosted** no agents_runtime (faster-whisper base CPU int8).
-25. **Mensagem amigavel** no cold start: "1o audio demora um pouquinho".
-26. **Max 5min audio** (timeout 120s do Cloud Run).
+23/07/2026: o Firestore Vector é **restrito a documentos** (livros,
+editais, base coletiva e pública). Toda interação do chat é persistida
+em Firestore plain (`message-history/{history_id}`) com indexação por
+`owner_hash = sha256(phone_digits)[:32]`.
 
-### WhatsApp
-27. **Webhook Evolution tem retry automatico 3-5x com backoff** — zero perda de mensagens mesmo durante cold start.
-28. **Min-instances=0 em whatsapp-agente** e agents_runtime — ping Cloud Scheduler 5min mantem warm.
-29. **Cold start 5-15s esperado** em horario nao-comercial (0h-7h).
+- `index_conversation_message()` — hot path: grava em
+  `message-history` plain **e nunca** em vector. Falhas de Firestore
+  são logadas e o retorno segue 200 (a interação não trava).
+- `scripts/ingest_owner_knowledge.py` e
+  `scripts/ingest_collective_memory.py` — únicos locais onde embedding
+  + Firestore Vector são aplicados.
+- `search_conversation_memory()` lê **plain** Firestore filtrando
+  `where("owner_hash", ==, _owner_hash(phone))` e ordena por
+  `created_at` desc. Resultado devolve `[]` quando `phone` é vazio.
+- A coleção vetorial legada `conversation-memory-v2` não é mais
+  alimentada em produção; pode ser removida após confirmação das novas
+  gravações.
 
-## Regras de Seguranca / Privacidade
+## 7. Embeddings
 
-1. Nenhuma chave de API, credencial ou token deve ser escrito no código em hardcode (plaintext).
-2. **Masker obrigatorio** em todas as camadas: input do usuario, tool calls, output do LLM, mensagens proativas.
-3. **Agent-morality**: linguagem grosseira/assedio → recusa educada + informacao sobre legislacao vigente (RAG em `agente-knowledge-{phone}`).
-4. **Jennifer NAO reproduz** linguagem vulgar, ofensiva ou de baixo calao mesmo se provocada.
-5. **Conteudo adulto**: proibido.
-6. **Webhook Evolution**: validar `fromMe=false`, `remoteJid` nao-broadcast.
+- OpenAI `text-embedding-3-small` (1536d) é o único provedor aceito em v2.
+- Nenhuma coleção vetorial aceita mistura de modelos/dimensões — toda
+  inserção deve carregar `embedding_model`/`embedding_dim`.
+- Coleções filtram `owner_hash == owner_id` em toda leitura.
+- Base pública (`public-knowledge-v2`) **nunca** recebe `owner_hash`.
 
-## Decisoes Resolvidas (nao mais pendentes)
+## 8. OAuth Google
 
-| Pendencia | Resolucao |
-|---|---|
-| Embedding provider | **MiniMax embo-01 (1536d)** via LangChain |
-| RAG collection naming | **Por phone do master**: `agente-knowledge-{phone}` |
-| Whisper load strategy | **Background load** (sem cold start penalty para texto) |
-| Min-instances | **0** + ping Cloud Scheduler 5min (ambos servicos) |
-| RAG pre-seed | **~10 docs curados** (Codigo Penal, Lei Maria da Penha, etc.) |
-| ~~whatsapp-agente min~~ (removido 2026-07-21) | ~~0 + ping (aceita cold start)~~ |
-| Proatividade em grupo | **Sempre permitida** apos entrada + welcome message |
-| Proatividade em grupo (formato) | **Mensagem GERAL** (sem @mention obrigatoria) |
-| Frequencia proativa | **2/dia/contato, 5/dia global, cooldown 12h** |
+- Escopos mínimos obrigatórios: `gmail.readonly + gmail.send`,
+  `drive.file + drive.readonly`, `calendar + calendar.events`.
+- Tokens persistidos **sem** `client_secret` e **sem** `client_id`.
+- Apenas o telefone do proprietário da instância pode chamar Gmail/Drive.
+- Revogação disponível via `POST /oauth/google` (re-login) ou remoção
+  manual no Firestore `usuarios/{phone}`.
 
-## LGPD Checklist por Fase
+## 9. Código e operação
 
-- [x] Fase 0: 4 docs mandatorios criados
-- [ ] Fase 1: masker.py criado e testado
-- [ ] Fase 3: masker aplicado antes de LLM
-- [ ] Fase 3: agent-morality com RAG respeitando LGPD
-- [ ] Fase 4: Portal UI com toggle "exportar meus dados" (Art. 18)
-- [ ] Fase 5: LGPD audit em cada webhook
-- [ ] Fase 7: TTL 90d para historico + opt-out completo
+- Sem `$` solto em código, mensagens ou documentação (conflito LaTeX).
+- Sem comentários no código.
+- 5 tentativas por erro específico antes de parar e reportar.
+- Documentação canônica: somente `docs/` na raiz. `agents_runtime/docs/` é
+  histórico e será removido.
+- Hot-reload de `agents/skills/tools` em ≤ 2 min sem rebuild (polling
+  120 s).
+- `embedding_model` no documento identifica época; mudança exige
+  re-indexação completa.
+- `response_identity` externa é sempre Jennifer; IDs internos ficam apenas
+  na metadata protegida.
+- `pending_action` é obrigatório para confirmar consentimento.
 
-## Referencias
+## 10. CI/CD e qualidade
 
-- [PLAN_OMNICHANNEL_AGENTES.md](./PLAN_OMNICHANNEL_AGENTES.md) - Plano completo
-- [ARQUITETURA.md](./ARQUITETURA.md) - Componentes
-- [DIARIO_BORDO.md](./DIARIO_BORDO.md) - Decisoes tecnicas
-- `Coherence_Portal/docs/GUARDRAILS.md` - Guardrails globais do Portal
+- `scripts/check_lgpd_compliance.py` roda em todo `cloudbuild-*.yaml`.
+- `ruff` + `mypy` + `pytest -q` obrigatórios antes do merge.
+- Integração Pub/Sub real (`RUN_PUBSUB_E2E=1`) roda no Cloud Build da branch
+  `test`.
+- Carga Locust fica em `tests/load/` e só roda com `RUN_LOAD_TEST=1`.
 
-## Guardrails Operacionais (17/07/2026)
+## 11. Pendências
 
-### G1-G6: WhatsappAgente (anti-spam e resiliência)
-
-| Guardrail | Regra | Onde | Penalidade |
-|---|---|---|---|
-| **G1** | Webhook NUNCA bloqueia. Responde 200 em <1s. Processamento async. | `whatsapp-agente/agente/main.py` /webhook | Timeout >1s = Evolution retry = spam |
-| **G2** | Idempotência por content hash (phone+texto). Mesma msg não processada 2x em 120s. | `_is_duplicate()` + `_content_hash()` | Duplicata gera fallback em cascata |
-| **G3** | Máximo 1 fallback por telefone a cada 120s. | `_can_send_fallback()` | Usuário recebe N mensagens "Demorou mais" |
-| **G4** | Máximo 5 mensagens enviadas por telefone por minuto. Excedeu → bloqueia. | `_check_outbound_rate()` | Spam para o usuário |
-| **G5** | Circuit breaker: 3 falhas seguidas no agents-runtime → pausa 60s. | `_circuit_breaker_allowed()` | Degradação controlada, não cascata |
-| **G6** | MESSAGES_UPDATE e fromMe=true NUNCA processam webhook. Só MESSAGES_UPSERT de usuário. | `extract_message()` | Loop infinito: Jennifer responde → Evolution notifica → webhook processa → timeout → fallback → repete |
-
-### G7: Orchestrator (eficiência)
-
-| Guardrail | Regra | Onde | Penalidade |
-|---|---|---|---|
-| **G7** | Saudações NUNCA usam tool loop. Apelido é pré-resolvido do JSON estático. 1 chamada LLM. | `orchestrator.py` `_prefetch_nickname()` | 2 chamadas LLM (10-30s) vs 1 chamada (5-10s) |
-
-### G8: Instância mínima
-
-| Guardrail | Regra | Onde |
-|---|---|---|
-| **G8** | `min-instances=1`. Nunca 0. Cold-start quebra WhatsApp. | `cloudbuild-test.yaml` |
-
-### G9: OAuth Per-User
-
-| Guardrail | Regra | Onde |
-|---|---|---|
-| **G9** | Tools Google (Calendar/Drive/Gmail) sempre usam token do usuário (phone). Fallback para token global se não existir. | `tools/google_*.py` `_get_credentials(phone)` |
-
-### Monitoramento
-
-| Métrica | O que observar | Alerta |
-|---|---|---|
-| Webhook latency | `POST /webhook` duração | >1s = ALERTA |
-| Duplicate webhooks | `skip: duplicate` no log | >3/min = investigar |
-| Circuit breaker | `CIRCUIT BREAKER OPEN` no log | Imediato |
-| Fallback rate | `Fallback throttled` no log | >1/hora = agents-runtime lento |
-| Outbound rate limit | `RATE LIMIT HIT` no log | >0 = anomalia |
-- Skill `lgpd_compliance` - Implementacao de LGPD
+- Rotação efetiva das credenciais expostas no commit `ad6399a`.
+- Backfill de embeddings para novos `owner_hash` da coleção legada
+  `contatos/.../historico`.
+- Remoção completa do proxy `WhatsappAgente` e do serviço legado.

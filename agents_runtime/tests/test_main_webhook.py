@@ -33,12 +33,18 @@ def _request(body=None, error=None):
     return request
 
 
+def _noop(*args, **kwargs):
+    return None
+
+
 @pytest.mark.asyncio
 async def test_webhook_queues_valid_message():
     publisher = MagicMock()
     publisher.publish.return_value = "pubsub-001"
     with patch("core.pubsub_publisher.get_publisher", return_value=publisher):
-        response = await evolution_webhook(_request(VALID_PAYLOAD))
+        with patch("core.message_ledger.register_or_load", return_value=None):
+            with patch("main._safe_mark_read", new=AsyncMock()):
+                response = await evolution_webhook(_request(VALID_PAYLOAD))
 
     payload = json.loads(response.body)
     assert response.status_code == 200
@@ -54,7 +60,9 @@ async def test_webhook_publishes_expected_attributes():
     publisher = MagicMock()
     publisher.publish.return_value = "pubsub-002"
     with patch("core.pubsub_publisher.get_publisher", return_value=publisher):
-        await evolution_webhook(_request(VALID_PAYLOAD))
+        with patch("core.message_ledger.register_or_load", return_value=None):
+            with patch("main._safe_mark_read", new=AsyncMock()):
+                await evolution_webhook(_request(VALID_PAYLOAD))
 
     _, kwargs = publisher.publish.call_args
     assert kwargs["topic"] == "chatbotwhatsapp-messages"
@@ -109,8 +117,10 @@ async def test_webhook_returns_generic_publish_error():
     publisher = MagicMock()
     publisher.publish.side_effect = RuntimeError("sensitive internal detail")
     with patch("core.pubsub_publisher.get_publisher", return_value=publisher):
-        with pytest.raises(HTTPException) as exc:
-            await evolution_webhook(_request(VALID_PAYLOAD))
+        with patch("core.message_ledger.register_or_load", return_value=None):
+            with patch("main._safe_mark_read", new=AsyncMock()):
+                with pytest.raises(HTTPException) as exc:
+                    await evolution_webhook(_request(VALID_PAYLOAD))
     assert exc.value.status_code == 503
     assert exc.value.detail == "publish_failed"
     assert "sensitive" not in exc.value.detail
@@ -122,5 +132,7 @@ async def test_webhook_accepts_lowercase_event():
     publisher.publish.return_value = "pubsub-lowercase"
     payload = {**VALID_PAYLOAD, "event": "messages.upsert"}
     with patch("core.pubsub_publisher.get_publisher", return_value=publisher):
-        response = await evolution_webhook(_request(payload))
+        with patch("core.message_ledger.register_or_load", return_value=None):
+            with patch("main._safe_mark_read", new=AsyncMock()):
+                response = await evolution_webhook(_request(payload))
     assert json.loads(response.body)["queued"] is True

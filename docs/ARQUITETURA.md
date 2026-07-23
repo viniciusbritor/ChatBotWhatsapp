@@ -1,235 +1,200 @@
-# Arquitetura do Projeto — ChatBotWhatsapp
+# Arquitetura — ChatBotWhatsapp (Agentes Omnichannel)
 
-> **Objetivo Principal:** Modulo `omnichannel-agentes` no Coherence Portal + servico `agents_runtime` (Cloud Run) com Jennifer (assistente corporativa) + 4 Managers + 3 Specialists, com hot-reload via Firestore.
+> Última revisão: **2026-07-23** — reflete o estado pós-limpeza (proxy
+> `whatsapp-agente` deletado, trigger `deploy-agents-runtime-test`
+> desabilitado, backlog Pub/Sub drenado). Ver `docs/DIARIO_BORDO.md`
+> para o histórico completo do dia.
 
-> **Documento mestre:** [`PLAN_OMNICHANNEL_AGENTES.md`](./PLAN_OMNICHANNEL_AGENTES.md) — plano consolidado completo.
+## 1. Objetivo
 
-## Stack Tecnologico
+Um único runtime FastAPI (`agents-runtime`) responde a mensagens do
+WhatsApp via Evolution API, orquestra capacidades por agente
+(configuração em Firestore), consulta Gmail/Drive/Calendar
+**somente para o proprietário da conta Evolution** e mantém uma base
+vetorial privada por proprietário em Firestore Vector. A documentação
+oficial é **somente esta pasta `docs/` na raiz**; cópias em
+`agents_runtime/docs/` foram removidas em 22/07/2026.
 
-| Camada | Tecnologia |
-|---|---|
-| Linguagem | Python 3.12 |
-| Web framework | FastAPI + Uvicorn |
-| LLM framework | Orquestrador Python async com tool calling |
-| LLM primario | MiniMax M2.7 Highspeed |
-| LLM fallback | MiniMax M3 → DeepSeek V4 Flash |
-| OAuth por usuario | `core/oauth_per_user.py` (Fase C 2026-07-21) com HMAC state, refresh automatico e persistencia em `usuarios/{phone}/google_oauth_token`. `phone` e obrigatorio nos 3 managers (Fase D 2026-07-21); secret global `GOOGLE_OAUTH_TOKEN` removido |
-| Cliente Evolution | `core/evolution_client.py` (Fase C 2026-07-21) — fonte canonica de envio de mensagens WhatsApp |
-| Logs estruturados | `core/logging.py:JsonFormatter` (Fase C 2026-07-21) — JSON com timestamp BRT em milissegundos |
-| Compliance LGPD | `scripts/check_lgpd_compliance.py` (Fase C 2026-07-21) — gate local de arquivos obrigatorios e snippets canonicos. Fase E: passou a exigir `Dockerfile`, `ata_worker/Dockerfile` e `proactive_worker/Dockerfile` |
-| Embeddings RAG | OpenAI text-embedding-3-small (1536d), sem fallback entre dimensoes |
-| Vector DB | Firestore Vector v2 (`conversation-memory-v2`, `agent-knowledge-v2`, `public-knowledge-v2`) |
-| Datastore | Firestore (coherence-ominichannel-fs) |
-| Secrets | GCP Secret Manager (upload via `versions add` apenas) |
-| Audio STT | faster-whisper base CPU int8 (self-host, background load) |
-| Web search | Serper.dev (com cache 24h) |
-| Deploy | Cloud Run `agents-runtime-test` (region us-central1) |
-| CI/CD | Cloud Build (push em `test` → deploy automatico) |
-| Frontend (UI do modulo) | Coherence Portal React + FastAPI proxy |
+## 2. Stack
 
-## Componentes Principais
+- **Linguagem**: Python 3.12 (imagem `python:3.12-slim`).
+- **Framework**: FastAPI 0.115 + Uvicorn.
+- **Mensageria**: Pub/Sub (`chatbotwhatsapp-messages` + DLQ nativa
+  `chatbotwhatsapp-dlq`).
+- **Persistência**: Firestore (collections canônicas abaixo) + GCS para
+  arquivos-fonte da base de conhecimento.
+- **Embeddings**: OpenAI `text-embedding-3-small` (1536d), coleção
+  `*-v2`.
+- **LLM**: cascata MiniMax M2.7 Highspeed → MiniMax M3 → DeepSeek V4
+  Flash.
+- **STT**: Whisper local (`faster-whisper`, `base/int8`). Fallback
+  controlado para Gemini 2.5 Flash apenas em falha técnica do Whisper
+  **e** com consentimento explícito.
+- **TTS / tick azul**: `markMessagesAsRead` (Evolution v2) automático
+  em cada webhook válido.
+- **Segredos**: Google Secret Manager, projeto
+  `coherence-ominichannel-fs`.
 
-1. **agents_runtime** (Cloud Run) — Orquestrador + tools + specialists + webhook Evolution + publisher Pub/Sub
-2. **Coherence Portal** (existente) — UI de gestao `/admin/agents/*`
-3. **ata_worker** (Cloud Run Job) — Geracao de atas pos-reuniao
-4. **proactive_worker** (Cloud Run Job) — Mensagens proativas (calibrado, 2/dia max)
-
-> **Removido 2026-07-21 (Fase A):** `WhatsappAgente` thin proxy. O webhook Evolution
-> foi consolidado em `agents_runtime/main.py` rota `/webhook`. O extrator canonico
-> vive em `core/evolution_webhook.py` e cobre texto, audioMessage, extendedTextMessage,
-> grupo, broadcast e fromMe.
->
-> **Cleanup pendente (Fase F):** a pasta local `C:\Users\vinic\workspace_antigravity\ChatBotWhatsapp\WhatsappAgente\` e o repo `viniciusbritor/WhatsappAgente` permanecem ate a execucao manual pelo usuario (ver `docs/fases/fase_F/cleanup_repo.md`). Os secrets orfaos `whatsapp-agente-url` e `agents-runtime-sa-token-clean` tambem serao deletados via procedure manual (ver `docs/fases/fase_F/cleanup_secrets.md`).
-
-## Fluxo de Dados Principal
+## 3. Topologia
 
 ```mermaid
-flowchart TB
-    subgraph WS["GCP: whatsapp-server VPC existente"]
-        EVO["Evolution API :8080"]
-    end
-
-    subgraph FS["GCP: coherence-ominichannel-fs"]
-        AR["agents_runtime<br/>Cloud Run test<br/>/webhook + /pubsub/push + /chat"]
-        ORCH["Orchestrator async + tool calling"]
-        TOOLS["Tool Executors<br/>pre-registered"]
-
-        subgraph SPECIALISTS["Specialists"]
-            INT["agent-intimacy"]
-            LRN["agent-learning"]
-            MOR["agent-morality<br/>RAG Firestore Vector"]
-            ATA["ata-generator"]
-        end
-
-        subgraph MANAGERS["Managers"]
-            MC["manager-calendar"]
-            MD["manager-drive"]
-            ME["manager-email"]
-            MW["manager-web"]
-        end
-
-        PRO["proactive_worker<br/>Cloud Scheduler 15min"]
-        ATW["ata_worker<br/>Cloud Scheduler 10min"]
-
-        PORTAL["Coherence Portal<br/>React + FastAPI"]
-        FS_DB[("Firestore<br/>agents, skills, tools,<br/>contatos, knowledge,<br/>grupos")]
-        SM["GCP Secret Manager"]
-        PUB["Pub/Sub<br/>whatsapp-messages"]
-    end
-
-    EVO -->|"HTTPS POST /webhook"| AR
-    AR -->|"publish"| PUB
-    PUB -->|"push /pubsub/push"| AR
-    AR --> ORCH
-    ORCH --> MANAGERS
-    ORCH --> SPECIALISTS
-    MANAGERS --> TOOLS
-    SPECIALISTS --> TOOLS
-    MOR --> FS_DB
-    PRO -->|"POST /proactive/send"| AR
-    ATW -->|"tool calls"| TOOLS
-    PORTAL -->|"proxy CRUD"| AR
-    AR -->|"read/write"| FS_DB
-    AR -->|"secrets"| SM
+flowchart LR
+    WA["WhatsApp"] --> EVO["Evolution API"]
+    EVO --> WEB["Cloud Run único: /webhook"]
+    WEB --> LEDGER[("Firestore: message-processing")]
+    WEB --> PS["Pub/Sub chatbotwhatsapp-messages"]
+    PS --> PUSH["Mesmo Cloud Run: /pubsub/push"]
+    PUSH --> ORCH["Jennifer orchestrator"]
+    ORCH --> TOOLS["Capacidades Gmail/Drive/Calendar + RAG"]
+    TOOLS --> VECT[("Firestore Vector por owner")]
+    ORCH --> EVO
+    ORCH --> PORTAL["Coherence Portal (UI Agentes Omnichannel)"]
+    PORTAL -->|"Authorization: Bearer ou Firebase"| WEB
+    SECRETS["Secret Manager"] --> WEB
 ```
 
-## Fluxo de Mensagem WhatsApp (texto + audio)
+Não há mais proxy `WhatsappAgente` nem serviço Cloud Run secundário
+(`whatsapp-agente` e `whatsapp-agente-test` foram deletados em
+23/07/2026). Toda a mensageria passa por esta única instância.
+Builds automáticos estão desabilitados; ver `HARNESS.md` § "Deploy
+Cloud Run (TEST) — modo manual".
+
+## 4. Componentes
+
+| Componente | Responsabilidade |
+| --- | --- |
+| `main.py` | FastAPI, lifecycle, endpoints `/webhook`, `/pubsub/push`, `/chat`, `/admin/*`. |
+| `orchestrator.py` | Detecção de intenção, roteamento para capabilities, prefetch Calendar/Email/Drive, indexação RAG. |
+| `agent_loader.py` | Polling 120 s para `agents`, `skills`, `tools` e snapshot atômico. |
+| `core.message_ledger` | Ledger Firestore para idempotência transacional de mensagens. |
+| `core.pubsub_dispatcher` | Lease, retry-control e terminalidade por mensagem. |
+| `core.evolution_client` | `send_text` e `mark_messages_read` na Evolution v2. |
+| `core.audio_transcribe` | Wrapper Whisper com fallback controlado para Gemini 2.5 Flash. |
+| `core.owner` + `core.owner_guard` | Resolução do proprietário da instância Evolution e aplicação do guard em Gmail/Drive/Calendar. |
+| `tools/google_*` | Integrações Google com escopos mínimos e guard do proprietário. |
+| `core.rag` | Embeddings OpenAI e busca vetorial filtrada por `owner_hash`. |
+| `core.module_ui` | Plano de controle HTML renderizado em `/admin/dashboard`. |
+| `scripts/ingest_owner_knowledge.py` | Ingestão de livros/editais em GCS para a coleção do proprietário. |
+
+## 5. Fluxo da mensagem
 
 ```mermaid
 sequenceDiagram
-    autonumber
-    actor User as WhatsApp User
-    participant EVO as Evolution API
-    participant AR as agents_runtime
-    participant WHISPER as Whisper (self-host)
-    participant LLM as MiniMax com fallback DeepSeek
-    participant FS as Firestore
-
-    User->>EVO: mensagem (texto/audio)
-    EVO->>AR: POST /webhook MESSAGES_UPSERT
-    Note over AR: core/evolution_webhook.py<br/>extrai texto, audio_url, message_id,<br/>filtra fromMe/broadcast/grupo vazio
-    AR->>AR: publish envelope no Pub/Sub whatsapp-messages
-    AR-->>EVO: 200 OK em <1s (sem bloqueio)
-
-    AR->>AR: /pubsub/push recebe o envelope<br/>(dedupe por message_id)
-    AR->>AR: LGPD masker no texto
-
-    alt has_audio == true
-        AR->>WHISPER: transcribe_base64(audio)
-        WHISPER-->>AR: text_transcrito
-        AR->>AR: LGPD masker no texto transcrito
-    end
-
-    AR->>LLM: MiniMax M2.7 Highspeed<br/>(com tools + skills do Firestore)
-    LLM-->>AR: response_text
-    Note over AR: Heuristica de confianca<br/>fallback MiniMax M3 e DeepSeek
-    AR->>FS: salva em contatos/{phone}/historico/{msg_id}
-    AR->>EVO: POST /message/sendText (delay, presence)
-    EVO->>User: typing + mensagem
+    participant Evo as Evolution API
+    participant Hook as /webhook
+    participant Ledger as Firestore ledger
+    participant PS as Pub/Sub
+    participant Push as /pubsub/push
+    participant Orch as Orchestrator
+    participant Tools as Capabilities
+    Evo->>Hook: POST {MESSAGES_UPSERT}
+    Hook->>Ledger: register_or_load(message_id)
+    Ledger-->>Hook: snapshot
+    Hook-->>Evo: POST markMessagesAsRead (async)
+    Hook->>PS: publish(envelope)
+    Hook-->>Evo: 200 OK
+    PS->>Push: push delivery
+    Push->>Ledger: claim(message_id)
+    Push->>Orch: orchestrate(envelope)
+    Orch->>Tools: Google/RAG/HTTP
+    Tools-->>Orch: result
+    Orch-->>Push: reply
+    Push->>Evo: sendText(remote_jid, reply)
+    Push->>Ledger: mark_delivered
 ```
 
-## Estrutura de Dados e Persistencia
+A entrega da resposta é registrada no ledger; Pub/Sub só reentrega se a
+instância sinaliza 503 (falha transitória). Falhas terminais são marcadas e o
+Pub/Sub descarta após o número configurado de tentativas.
 
-### Firestore Collections (project `coherence-ominichannel-fs`)
+## 6. Coleções Firestore
 
-| Collection | Funcao | Chave | Acesso |
-|---|---|---|---|
-| `usuarios/{phone}` | Dados pessoais + OAuth token individual | phone (E.164) | So o dono |
-| `contatos/{phone}` | Memoria por contato | phone (E.164) | So o dono |
-| `contatos/{phone}/historico/{msg_id}` | Mensagens individuais (TTL 90d) | msg_id | So o dono |
-| `contatos/{phone}/corrections/{id}` | Log de correcoes aplicadas | correction_id | So o dono |
-| `apelidos_custom/{phone}` | Apelidos aprendidos por contato | phone | So o dono |
-| `conversation-memory-v2/{doc_id}` | Memoria vetorial mascarada, TTL 90d | owner_hash + message_id | So o dono |
-| `agent-knowledge-v2/{doc_id}` | Conhecimento privado vetorial (1536d) | owner_hash + doc_id | So o dono |
-| `public-knowledge-v2/{doc_id}` | Conhecimento publico vetorial (1536d) | doc_id | Todos |
-| `group-knowledge-v2/{doc_id}` | Conhecimento de grupo vetorial (1536d) | group_hash + doc_id | Membros |
-| `agents/{id}` | Definicoes de agentes | agent_id | Admin |
-| `skills/{id}` | Skills markdown reutilizaveis | skill_id | Admin |
-| `tools/{id}` | Tools pre-registradas com schema | tool_id | Admin |
-| `grupos/{group_jid}` | Grupos onde Jennifer participa | group_jid | Admin |
-| `grupos/{group_jid}/membros/{phone}` | Membros de cada grupo | phone | Admin |
-| `ata_runs/{id}` | Log de geracao de atas | run_id | Admin |
-| `proactive_runs/{id}` | Log de proatividade | run_id | Admin |
-| `proactive_feedback/{id}` | Engagement de msgs proativas | feedback_id | Admin |
-| `proactive_weekly/{YYYY-WW}` | Avaliacao semanal | week_id | Admin |
-| `audit/{id}` | LGPD audit log (5y retention) | audit_id | Admin |
-| `cost_runs/{month}` | Metricas de custo LLM | YYYY-MM |
-| `modules/{id}` | Registro de modulos (existente Portal) | module_id |
+Camadas:
 
-### Contrato Firestore Vector v2
+### Mensageria e controle
+- `message-processing/{message_id}` — ledger de idempotência por mensagem (TTL 7 dias).
+- `audit/*` — trilha de auditoria.
+- `whatsapp_accounts/{account_id}` — vínculo entre `instance`, `owner_phone`, `owner_uid`.
+- `usuarios/{phone}` — tokens OAuth Google do proprietário (refresh automático).
 
-Todas as collections vetoriais usam nomes fixos para permitir um unico indice por tipo de dado. Dados privados sao isolados por `owner_hash`, nunca por telefone cru no nome da collection. O campo `vector_embedding` e gravado como `google.cloud.firestore_v1.vector.Vector` e acompanhado por `embedding_model`, `embedding_dim` e `schema_version`.
+### Histórico do chat (Firestore **plain**, sem embedding)
+- `message-history/{history_id}` — todas as interações (`owner_hash` +
+  `message_id` + `text_masked` + `conversation_id` + `direction` +
+  `created_at` + `agent_id`). Filename explícito: conversas **nunca** vão
+  para o Firestore Vector. A coleção `conversation-memory-v2` (vetorial)
+  está marcada como **legada** e não é mais alimentada pelo runtime.
 
-A memoria de conversa persiste somente `text_masked`, `conversation_id`, `message_id`, `turn_id`, `direction`, `agent_id`, `created_at` e `expires_at`. Consultas privadas aplicam filtro por `owner_hash` antes de `find_nearest`. Mudanca de modelo, dimensao ou schema exige reindexacao integral.
+### Base de conhecimento (Firestore Vector, embeddings OpenAI)
+- `agent-knowledge-v2` — livros/editais por proprietário (`owner_hash`).
+- `collective-knowledge-v2` — memórias coletivas configuradas pelo
+  operador via `scripts/ingest_collective_memory.py`.
+- `public-knowledge-v2` — base pública sem `owner_hash`.
 
-A Fase 3 corretiva adota MiniMax `embo-01` 1536d como provider unico. Falha de embedding nao aciona fallback com outra dimensao; o item permanece reprocessavel e a falha e registrada.
+### Configuração carregada pelo `agent_loader`
+- `agents`, `skills`, `tools`, `config/*`.
+- `apelidos_custom/{owner_hash}` — consentimento de apelidos.
 
-## Hierarquia de Agentes
+Regras de isolamento:
 
-```
-jennifier (orchestrator)
-    ├── 4 Domain Managers
-    │   ├── manager-calendar (V4 Flash)
-    │   ├── manager-drive (V4 Flash)
-    │   ├── manager-email (V4 Flash)
-    │   └── manager-web (V4 Flash)
-    └── 4 Specialists
-        ├── agent-intimacy (V4 Flash) - apelidos, rapport
-        ├── agent-learning (V4 Pro) - auto-aprendizado com confirmacao
-        ├── agent-morality (V4 Flash) - filtros + RAG juridico
-        └── ata-generator (V4 Pro + thinking) - pos-reuniao
-```
+- Toda leitura vetorial (`agent-knowledge-v2`, `collective-knowledge-v2`)
+  filtra `owner_hash == owner_hash(inbound)`. A coleção pública não
+  recebe `owner_hash`.
+- Toda leitura em `message-history` filtra
+  `where("owner_hash", "==", _owner_hash(phone))` antes de ordenar por
+  `created_at` desc.
+- Quando o `phone` chega vazio (caso de grupo sem sender identificável),
+  a interação é **ignorada** com `status: skipped, reason: missing_phone`
+  para evitar mistura entre contas.
+- Gmail/Drive/Calendar requerem que o telefone do remetente coincida com o
+  `owner_phone` da conta Evolution; tool retorna
+  `owner_only_capability` caso contrário.
 
-### Inventario operacional dos agentes
+## 7. Módulo `Agentes Omnichannel` (plano de controle)
 
-Agentes sao configuracoes executadas sob demanda, nao processos permanentemente ativos. O inventario central classifica cada agente como cadastrado, carregado, habilitado, compativel com a instancia, roteavel, tools validas, provider disponivel, pronto para o usuario, saudavel, degradado ou nao verificado.
+Continua dentro do `agents-runtime` em `/admin/dashboard`. Agora:
 
-Consultas como "quantos agentes estao funcionando" sao respondidas deterministicamente, sem LLM, Serper ou fan-out. Um agente so e considerado saudavel quando possui pre-requisitos validos e sucesso recente dentro da janela configurada. Ausencia de execucao recente resulta em `unverified`, nunca em `healthy`.
+- Não depende mais de tokens em query string. Aceita `Authorization: Bearer`
+  ou Firebase ID token; o bearer é refletido na página apenas para evitar que
+  o frontend fique sem credencial em interações locais.
+- Mantém abas: **Contas WhatsApp**, **Agentes**, **Skills**, **Tools**,
+  **Proprietários**, **Conhecimento**, **Status**.
+- Tools são somente leitura no Firestore — a implementação executável continua
+  versionada em código.
 
-Managers e specialists sao componentes internos. A metadata preserva `executed_agent_id`, mas `response_identity` permanece `Jennifer`. O runtime injeta essa regra em toda execucao nao-orquestradora para impedir exposicao de nomes internos.
+## 8. Áudio
 
-Confirmacoes curtas dependem de `pending_action` tipada e expirada. Respostas como "sim" nunca alteram apelidos ou configuracoes sem uma acao pendente compativel. Idempotencia usa `message_id`, instancia e conversa; texto repetido isoladamente nao reutiliza resposta.
+- Whisper local em `tools/audio_transcribe.py`. Warm-up assíncrono no startup.
+- Download valida host, MIME, tamanho (25 MB), duração (5 min) e ausência de
+  redirecionamento.
+- Em falha técnica (`RuntimeError`, `MemoryError`, timeout) o `core/audio_transcribe`
+  aciona o fallback Gemini 2.5 Flash **apenas** se houver consentimento
+  registrado (`STT_FALLBACK_CONSENT=true` ou `audio_consent_external=true`).
+- Limite diário: 20 chamadas (configurável via `STT_FALLBACK_DAILY_LIMIT`).
+- Áudio bruto nunca é persistido; arquivos temporários são apagados em
+  `finally` e a transcrição é mascarada antes de chegar ao LLM ou ao vetor.
 
-## Topologia Cloud Run (TEST)
+## 9. Custos e limites
 
-| Servico | CPU | Mem | min/max | Auth |
-|---|---|---|---|---|
-| `agents-runtime-test` | 2 | **2Gi** | **0/3** | Bearer SA (exceto /healthz) + ping 5min |
-| `coherence-portal-test` | 2 | 2Gi | 0/2 | Firebase JWT |
-| `whatsapp-agente-test` | 1 | 1Gi | **0/2** | Bearer SA + Evolution webhook + ping 5min |
+- Cascade LLM com MiniMax M2.7 Highspeed como entrada minimiza tokens.
+- Limite diário de fallback Gemini (20/dia) impede surpresas de billing.
+- Pub/Sub: idempotência garantida pelo ledger evita a antiga tempestade de 44k
+  requisições/dia.
+- Firestore Vector: retém coleções por 90 dias (`RETENTION_DAYS`).
 
-**Cold start strategy:** ambos servicos com `min-instances=0`. Ping via Cloud Scheduler a cada 5min para manter warm durante horario comercial. Cold start tipico: 5-15s em horario nao-comercial (0h-7h).
+## 10. Conformidade
 
-## Fluxo de Proatividade
+- LGPD: `scripts/check_lgpd_compliance.py` roda no CI e valida `LGPD.md`,
+  `TERMOS.md`, snippets obrigatórios, Dockerfile.
+- Tokens OAuth são persistidos sem `client_secret` no documento (strip no
+  `oauth_per_user._persist_token`).
+- Auditoria registra `actor`, `action`, `target`, `phone_hash` (truncado).
+- Retenção de logs 5 anos (LGPD Art. 37).
 
-```mermaid
-flowchart TD
-    A[Cloud Scheduler 15min ou diario 8h] --> B[proactive_worker]
-    B --> C[Coleta candidatos<br/>master + membros grupo]
-    C --> D{8 camadas anti-spam}
-    D -->|bloqueado| E[Skip + log]
-    D -->|passou| F[Ordena por relevance ≥0.75]
-    F --> G{cap atingido?}
-    G -->|sim| E
-    G -->|nao| H[LLM gera msg]
-    H --> I{DM ou Grupo?}
-    I -->|DM| J[POST /send DM]
-    I -->|Grupo| K[POST /send Grupo<br/>msg geral visivel a todos]
-    J --> L[Log em proactive_runs]
-    K --> L
-```
+## 11. Pendências conhecidas
 
-## Fase B — Resiliencia do fluxo de audio e RAG
-
-A investigação confirmou que `message_id`, dedupe e `owner_hash` chegam corretamente no fluxo Evolution → Pub/Sub → orchestrator. A causa real era o retorno antecipado de `/chat` quando o Whisper falhava sem texto alternativo: o áudio não passava pelo caminho de indexação.
-
-Quando a transcrição é concluída, o texto passa pelo masker e segue para a orquestração e memória vetorial. Quando a transcrição falha, o runtime mantém a resposta amigável ao usuário e indexa somente um marcador curto de auditoria, mascarado, em `conversation-memory-v2`. O marcador preserva `message_id`, `conversation_id`, `turn_id` e timestamp BRT, mas nunca armazena bytes, URL de áudio ou texto bruto.
-
-A telemetria de ausência de `message_id` usa `owner_hash` e nível WARN. O fallback temporal permanece diagnosticável, mas não é considerado idempotente em retries. O teste de fluxo cobre texto e áudio, propagação do ID, retry deduplicado, normalização do proprietário e falhas do Whisper.
-
-
-- [PLAN_OMNICHANNEL_AGENTES.md](./PLAN_OMNICHANNEL_AGENTES.md) - Plano completo
-- [HARNESS.md](./HARNESS.md) - Setup e deploy
-- [GUARDRAILS.md](./GUARDRAILS.md) - Regras inegociaveis
-- [DIARIO_BORDO.md](./DIARIO_BORDO.md) - Historico de decisoes
-- `Coherence_Portal/docs/MODULE_INTEGRATION_AGENTES.md` - Contrato Portal ↔ agents_runtime
+- Migração completa do proxy `WhatsappAgente` para descarte precisa de janela
+  com `agents-runtime-prod` pausado.
+- RAG por owner precisa de script de migração para backfill de embeddings já
+  gerados sob o antigo `_owner_hash(phone)`.
+- README em `agents_runtime/README.md` ainda menciona contagens antigas; será
+  atualizado após o deploy.
