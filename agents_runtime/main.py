@@ -130,7 +130,7 @@ async def metrics_endpoint():
     try:
         from core.agent_status import build_agent_inventory
 
-        inventory = build_agent_inventory(instance=os.getenv("INSTANCE", "jennifer"))
+        inventory = build_agent_inventory(instance=os.getenv("INSTANCE", "Jennifer"))
         metrics.observe_inventory(inventory)
     except Exception as exc:  # noqa: BLE001
         logger.debug("metrics inventory observe skipped: %s", exc)
@@ -195,7 +195,7 @@ async def chat(request: Request):
                     _run_primary,
                     audio_bytes=audio_bytes,
                     mimetype=mimetype,
-                    instance=body.get("instance", "jennifer"),
+                    instance=body.get("instance", "Jennifer"),
                     consent=bool(extra.get("audio_consent_external")),
                 )
                 transcript = result["transcript"]
@@ -214,7 +214,7 @@ async def chat(request: Request):
                     _run_primary,
                     audio_bytes=audio_bytes,
                     mimetype=mimetype,
-                    instance=body.get("instance", "jennifer"),
+                    instance=body.get("instance", "Jennifer"),
                     consent=bool(extra.get("audio_consent_external")),
                 )
                 transcript = result["transcript"]
@@ -469,7 +469,7 @@ async def pubsub_push(request: Request):
         if reply and phone:
             try:
                 await send_text(
-                    instance=p.get("instance", "jennifer"),
+                    instance=p.get("instance", "Jennifer"),
                     phone=phone,
                     text=reply,
                     delay_ms=result.get("delay_ms", 0),

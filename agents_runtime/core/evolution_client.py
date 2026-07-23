@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 from typing import Any, Dict, List, Tuple
@@ -5,6 +6,9 @@ from typing import Any, Dict, List, Tuple
 import httpx
 
 from core.secrets import get_secret
+
+
+logger = logging.getLogger(__name__)
 
 
 class EvolutionDeliveryError(RuntimeError):
@@ -16,7 +20,52 @@ def _config() -> Tuple[str, str]:
     api_key = os.getenv("EVOLUTION_API_KEY") or get_secret("EVOLUTION_API_KEY") or ""
     if not api_key:
         raise EvolutionDeliveryError("evolution_api_key_not_configured")
+    logger.debug(
+        "evolution_client base_url=%s token_prefix=%s token_len=%d",
+        base_url,
+        api_key[:4],
+        len(api_key),
+    )
     return base_url, api_key
+
+
+def _resolve_instance_name() -> str:
+    """Resolve the Evolution instance name case-sensitively.
+
+    The runtime is configured with ``INSTANCE=jennifer`` but the actual
+    instance on the Evolution server is ``Jennifer``. The Evolution API
+    rejects case mismatches with 404. We fetch the instance list once
+    and return the canonical casing.
+    """
+    desired = (os.getenv("INSTANCE") or "jennifer").strip()
+    if not desired:
+        return desired
+    try:
+        api_key = os.getenv("EVOLUTION_API_KEY") or get_secret("EVOLUTION_API_KEY") or ""
+        if not api_key:
+            return desired
+        base_url, _ = _config()
+        with httpx.Client(timeout=10) as client:
+            response = client.get(
+                f"{base_url}/instance/fetchInstances",
+                headers={"apikey": api_key},
+            )
+            if response.status_code >= 400:
+                return desired
+            payload = response.json() or []
+        for entry in payload:
+            name = (entry.get("name") or "").strip()
+            if name.lower() == desired.lower():
+                if name != desired:
+                    logger.info(
+                        "evolution_instance_case_corrected desired=%s actual=%s",
+                        desired,
+                        name,
+                    )
+                return name
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("evolution_instance_resolve_failed error=%s", exc)
+    return desired
 
 
 def _target(phone: str, remote_jid: str = "") -> str:
@@ -46,6 +95,8 @@ async def send_text(
     if not instance or not text:
         raise EvolutionDeliveryError("invalid_message")
     base_url, api_key = _config()
+    instance = _resolve_instance_name() if instance.lower() == (os.getenv("INSTANCE") or "jennifer").lower() else instance
+    logger.debug("evolution_send_text instance=%s phone=%s", instance, phone)
     async with httpx.AsyncClient(timeout=_request_timeout(30)) as client:
         response = await client.post(
             f"{base_url}/message/sendText/{instance}",
@@ -74,13 +125,16 @@ async def mark_messages_read(
 ) -> Dict[str, Any]:
     """Mark inbound messages as read on Evolution.
 
-    Evolution v2 expects the ``markMessagesAsRead`` endpoint with a
-    ``readMessages`` array. Failures are logged and surfaced to the caller;
-    the webhook does not block on them.
+    Evolution v1 accepts the ``markMessageAsRead`` endpoint (singular)
+    with the v2 payload shape (``readMessages``). The plural
+    ``markMessagesAsRead`` endpoint is not implemented in this version.
+    Failures are logged and surfaced to the caller; the webhook does not
+    block on them.
     """
     if not instance or not remote_jid or not message_ids:
         raise EvolutionDeliveryError("invalid_mark_read_request")
     base_url, api_key = _config()
+    instance = _resolve_instance_name() if instance.lower() == (os.getenv("INSTANCE") or "jennifer").lower() else instance
     payload = {
         "readMessages": [
             {"id": message_id, "fromMe": from_me, "remoteJid": remote_jid}
@@ -90,7 +144,7 @@ async def mark_messages_read(
     }
     async with httpx.AsyncClient(timeout=_request_timeout(10)) as client:
         response = await client.post(
-            f"{base_url}/chat/markMessagesAsRead/{instance}",
+            f"{base_url}/chat/markMessageAsRead/{instance}",
             json=payload,
             headers={"apikey": api_key, "Content-Type": "application/json"},
         )
