@@ -185,6 +185,14 @@ def test_lowercase_event_accepted():
     assert envelope["text"] == "Oi Jennifer, tudo bem?"
 
 
+def test_messages_update_event_accepted():
+    """Evolution dispatches messages.update in addition to MESSAGES_UPSERT."""
+    payload = {**SAMPLE_TEXT_PAYLOAD, "event": "messages.update"}
+    envelope = extract_envelope(payload)
+    assert envelope is not None
+    assert envelope["text"] == "Oi Jennifer, tudo bem?"
+
+
 def test_invalid_payload_returns_none():
     assert extract_envelope(None) is None
     assert extract_envelope("string") is None

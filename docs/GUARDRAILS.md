@@ -101,6 +101,30 @@ em Firestore plain (`message-history/{history_id}`) com indexação por
   alimentada em produção; pode ser removida após confirmação das novas
   gravações.
 
+## 8. Integração com a Evolution API (23/07/2026)
+
+- **Endpoints** — esta versão da Evolution aceita:
+  - `POST /message/sendText/{instance}` (envio de mensagens) → 201.
+  - `GET /instance/connectionState/{instance}` (verificação de status).
+  - `POST /chat/markMessageAsRead/{instance}` (v1, **singular**) com
+    payload v2 `readMessages: [{id, fromMe, remoteJid}]` → 200.
+  - **Não suporta** `POST /chat/markMessagesAsRead/{instance}` (plural)
+    — retorna 404 "Cannot POST". Não usar.
+- **Instance name é case-sensitive**. O nome cadastrado na Evolution
+  deve ser preservado em todas as chamadas. `core/evolution_client.py`
+  resolve dinamicamente via `GET /instance/fetchInstances` antes de
+  chamar os endpoints; o container **não** pode assumir um casing
+  hardcoded.
+- **Token `EVOLUTION_API_KEY`**: configurado no Secret Manager
+  (`evolution-api-key`) e injetado via `--set-secrets` na revisão.
+  A `cloudbuild-test.yaml` referencia `EVOLUTION_API_KEY=evolution-api-key:latest`.
+- **Variável de env `INSTANCE`**: deve ser exportada com o nome
+  exato cadastrado (ex.: `INSTANCE=Jennifer`). O `_resolve_instance_name`
+  funciona como fallback dinâmico.
+- **Auditoria**: `core.evolution_client` emite `logger.debug` com
+  `base_url`, `token_prefix` (4 primeiros caracteres) e `token_len` em
+  cada request — sem expor o token completo.
+
 ## 7. Embeddings
 
 - OpenAI `text-embedding-3-small` (1536d) é o único provedor aceito em v2.

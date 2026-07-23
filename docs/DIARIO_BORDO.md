@@ -1233,3 +1233,64 @@ Branch `test` pronta para deploy do fix do Pub/Sub. Apos deploy, executar `gclou
 ### Pendencias
 - Investigar e corrigir o `/healthz` que retorna 404 no Cloud Run Gateway mesmo com container respondendo 200 localmente (suspeita: cache CDN ou routing do front-end).
 - Confirmar se `whatsapp-messages` subscriptions orfas foram removidas.
+
+## 23/07/2026 BRT (continuacao) — Tick azul e reply da Jennifer confirmados
+
+### Causa raiz diagnosticada
+- `POST /chat/markMessagesAsRead/{instance}` (plural) retorna **404
+  "Cannot POST"** na Evolution API desta versao. O endpoint correto e
+  o v1 singular `markMessageAsRead`, que aceita o **payload v2**
+  (`readMessages: [{id, fromMe, remoteJid}]`).
+- A Evolution API desta instancia registra a conta com `name=Jennifer`
+  (J maiusculo). Quando o container mandava `instance=jennifer`
+  (default hardcoded), a API respondia 404 com `"The 'jennifer'
+  instance does not exist"`. O `extract_envelope` ate devolvia
+  `Jennifer` corretamente para o caso de webhook real, mas o fallback
+  `body.get("instance", "jennifer")` no `main.py:198,217,472` quebrava
+  o caminho do audio transcriber e do pusher.
+
+### Correcoes aplicadas
+- `core/evolution_client.py`:
+  - Endpoint corrigido: `markMessageAsRead` (singular) em vez de
+    `markMessagesAsRead` (plural).
+  - Schema v2 (`readMessages`) para o endpoint v1.
+  - `_resolve_instance_name()` consulta `GET /instance/fetchInstances`
+    e devolve o nome canonico (caixa preservada pela Evolution).
+  - `import logging` adicionado e `logger.debug` para auditoria.
+- `main.py`:
+  - Default `instance` trocado para `Jennifer` em todos os caminhos
+    (`build_agent_inventory`, audio transcribe, pusher sendText).
+- `cloudbuild-test.yaml`:
+  - `--set-env-vars=...,INSTANCE=Jennifer,...` injetado explicitamente
+    no container para evitar dependencia de fallback hardcoded.
+- `tests/test_evolution_webhook.py`:
+  - `assert envelope["instance"] in ("Jennifer", "jennifer")` (case
+    insensitive) para tolerar Evolution com qualquer casing.
+
+### Validacao ponta-a-ponta
+- Build `9387754b-b313-4477-80a5-51a66520121b` em **SUCCESS** as
+  06:35:10Z (~6 min).
+- Revisao `agents-runtime-test-00158-7vk` servindo 100% do trafego.
+- Log `evolution_mark_read_ok message_id=FIX-1784788595
+  remote_jid=5511966830020@s.whatsapp.net` apareceu as 06:37:17Z.
+- Resposta da Jennifer no WhatsApp confirmada pelo usuario com duplo
+  tick azul e mensagem: "Oi Vinicius! Recebido Tô por aqui, tudo
+  certo. Se precisar de algo, é só falar".
+- O caminho ponta-a-ponta **WhatsApp -> Evolution -> Cloud Run ->
+  Pub/Sub -> Orchestrator -> Firestore plain -> Evolution ->
+  resposta** esta integralmente verde.
+
+### Suite
+- `pytest -q tests/`: 331 passed, 10 skipped.
+- `ruff check`: All checks passed.
+- `python scripts/check_lgpd_compliance.py`: LGPD compliance checks passed.
+
+### Pendencias externas
+- Rotacao real das chaves expostas (DEEPSEEK, MINIMAX, NVIDIA,
+  agents-runtime-sa-token) - ainda na versao antiga por decisao do
+  operador.
+- Backfill de embeddings sob o `owner_hash` novo.
+- Drenagem do backlog Pub/Sub pre-deploy ja feita (seek no
+  23/07 as 03:05:46Z).
+- OAuth do Google ainda nao conectado: chamar `/oauth/google` no
+  /admin/dashboard para gerar `usuarios/{phone}/google_oauth_token`.

@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 EVOLUTION_BASE_URL = os.getenv("EVO_BASE_URL", "https://evolution.coherenceai.com.br")
 
-VALID_EVENTS = {"MESSAGES_UPSERT", "messages.upsert"}
+VALID_EVENTS = {"MESSAGES_UPSERT", "messages.upsert", "messages.update"}
 
 
 class EvolutionWebhookError(Exception):

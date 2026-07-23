@@ -7,6 +7,14 @@
 > Pub/Sub → Orchestrator → Evolution → resposta` com Firestore plain
 > para histórico de chat e Firestore Vector restrito a documentos.
 
+> **Importante — Evolution API 23/07/2026:** o instance name
+> (`INSTANCE=Jennifer`) é case-sensitive. O container resolve
+> dinamicamente via `GET /instance/fetchInstances` antes de cada
+> chamada. O endpoint de tick azul é o v1 singular
+> `POST /chat/markMessageAsRead/{instance}` com payload v2
+> `readMessages: [{id, fromMe, remoteJid}]`. Não usar o plural
+> `markMessagesAsRead` — esta versão da Evolution retorna 404.
+
 ## GCP Project & Recursos
 
 - **Project:** `coherence-ominichannel-fs`
