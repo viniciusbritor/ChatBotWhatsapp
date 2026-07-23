@@ -3,7 +3,7 @@ steps:
     entrypoint: "bash"
     args:
       - "-c"
-      - "cd agents_runtime && pip install -q -r requirements.txt && pip install -q -r requirements-dev.txt && python scripts/check_lgpd_compliance.py && ruff check core/ main.py orchestrator.py agent_loader.py tool_registry.py && mypy --no-incremental --explicit-package-bases --follow-imports=silent core && pytest -q tests/ && pytest -q --cov=core.evolution_webhook --cov=core.pubsub_publisher --cov=core.pubsub_consumer --cov-report=term-missing --cov-fail-under=80 tests/test_evolution_webhook.py tests/test_main_webhook.py tests/test_pubsub_consumer.py tests/test_pubsub_publisher.py && RUN_PUBSUB_E2E=1 PUBSUB_E2E_PROJECT=$PROJECT_ID PUBSUB_E2E_RUN_ID=$BUILD_ID pytest -q tests/integration/test_pubsub_e2e.py"
+      - "export REPO_ROOT=$PWD && cd agents_runtime && pip install -q -r requirements.txt && pip install -q -r requirements-dev.txt && python scripts/check_lgpd_compliance.py && ruff check core/ main.py orchestrator.py agent_loader.py tool_registry.py && mypy --no-incremental --explicit-package-bases --follow-imports=silent core && pytest -q tests/ && pytest -q --cov=core.evolution_webhook --cov=core.pubsub_publisher --cov=core.pubsub_consumer --cov-report=term-missing --cov-fail-under=80 tests/test_evolution_webhook.py tests/test_main_webhook.py tests/test_pubsub_consumer.py tests/test_pubsub_publisher.py && RUN_PUBSUB_E2E=1 PUBSUB_E2E_PROJECT=$PROJECT_ID PUBSUB_E2E_RUN_ID=$BUILD_ID pytest -q tests/integration/test_pubsub_e2e.py"
 
   - name: "gcr.io/cloud-builders/docker"
     args:
