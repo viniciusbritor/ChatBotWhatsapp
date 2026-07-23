@@ -464,7 +464,8 @@ class LLMProvider:
         from tools.audio_transcribe import transcribe_base64
 
         try:
-            return await transcribe_base64(audio_b64, mimetype)
+            result = await transcribe_base64(audio_b64, mimetype)
+            return result.get("transcript", "")
         except Exception as exc:
             logger.warning("Local Whisper STT failed: %s", type(exc).__name__)
             return "[audio]"
@@ -473,7 +474,8 @@ class LLMProvider:
         from tools.audio_transcribe import transcribe_url
 
         try:
-            return await transcribe_url(audio_url, mimetype)
+            result = await transcribe_url(audio_url, mimetype)
+            return result.get("transcript", "")
         except Exception as exc:
             logger.warning("Local Whisper URL STT failed: %s", type(exc).__name__)
             return "[audio]"
