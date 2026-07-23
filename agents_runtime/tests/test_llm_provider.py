@@ -21,64 +21,31 @@ def mock_responses():
 
 
 class TestIsAvailable:
-    def test_available_with_deepseek(self, monkeypatch):
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+    def test_available_with_minimax(self, monkeypatch):
+        monkeypatch.setenv("MINIMAX_API_KEY", "sk-test")
+        provider = LLMProvider()
+        assert provider.is_available() is True
+
+    def test_available_with_gemini(self, monkeypatch):
+        monkeypatch.setenv("GEMINI_API_KEY", "sk-gemini")
         provider = LLMProvider()
         assert provider.is_available() is True
 
     def test_not_available_without_keys(self, monkeypatch):
-        for key in ["DEEPSEEK_API_KEY", "NVIDIA_API_KEY", "MINIMAX_API_KEY"]:
+        for key in ["MINIMAX_API_KEY", "GEMINI_API_KEY"]:
             monkeypatch.delenv(key, raising=False)
         monkeypatch.setenv("GCP_PROJECT", "")
         monkeypatch.setenv("GCLOUD_PROJECT", "")
-        monkeypatch.setattr("core.llm_provider.LLMProvider.gemini_available", lambda self: False)
         provider = LLMProvider()
         assert provider.is_available() is False
 
 
-class TestChatCascade:
-    @pytest.mark.asyncio
-    async def test_deepseek_used_when_minimax_unavailable(self, monkeypatch, mock_responses):
-        """When only DeepSeek is configured, the cascade reaches it directly."""
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
-        monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
-        monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
-        provider = LLMProvider()
-
-        with patch("requests.post", return_value=mock_responses("DeepSeek answer")):
-            result = await provider.chat("sys", "user", model="deepseek-v4-flash")
-
-        assert result["content"] == "DeepSeek answer"
-        assert result["provider"] == "deepseek"
-        assert result["model_used"] == "deepseek-v4-flash"
-
-    @pytest.mark.asyncio
-    async def test_cascade_fallback_to_deepseek(self, monkeypatch, mock_responses):
-        """MiniMax fails (quota), DeepSeek is tried and used."""
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
-        monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
-        monkeypatch.setenv("MINIMAX_API_KEY", "minimax-test")
-
-        provider = LLMProvider()
-
-        fail_response = MagicMock()
-        fail_response.status_code = 429
-
-        success_response = mock_responses("DeepSeek answer")
-
-        with patch("requests.post", side_effect=[fail_response, fail_response, success_response]):
-            with patch("time.sleep"):
-                result = await provider.chat("sys", "user", model="deepseek-v4-flash")
-
-        assert result["content"] == "DeepSeek answer"
-        assert result["provider"] == "deepseek"
-
+class TestCascade:
     @pytest.mark.asyncio
     async def test_minimax_highspeed_first(self, monkeypatch, mock_responses):
-        """MiniMax-M2.7-highspeed is the primary provider (Fase A decision)."""
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        """MiniMax-M2.7-highspeed is the primary provider."""
         monkeypatch.setenv("MINIMAX_API_KEY", "minimax-test")
-
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
         provider = LLMProvider()
 
         with patch("requests.post", return_value=mock_responses("MiniMax fast answer")):
@@ -89,34 +56,61 @@ class TestChatCascade:
         assert result["model_used"] == "MiniMax-M2.7-highspeed"
 
     @pytest.mark.asyncio
-    async def test_all_providers_fail(self, monkeypatch):
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
-        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test")
+    async def test_gemini_fallback_when_minimax_fails(self, monkeypatch):
         monkeypatch.setenv("MINIMAX_API_KEY", "minimax-test")
-
+        monkeypatch.setenv("GEMINI_API_KEY", "gemini-test")
         provider = LLMProvider()
 
         fail_response = MagicMock()
         fail_response.status_code = 429
+        fail_response.raise_for_status = MagicMock()
+
+        async def fake_call_gemini(*args, **kwargs):
+            return "Gemini fallback answer"
 
         with patch("requests.post", return_value=fail_response):
             with patch("time.sleep"):
-                with pytest.raises(LLMError, match="all_providers_failed"):
-                    await provider.chat("sys", "user", model="deepseek-v4-flash")
+                with patch.object(
+                    provider,
+                    "_call_gemini",
+                    side_effect=fake_call_gemini,
+                ):
+                    result = await provider.chat("sys", "user")
+
+        assert result["content"] == "Gemini fallback answer"
+        assert result["provider"] == "gemini-2.5-flash"
+
+    @pytest.mark.asyncio
+    async def test_all_providers_fail(self, monkeypatch):
+        monkeypatch.setenv("MINIMAX_API_KEY", "minimax-test")
+        monkeypatch.setenv("GEMINI_API_KEY", "gemini-test")
+        provider = LLMProvider()
+
+        fail_response = MagicMock()
+        fail_response.status_code = 429
+        fail_response.raise_for_status = MagicMock()
+
+        async def fake_call_gemini(*args, **kwargs):
+            raise LLMError("gemini_quota_exceeded")
+
+        with patch("requests.post", return_value=fail_response):
+            with patch("time.sleep"):
+                with patch.object(provider, "_call_gemini", side_effect=fake_call_gemini):
+                    with pytest.raises(LLMError, match="all_providers_failed"):
+                        await provider.chat("sys", "user")
 
 
 class TestChatEscalating:
     @pytest.mark.asyncio
     async def test_no_escalation_when_confident(self, monkeypatch, mock_responses):
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
         monkeypatch.setenv("MINIMAX_API_KEY", "minimax-test")
         provider = LLMProvider()
 
         with patch("requests.post", return_value=mock_responses("Good long answer with many words")):
             result = await provider.chat_escalating(
                 "sys", "user",
-                fast_model="deepseek-v4-flash",
-                pro_model="deepseek-v4-pro",
+                fast_model="MiniMax-M2.7-highspeed",
+                pro_model="gemini-2.5-flash",
                 threshold=-2,
                 scoring_fn=lambda t: 0,
             )
@@ -125,19 +119,18 @@ class TestChatEscalating:
 
     @pytest.mark.asyncio
     async def test_escalation_when_low_confidence(self, monkeypatch, mock_responses):
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
         monkeypatch.setenv("MINIMAX_API_KEY", "minimax-test")
         provider = LLMProvider()
 
-        flash_response = mock_responses("sim")
-        pro_response = mock_responses("Much better detailed answer with many words")
+        async def fake_call_gemini(*args, **kwargs):
+            return "Gemini better answer"
 
-        with patch("requests.post", side_effect=[flash_response, pro_response]):
-            with patch("time.sleep"):
+        with patch("requests.post", return_value=mock_responses("sim")):
+            with patch.object(provider, "_call_gemini", side_effect=fake_call_gemini):
                 result = await provider.chat_escalating(
                     "sys", "user",
-                    fast_model="deepseek-v4-flash",
-                    pro_model="deepseek-v4-pro",
+                    fast_model="MiniMax-M2.7-highspeed",
+                    pro_model="gemini-2.5-flash",
                     threshold=-2,
                     scoring_fn=lambda t: -3,
                 )
@@ -147,7 +140,6 @@ class TestChatEscalating:
 
     @pytest.mark.asyncio
     async def test_no_escalation_flag_disables_escalation(self, monkeypatch, mock_responses):
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
         monkeypatch.setenv("MINIMAX_API_KEY", "minimax-test")
         provider = LLMProvider()
 
@@ -158,27 +150,6 @@ class TestChatEscalating:
                 scoring_fn=lambda t: -5,
             )
         assert result["escalated"] is False
-
-
-class TestJsonMarkerInjection:
-    def test_injects_json_marker_when_json_mode(self, monkeypatch):
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
-        provider = LLMProvider()
-        result = provider._maybe_inject_json_marker("You are helpful", json_mode=True)
-        assert result.startswith("JSON: ")
-
-    def test_no_injection_when_json_keyword_present(self, monkeypatch):
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
-        provider = LLMProvider()
-        original = "Return json with the result"
-        result = provider._maybe_inject_json_marker(original, json_mode=True)
-        assert result == original
-
-    def test_no_injection_when_json_mode_false(self, monkeypatch):
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
-        provider = LLMProvider()
-        result = provider._maybe_inject_json_marker("Plain text", json_mode=False)
-        assert result == "Plain text"
 
 
 class TestExtractMiniMaxToolCalls:
@@ -240,7 +211,6 @@ class TestExtractMiniMaxToolCalls:
 class TestChatWithToolsMiniMaxFallback:
     @pytest.mark.asyncio
     async def test_extracts_inline_tool_call_when_structured_empty(self, monkeypatch):
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
         monkeypatch.setenv("MINIMAX_API_KEY", "sk-mm")
 
         provider = LLMProvider()
@@ -286,4 +256,3 @@ class TestChatWithToolsMiniMaxFallback:
         assert "<invoke" not in result["content"]
         assert result["content"] == clean_content
         assert result["tool_rounds"] == 1
-

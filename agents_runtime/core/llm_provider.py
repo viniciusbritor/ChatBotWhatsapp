@@ -1,11 +1,17 @@
-"""LLM cascade: DeepSeek V4 Flash -> NVIDIA V4 Flash -> DeepSeek V4 Pro -> NVIDIA V4 Pro -> MiniMax M3.
+"""LLM cascade: MiniMax M2.7-highspeed -> Gemini 2.5 Flash.
+
+Every agent in the runtime uses this cascade through the
+``chat()``, ``chat_with_tools()`` and ``chat_escalating()`` entry
+points. The defaults are:
+
+- ``fast_model`` (first try): ``MiniMax-M2.7-highspeed``.
+- ``pro_model`` (escalation target): ``gemini-2.5-flash``.
 
 Features:
 - Cascade fallback on failure (quota, auth, timeout)
 - Exponential backoff with jitter
-- JSON mode support (auto-injects "JSON:" prefix per DeepSeek requirement)
+- JSON mode support
 - Thinking mode toggle per request
-- chat_escalating uses built-in cascade order (Pro comes after Flash in fallback chain)
 - chat_with_tools handles MiniMax-style tool_call tags emitted inside content
 """
 import os
@@ -72,8 +78,6 @@ def _extract_minimax_tool_calls(content: str) -> tuple:
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     return tool_calls, cleaned
 
-logger = logging.getLogger(__name__)
-
 
 class LLMError(Exception):
     """Raised when all providers fail."""
@@ -84,36 +88,27 @@ class LLMProvider:
     """Multi-provider LLM client with cascade fallback."""
 
     def __init__(self):
-        self.deepseek_key = get_secret("DEEPSEEK_API_KEY")
-        self.nvidia_key = get_secret("NVIDIA_API_KEY")
         self.minimax_key = get_secret("MINIMAX_API_KEY")
+        self.gemini_key = get_secret("GEMINI_API_KEY")
 
-        self.deepseek_base = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-        self.nvidia_base = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
         self.minimax_base = os.getenv(
             "MINIMAX_BASE_URL", "https://api.minimax.io/v1"
         )
-        self.minimax_model = os.getenv("MINIMAX_MODEL", "MiniMax-M3")
+        self.gemini_base = os.getenv(
+            "GEMINI_BASE_URL", "https://generativelanguage.googleapis.com"
+        )
+        self.minimax_model = os.getenv("MINIMAX_MODEL", "MiniMax-M2.7-highspeed")
+        self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
     def is_available(self) -> bool:
-        """Check if at least one provider is configured."""
-        return bool(self.deepseek_key or self.nvidia_key or self.minimax_key)
+        return bool(self.minimax_key or self.gemini_key)
 
     def gemini_available(self) -> bool:
-        return False
+        return bool(self.gemini_key)
 
     def _backoff_sleep(self, attempt: int, base: float = 1.0, cap: float = 30.0):
-        """Exponential backoff with jitter."""
         delay = min(cap, base * (2 ** attempt)) + random.uniform(0, 0.5)
         time.sleep(delay)
-
-    def _maybe_inject_json_marker(self, system_prompt: str, json_mode: bool) -> str:
-        """DeepSeek requires 'json' keyword in prompt for response_format=json_object."""
-        if not json_mode:
-            return system_prompt
-        if "json" in system_prompt.lower():
-            return system_prompt
-        return "JSON: " + system_prompt
 
     def _build_payload(
         self,
@@ -126,7 +121,6 @@ class LLMProvider:
         thinking_disabled: bool,
         tools: Optional[List[Dict]] = None,
     ) -> Dict[str, Any]:
-        """Build request payload (OpenAI-compatible)."""
         payload = {
             "model": model,
             "temperature": temperature,
@@ -144,86 +138,6 @@ class LLMProvider:
             payload["tools"] = tools
         return payload
 
-    def _call_deepseek(
-        self,
-        model: str,
-        system_prompt: str,
-        user_prompt: str,
-        json_mode: bool,
-        temperature: float,
-        max_tokens: int,
-        thinking_disabled: bool,
-    ) -> str:
-        """Call DeepSeek API."""
-        if not self.deepseek_key:
-            raise LLMError("deepseek_key_not_configured")
-
-        url = f"{self.deepseek_base}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.deepseek_key}",
-            "Content-Type": "application/json",
-        }
-        sp = self._maybe_inject_json_marker(system_prompt, json_mode)
-        payload = self._build_payload(
-            model, sp, user_prompt, json_mode, temperature, max_tokens, thinking_disabled
-        )
-
-        resp = requests.post(url, headers=headers, json=payload, timeout=120)
-        if resp.status_code == 429:
-            raise LLMError("deepseek_quota_exceeded")
-        if resp.status_code == 401:
-            raise LLMError("deepseek_auth_failed")
-        if resp.status_code >= 500:
-            raise LLMError(f"deepseek_server_error_{resp.status_code}")
-        resp.raise_for_status()
-
-        data = resp.json()
-        if "choices" not in data or not data["choices"]:
-            raise LLMError("deepseek_empty_response")
-
-        if "base_resp" in data:
-            base_resp = data["base_resp"]
-            if base_resp.get("status_code", 0) != 0:
-                raise LLMError(f"deepseek_in_body_error: {base_resp.get('status_msg')}")
-
-        return data["choices"][0]["message"]["content"]
-
-    def _call_nvidia(
-        self,
-        model: str,
-        system_prompt: str,
-        user_prompt: str,
-        json_mode: bool,
-        temperature: float,
-        max_tokens: int,
-        thinking_disabled: bool,
-    ) -> str:
-        """Call NVIDIA NIM API (DeepSeek V4 Flash via NIM)."""
-        if not self.nvidia_key:
-            raise LLMError("nvidia_key_not_configured")
-
-        url = f"{self.nvidia_base}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.nvidia_key}",
-            "Content-Type": "application/json",
-        }
-        sp = self._maybe_inject_json_marker(system_prompt, json_mode)
-        payload = self._build_payload(
-            model, sp, user_prompt, json_mode, temperature, max_tokens, thinking_disabled
-        )
-
-        resp = requests.post(url, headers=headers, json=payload, timeout=120)
-        if resp.status_code == 429:
-            raise LLMError("nvidia_quota_exceeded")
-        if resp.status_code == 401:
-            raise LLMError("nvidia_auth_failed")
-        resp.raise_for_status()
-
-        data = resp.json()
-        if "choices" not in data or not data["choices"]:
-            raise LLMError("nvidia_empty_response")
-        return data["choices"][0]["message"]["content"]
-
     def _call_minimax(
         self,
         system_prompt: str,
@@ -232,57 +146,91 @@ class LLMProvider:
         temperature: float,
         max_tokens: int,
     ) -> str:
-        """Call MiniMax M3 API."""
         if not self.minimax_key:
             raise LLMError("minimax_key_not_configured")
-
         url = f"{self.minimax_base}/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.minimax_key}",
             "Content-Type": "application/json",
         }
-        sp = self._maybe_inject_json_marker(system_prompt, json_mode)
         payload = self._build_payload(
-            self.minimax_model, sp, user_prompt, json_mode, temperature, max_tokens, True
+            self.minimax_model, system_prompt, user_prompt,
+            json_mode, temperature, max_tokens, True,
         )
 
         resp = requests.post(url, headers=headers, json=payload, timeout=120)
         if resp.status_code == 429:
             raise LLMError("minimax_quota_exceeded")
+        if resp.status_code == 401:
+            raise LLMError("minimax_auth_failed")
+        if resp.status_code >= 500:
+            raise LLMError(f"minimax_server_error_{resp.status_code}")
         resp.raise_for_status()
 
         data = resp.json()
         if "choices" not in data or not data["choices"]:
             raise LLMError("minimax_empty_response")
+
+        if "base_resp" in data:
+            base_resp = data["base_resp"]
+            if base_resp.get("status_code", 0) != 0:
+                raise LLMError(f"minimax_in_body_error: {base_resp.get('status_msg')}")
+
         return data["choices"][0]["message"]["content"]
 
     def _build_cascade_providers(self, model: str, skip_gemini: bool = False):
         """Build interleaved cascade list, skipping providers without keys.
 
-        Cascade order:
-        1. MiniMax M2.7-highspeed
-        2. MiniMax M3
-        3. DeepSeek V4 Flash
+        Cascade order (todos os agentes):
+        1. MiniMax M2.7-highspeed (primario)
+        2. Gemini 2.5 Flash (fallback)
         """
         providers = []
 
         if self.minimax_key:
             providers.append(("minimax-hs", "MiniMax-M2.7-highspeed", "_call_minimax", "MiniMax-M2.7-highspeed"))
-        if self.minimax_key:
-            providers.append(("minimax", self.minimax_model, "_call_minimax", self.minimax_model))
-        if self.deepseek_key:
-            providers.append(("deepseek", "deepseek-v4-flash", "_call_deepseek", "deepseek-v4-flash"))
+        if not skip_gemini and self.gemini_key:
+            providers.append(("gemini-2.5-flash", "gemini-2.5-flash", "_call_gemini", "gemini-2.5-flash"))
 
         if not providers:
             raise LLMError("no_provider_keys_configured")
 
         return providers
 
+    async def _call_gemini(self, model: str, sp, user_prompt, json_mode, temperature, max_tokens, thinking_disabled):
+        if not self.gemini_key:
+            raise LLMError("gemini_key_not_configured")
+        try:
+            from google.generativeai import configure as _ga_configure  # type: ignore
+            from google.generativeai import GenerativeModel  # type: ignore
+        except Exception as exc:  # noqa: BLE001
+            raise LLMError(f"gemini_sdk_missing: {exc}")
+
+        _ga_configure(api_key=self.gemini_key)
+        gen_model = GenerativeModel(model_name=model)
+        system_instruction = sp or ""
+        full_prompt = (
+            f"{system_instruction}\n\n{user_prompt}" if system_instruction else user_prompt
+        )
+        generation_config = {
+            "temperature": float(temperature or 0.7),
+            "max_output_tokens": int(max_tokens or 1024),
+        }
+        if json_mode:
+            generation_config["response_mime_type"] = "application/json"
+        response = await asyncio.to_thread(
+            gen_model.generate_content,
+            full_prompt,
+            generation_config=generation_config,
+        )
+        text = (response.text or "").strip()
+        return text
+
     async def chat(
         self,
         system_prompt: str,
         user_prompt: str,
-        model: str = "deepseek-v4-flash",
+        model: str = "MiniMax-M2.7-highspeed",
         json_mode: bool = False,
         temperature: float = 0.7,
         max_tokens: int = 1000,
@@ -291,24 +239,19 @@ class LLMProvider:
         """Call LLM with cascade fallback. Async."""
         attempts = []
 
-        cascade = self._build_cascade_providers(model, skip_gemini=True)
+        cascade = self._build_cascade_providers(model)
 
         for attempt_idx, (provider_name, provider_model, method_name, call_model) in enumerate(cascade):
             try:
-                if method_name == "_call_deepseek":
-                    content = await asyncio.to_thread(
-                        self._call_deepseek,
-                        call_model, system_prompt, user_prompt, json_mode, temperature, max_tokens, thinking_disabled
-                    )
-                elif method_name == "_call_nvidia":
-                    content = await asyncio.to_thread(
-                        self._call_nvidia,
-                        call_model, system_prompt, user_prompt, json_mode, temperature, max_tokens, thinking_disabled
-                    )
-                elif method_name == "_call_minimax":
+                if method_name == "_call_minimax":
                     content = await asyncio.to_thread(
                         self._call_minimax,
                         system_prompt, user_prompt, json_mode, temperature, max_tokens
+                    )
+                elif method_name == "_call_gemini":
+                    content = await self._call_gemini(
+                        call_model, system_prompt, user_prompt,
+                        json_mode, temperature, max_tokens, thinking_disabled
                     )
                 else:
                     raise LLMError(f"unknown_method: {method_name}")
@@ -336,8 +279,8 @@ class LLMProvider:
         self,
         system_prompt: str,
         user_prompt: str,
-        fast_model: str = "deepseek-v4-flash",
-        pro_model: str = "deepseek-v4-pro",
+        fast_model: str = "MiniMax-M2.7-highspeed",
+        pro_model: str = "gemini-2.5-flash",
         threshold: int = -2,
         no_escalation: bool = False,
         json_mode: bool = False,
@@ -346,7 +289,7 @@ class LLMProvider:
         thinking_disabled: bool = True,
         scoring_fn=None,
     ) -> Dict[str, Any]:
-        """Try Flash first; if cascade fails, escalate to Pro explicitly. Async."""
+        """Try fast (MiniMax) first; if cascade fails or low score, escalate to pro (Gemini)."""
         if no_escalation:
             result = await self.chat(
                 system_prompt, user_prompt, fast_model, json_mode, temperature, max_tokens, thinking_disabled
@@ -374,7 +317,6 @@ class LLMProvider:
 
     @staticmethod
     def parse_tool_calls(response_data: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Extract tool_calls from LLM response."""
         choices = response_data.get("choices", [])
         if not choices:
             return []
@@ -387,7 +329,7 @@ class LLMProvider:
         user_prompt: str,
         tools: List[Dict[str, Any]],
         tool_executor=None,
-        model: str = "deepseek-v4-flash",
+        model: str = "MiniMax-M2.7-highspeed",
         json_mode: bool = False,
         temperature: float = 0.7,
         max_tokens: int = 1000,
@@ -453,18 +395,14 @@ class LLMProvider:
         return {"content": last_content or "Maximo de execucoes atingido.", "model_used": model, "tool_rounds": tool_count}
 
     async def _call_provider(self, payload: Dict[str, Any], model: str) -> Dict[str, Any]:
-        """Execute a single provider call and return the full API response dict. Async."""
         cascade = self._build_cascade_providers(model)
 
         for attempt_idx, (pname, pmodel, method_name, call_model) in enumerate(cascade):
-            data: Dict[str, Any]
             try:
-                if method_name == "_call_deepseek":
-                    data = self._normalize_raw(await self._call_deepseek_raw(call_model, payload))
-                elif method_name == "_call_nvidia":
-                    data = await self._call_nvidia_raw(call_model, payload)
-                elif method_name == "_call_minimax":
+                if method_name == "_call_minimax":
                     data = await self._call_minimax_raw(payload)
+                elif method_name == "_call_gemini":
+                    data = await self._call_gemini_raw(call_model, payload)
                 else:
                     raise LLMError(f"unknown_method: {method_name}")
                 return data
@@ -475,11 +413,52 @@ class LLMProvider:
                 continue
         raise LLMError("all_providers_failed")
 
-    @staticmethod
-    def _normalize_raw(value: Any) -> Dict[str, Any]:
-        if isinstance(value, dict):
-            return value
-        return {"choices": [{"message": {"content": str(value)}}]}
+    async def _call_minimax_raw(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        if not self.minimax_key:
+            raise LLMError("minimax_key_not_configured")
+        url = f"{self.minimax_base}/chat/completions"
+        headers = {"Authorization": f"Bearer {self.minimax_key}", "Content-Type": "application/json"}
+        payload["model"] = self.minimax_model
+        payload.pop("thinking", None)
+        async with httpx.AsyncClient(timeout=300) as client:
+            resp = await client.post(url, headers=headers, json=payload)
+        if resp.status_code == 429:
+            raise LLMError("minimax_quota_exceeded")
+        if resp.status_code == 401:
+            raise LLMError("minimax_auth_failed")
+        resp.raise_for_status()
+        data = resp.json()
+        if "choices" not in data or not data["choices"]:
+            raise LLMError("minimax_empty_response")
+        if "base_resp" in data:
+            base_resp = data["base_resp"]
+            if base_resp.get("status_code", 0) != 0:
+                raise LLMError(f"minimax_in_body_error: {base_resp.get('status_msg')}")
+        return data
+
+    async def _call_gemini_raw(self, model: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        if not self.gemini_key:
+            raise LLMError("gemini_key_not_configured")
+        # Translate OpenAI messages[] to Gemini generateContent shape.
+        text = await self._call_gemini(
+            model,
+            next((m["content"] for m in payload["messages"] if m["role"] == "system"), ""),
+            next((m["content"] for m in payload["messages"] if m["role"] == "user"), ""),
+            json_mode=payload.get("response_format", {}).get("type") == "json_object",
+            temperature=payload.get("temperature", 0.7),
+            max_tokens=payload.get("max_tokens", 1024),
+            thinking_disabled=True,
+        )
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": text,
+                    }
+                }
+            ]
+        }
 
     async def transcribe_audio_base64(self, audio_b64: str, mimetype: str = "audio/ogg") -> str:
         from tools.audio_transcribe import transcribe_base64
@@ -500,58 +479,28 @@ class LLMProvider:
             return "[audio]"
 
     async def _stt_gemini(self, audio_b64: str, mimetype: str) -> str:
-        raise LLMError("gemini_disabled_by_guardrail")
+        """Fallback STT via Gemini 2.5 Flash (only when Whisper fails)."""
+        if not self.gemini_key:
+            raise LLMError("gemini_key_not_configured")
+        try:
+            from google.generativeai import configure as _ga_configure
+            from google.generativeai import GenerativeModel
+            import base64 as _b64
+        except Exception as exc:  # noqa: BLE001
+            raise LLMError(f"gemini_sdk_missing: {exc}")
 
-    async def _call_gemini_raw(self, model: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        raise LLMError("gemini_disabled_by_guardrail")
-
-    async def _call_deepseek_raw(self, model: str, payload: Dict[str, Any]) -> str:
-        if not self.deepseek_key:
-            raise LLMError("deepseek_key_not_configured")
-        url = f"{self.deepseek_base}/chat/completions"
-        headers = {"Authorization": f"Bearer {self.deepseek_key}", "Content-Type": "application/json"}
-        payload["model"] = model
-        async with httpx.AsyncClient(timeout=300) as client:
-            resp = await client.post(url, headers=headers, json=payload)
-        if resp.status_code == 429:
-            raise LLMError("deepseek_quota_exceeded")
-        if resp.status_code == 401:
-            raise LLMError("deepseek_auth_failed")
-        resp.raise_for_status()
-        data = resp.json()
-        if "choices" not in data or not data["choices"]:
-            raise LLMError("deepseek_empty_response")
-        return data
-
-    async def _call_nvidia_raw(self, model: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        if not self.nvidia_key:
-            raise LLMError("nvidia_key_not_configured")
-        url = f"{self.nvidia_base}/chat/completions"
-        headers = {"Authorization": f"Bearer {self.nvidia_key}", "Content-Type": "application/json"}
-        payload["model"] = model
-        async with httpx.AsyncClient(timeout=300) as client:
-            resp = await client.post(url, headers=headers, json=payload)
-        if resp.status_code == 429:
-            raise LLMError("nvidia_quota_exceeded")
-        resp.raise_for_status()
-        data = resp.json()
-        if "choices" not in data or not data["choices"]:
-            raise LLMError("nvidia_empty_response")
-        return data
-
-    async def _call_minimax_raw(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        if not self.minimax_key:
-            raise LLMError("minimax_key_not_configured")
-        url = f"{self.minimax_base}/chat/completions"
-        headers = {"Authorization": f"Bearer {self.minimax_key}", "Content-Type": "application/json"}
-        payload["model"] = self.minimax_model
-        payload.pop("thinking", None)
-        async with httpx.AsyncClient(timeout=300) as client:
-            resp = await client.post(url, headers=headers, json=payload)
-        if resp.status_code == 429:
-            raise LLMError("minimax_quota_exceeded")
-        resp.raise_for_status()
-        data = resp.json()
-        if "choices" not in data or not data["choices"]:
-            raise LLMError("minimax_empty_response")
-        return data
+        _ga_configure(api_key=self.gemini_key)
+        gen_model = GenerativeModel(model_name=self.gemini_model)
+        raw = _b64.b64decode(audio_b64) if isinstance(audio_b64, str) else audio_b64
+        response = await asyncio.to_thread(
+            gen_model.generate_content,
+            [
+                {"inline_data": {"mime_type": mimetype, "data": _b64.b64encode(raw).decode()}},
+                "Transcreva este audio em portugues brasileiro.",
+            ],
+            generation_config={
+                "temperature": 0.0,
+                "max_output_tokens": 1024,
+            },
+        )
+        return (response.text or "").strip()

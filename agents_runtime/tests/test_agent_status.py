@@ -90,6 +90,7 @@ class TestAgentInventory:
             minimax_key = None
             deepseek_key = None
             nvidia_key = None
+            gemini_key = None
 
             def is_available(self) -> bool:
                 return False
@@ -100,7 +101,7 @@ class TestAgentInventory:
         monkeypatch.setattr(agent_status, "_LLMProvider", FakeLLM)
         with patch("core.rag._validate_embedding", return_value=[0.0] * 1536):
             with patch("core.secrets.get_secret", return_value=None):
-                assert agent_status._model_provider_ready("MiniMax-M3") is False
+                assert agent_status._model_provider_ready("MiniMax-M2.7-highspeed") is False
                 assert agent_status._model_provider_ready("deepseek-v4-flash") is False
                 assert agent_status._model_provider_ready("nvidia/nemotron") is False
                 assert agent_status._model_provider_ready("anything-else") is False
@@ -108,13 +109,13 @@ class TestAgentInventory:
                 assert agent_status._model_provider_ready("Gemini-2.5-Flash") is False
 
         class FakeLLMSingleKey(FakeLLM):
-            deepseek_key = "sk-test"
+            minimax_key = "sk-test"
 
             def is_available(self) -> bool:
                 return True
 
         monkeypatch.setattr(agent_status, "_LLMProvider", FakeLLMSingleKey)
-        assert agent_status._model_provider_ready("deepseek-v4-flash") is True
+        assert agent_status._model_provider_ready("MiniMax-M2.7-highspeed") is True
         assert agent_status._model_provider_ready("anything-else") is True
 
         class FakeLLMAvailable(FakeLLM):
@@ -122,7 +123,7 @@ class TestAgentInventory:
                 return True
 
         monkeypatch.setattr(agent_status, "_LLMProvider", FakeLLMAvailable)
-        assert agent_status._model_provider_ready("MiniMax-M3") is True
+        assert agent_status._model_provider_ready("MiniMax-M2.7-highspeed") is True
         assert agent_status._model_provider_ready("deepseek-v4-flash") is True
         assert agent_status._model_provider_ready("anything-else") is True
 

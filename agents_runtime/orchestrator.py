@@ -1080,7 +1080,7 @@ async def _execute_agent(
     threshold = agent.get("escalation_threshold", -2)
     no_escalation = agent.get("no_escalation", False)
     thinking = agent.get("thinking", "disabled") == "enabled"
-    fast_model = agent.get("model", "deepseek-v4-flash")
+    fast_model = agent.get("model", "MiniMax-M2.7-highspeed")
 
     tool_schemas = []
     for tid in available_tools:
@@ -1120,7 +1120,7 @@ async def _execute_agent(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 fast_model=fast_model,
-                pro_model=agent.get("model_escalation") or "deepseek-v4-pro",
+                pro_model=agent.get("model_escalation") or "gemini-2.5-flash",
                 threshold=threshold,
                 no_escalation=no_escalation,
                 temperature=0.7,

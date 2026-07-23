@@ -100,17 +100,23 @@ class TestAudioTranscription:
                 _probe_duration("audio.ogg")
 
 
-class TestNoGeminiAudio:
-    def test_cascade_never_contains_gemini(self, monkeypatch):
+class TestGeminiAudioFallback:
+    """23/07/2026: Gemini e fallback controlado do Whisper quando o
+    Whisper falha tecnicamente e o consentimento (env ou flag) esta ativo.
+    """
+
+    def test_cascade_uses_gemini_as_fallback(self, monkeypatch):
         from core.llm_provider import LLMProvider
 
         monkeypatch.setenv("MINIMAX_API_KEY", "minimax-test")
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-test")
+        monkeypatch.setenv("GEMINI_API_KEY", "gemini-test")
         provider = LLMProvider()
-        providers = provider._build_cascade_providers("MiniMax-M3")
+        providers = provider._build_cascade_providers("MiniMax-M2.7-highspeed")
 
-        assert all(item[0] != "gemini" for item in providers)
-        assert provider.gemini_available() is False
+        names = [item[0] for item in providers]
+        assert "minimax-hs" in names
+        assert "gemini-2.5-flash" in names
+        assert provider.gemini_available() is True
 
     @pytest.mark.asyncio
     async def test_llm_provider_delegates_base64_to_whisper(self, monkeypatch):
@@ -131,10 +137,16 @@ class TestNoGeminiAudio:
         transcribe.assert_awaited_once_with("YXVkaW8=", "audio/ogg")
 
     @pytest.mark.asyncio
-    async def test_gemini_call_is_blocked(self, monkeypatch):
+    async def test_gemini_call_requires_key(self, monkeypatch):
+        """23/07/2026: Gemini e fallback controlado do Whisper.
+
+        Quando a chave nao esta configurada, o provider levanta
+        ``gemini_key_not_configured`` em vez de fazer request.
+        """
         from core.llm_provider import LLMError, LLMProvider
 
         monkeypatch.setenv("MINIMAX_API_KEY", "minimax-test")
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
         provider = LLMProvider()
-        with pytest.raises(LLMError, match="gemini_disabled_by_guardrail"):
-            await provider._call_gemini_raw("gemini", {})
+        with pytest.raises(LLMError, match="gemini_key_not_configured"):
+            await provider._stt_gemini(b"fake-audio", "audio/ogg")

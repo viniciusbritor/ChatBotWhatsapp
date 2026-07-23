@@ -46,10 +46,16 @@ def _model_provider_ready(model: str) -> bool:
         logger.warning("_LLMProvider init failed: %s", exc)
         return False
     has_minimax = bool(provider.minimax_key)
-    has_deepseek = bool(provider.deepseek_key)
-    has_nvidia = bool(provider.nvidia_key)
-    cascade_avail = has_minimax or has_deepseek or has_nvidia or provider.is_available()
-    if any(token in normalized for token in ("minimax", "deepseek", "nvidia", "claude", "gpt-")):
+    has_gemini = bool(provider.gemini_key)
+    cascade_avail = (
+        has_minimax
+        or has_gemini
+        or provider.is_available()
+    )
+    if any(
+        token in normalized
+        for token in ("minimax", "gemini", "claude", "gpt-")
+    ):
         return cascade_avail
     return cascade_avail
 

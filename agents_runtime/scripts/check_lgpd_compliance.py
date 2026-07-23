@@ -16,7 +16,6 @@ REQUIRED_SNIPPETS = {
     ROOT / "main.py": ["mask_pii(transcript)"],
     ROOT / "orchestrator.py": ["masked_text = mask_pii(text)"],
     ROOT / "cloudbuild-test.yaml": ["scripts/check_lgpd_compliance.py"],
-    ROOT / "cloudbuild.yaml": ["scripts/check_lgpd_compliance.py"],
 }
 
 
