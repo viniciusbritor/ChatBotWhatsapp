@@ -201,8 +201,8 @@ class LLMProvider:
         if not self.gemini_key:
             raise LLMError("gemini_key_not_configured")
         try:
-            from google.generativeai import configure as _ga_configure  # type: ignore
-            from google.generativeai import GenerativeModel  # type: ignore
+            from google.generativeai import configure as _ga_configure
+            from google.generativeai import GenerativeModel
         except Exception as exc:  # noqa: BLE001
             raise LLMError(f"gemini_sdk_missing: {exc}")
 
@@ -212,7 +212,7 @@ class LLMProvider:
         full_prompt = (
             f"{system_instruction}\n\n{user_prompt}" if system_instruction else user_prompt
         )
-        generation_config = {
+        generation_config: Dict[str, Any] = {
             "temperature": float(temperature or 0.7),
             "max_output_tokens": int(max_tokens or 1024),
         }
