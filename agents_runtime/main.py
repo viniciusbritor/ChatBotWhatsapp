@@ -82,8 +82,17 @@ app.middleware("http")(auth_middleware)
 
 
 @app.get("/healthz")
-async def healthz():
-    """Public health check endpoint."""
+async def healthz():  # alias for compatibility with previous deployments
+    return _health_payload()
+
+
+@app.get("/health")
+async def health():
+    """Public health check endpoint (alias)."""
+    return _health_payload()
+
+
+def _health_payload() -> Dict[str, Any]:
     return {
         "status": "ok",
         "version": VERSION,

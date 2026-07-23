@@ -2,7 +2,10 @@
 
 > **Ambiente Operacional:** Instrucoes para configurar, executar e depurar o modulo `omnichannel-agentes` + servico `agents_runtime`.
 
-> **Documento mestre:** [`PLAN_OMNICHANNEL_AGENTES.md`](./PLAN_OMNICHANNEL_AGENTES.md) — plano consolidado.
+> **Diagrama visual ponta a ponta:** [`ARQUITETURA.md`](./ARQUITETURA.md#0-diagrama-visual-ponta-a-ponta).
+> O diagrama mostra o caminho `WhatsApp → Evolution → Cloud Run →
+> Pub/Sub → Orchestrator → Evolution → resposta` com Firestore plain
+> para histórico de chat e Firestore Vector restrito a documentos.
 
 ## GCP Project & Recursos
 

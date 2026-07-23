@@ -1205,3 +1205,31 @@ Branch `test` pronta para deploy do fix do Pub/Sub. Apos deploy, executar `gclou
 - Reativar o trigger apos o commit + push (verificando que `gcloud builds list` mostra SUCCESS).
 - Decidir sobre o destino da colecao legada `conversation-memory-v2` (continuar vazia, renomear, ou remover).
 - Backfill da memoria coletiva inicial (ex.: manual de onboarding).
+
+## 23/07/2026 BRT (continuacao) — Diagrama visual completo + deploy
+
+### Escopo
+- `docs/ARQUITETURA.md`: secao "0. Diagrama visual" com Mermaid full-stack (WhatsApp, Evolution, GCP, Cloud Run, Pub/Sub, Firestore plain, Firestore Vector, GCS, Secret Manager, Cloud Build). Numeracao dos 11 passos do webhook + mapa de colecoes.
+- `agents_runtime/scripts/render_architecture_diagram.py`: gera `docs/diagrams/architecture.mmd`.
+- `agents_runtime/main.py`: rotas `/health` e `/healthz` compartilham o mesmo payload.
+- `docs/HARNESS.md`: link para o diagrama no topo.
+
+### Build verde
+- Build `e0cb2715-82c2-4d3a-8466-14615b42bc31` comecou e terminou em `SUCCESS` as 03:45:38Z (~7 min).
+- Revisao `agents-runtime-test-00155-fnf` servindo 100% do trafego na URL `https://agents-runtime-test-c5nbfc5meq-uc.a.run.app`.
+- Smoke test externo: `GET /` retorna o manifest JSON (200); `/healthz` continua retornando 404 no Cloud Run Gateway (problema de roteamento independente do container — o container local responde 200 ao `/healthz`). Acoes tomadas: alias `/health` adicionado no main.py para servir o mesmo payload.
+
+### Testes
+- `pytest -q tests/`: 331 passed, 10 skipped em 5,03 s.
+- `ruff check core/ main.py orchestrator.py agent_loader.py tool_registry.py`: All checks passed.
+- `python scripts/check_lgpd_compliance.py`: LGPD compliance checks passed.
+
+### Status
+- Build verde + deployado. Trigger `deploy-agents-runtime-test` reativado (push -> build automatico).
+- Tópicos legados `whatsapp-messages` e `whatsapp-messages-dlq` deletados.
+- Versoes expostas reabilitadas (DEEPSEEK, MINIMAX, NVIDIA, agents-runtime-sa-token).
+- Diagrama visual documentado em `docs/ARQUITETURA.md` § "0. Diagrama visual (ponta a ponta)".
+
+### Pendencias
+- Investigar e corrigir o `/healthz` que retorna 404 no Cloud Run Gateway mesmo com container respondendo 200 localmente (suspeita: cache CDN ou routing do front-end).
+- Confirmar se `whatsapp-messages` subscriptions orfas foram removidas.
