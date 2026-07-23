@@ -36,7 +36,7 @@ def test_oauth_state_rejects_expiration(monkeypatch):
     monkeypatch.setenv("OAUTH_STATE_SECRET", "state-secret")
     with patch("core.oauth_per_user.time.time", return_value=1000):
         state = create_oauth_state("5511966830020")
-    with patch("core.oauth_per_user.time.time", return_value=2000):
+    with patch("core.oauth_per_user.time.time", return_value=1000 + 8 * 24 * 60 * 60):
         assert parse_oauth_state(state) is None
 
 

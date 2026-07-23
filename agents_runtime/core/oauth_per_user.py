@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 GCP_PROJECT = os.getenv("GCP_PROJECT", "coherence-ominichannel-fs")
 TOKEN_REFRESH_BEFORE_SEC = int(os.getenv("OAUTH_REFRESH_BEFORE_SEC", "300"))
-OAUTH_STATE_TTL_SEC = int(os.getenv("OAUTH_STATE_TTL_SEC", "600"))
+OAUTH_STATE_TTL_SEC = int(os.getenv("OAUTH_STATE_TTL_SEC", str(7 * 24 * 60 * 60)))
 OAUTH_USER_COLLECTION = os.getenv("OAUTH_USER_COLLECTION", "usuarios")
 BRT = timezone(timedelta(hours=-3))
 
