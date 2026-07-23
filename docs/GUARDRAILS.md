@@ -11,8 +11,9 @@
   precisam ser rotacionadas antes do próximo deploy.
 - **Upload de secrets**: APENAS `gcloud secrets versions add`. Nunca `versions
   update` (bug 12/07/2026 corrompeu chave DeepSeek).
-- **Sem Gemini API** para inferência LLM fora do fallback STT. STT Gemini só é
-  acionado para transcrição quando Whisper falha tecnicamente **e** há
+- **Gemini API é permitida como fallback LLM do cascade MiniMax M2.7-highspeed
+  → Gemini 2.5 Flash** (regra atualizada em 23/07/2026). STT Gemini permanece
+  como fallback da transcrição quando Whisper falha tecnicamente **e** há
   consentimento registrado.
 - **`agents_runtime` não expõe Swagger público** (`/docs`, `/redoc`,
   `/openapi.json` proibidos).
@@ -22,6 +23,12 @@
   UI e do middleware.
 - **Webhook aceita apenas payload Evolution válido**; filtros aplicam
   Evolution event, broadcast, fromMe e MIME.
+- **Controle de acesso Gmail/Drive/Calendar é responsabilidade do agente
+  `access_guardian`** (Fase H, 23/07/2026). O guardião roda dentro do grafo
+  LangGraph (`agent_orchestration.graph`) antes de cada tool call. O guard
+  determinístico `core.owner_guard` foi **descontinuado** — toda checagem de
+  owner + OAuth + scopes agora flui pelo agente. Tools Google podem confiar
+  que o guard já autorizou.
 
 ## 2. Privacidade (LGPD)
 
@@ -69,7 +76,11 @@
   válido. Falha no tick vira métrica mas nunca bloqueia o webhook.
 - Tick não bloqueia nem repete o webhook: timeout máximo 5 s, sem retry.
 - Remetente precisa coincidir com `owner_phone` da instância Evolution para
-  acessar Gmail, Drive ou Calendar.
+  acessar Gmail, Drive ou Calendar. Ver `access_guardian` no grafo LangGraph
+  (§ 0.0.1 do ARQUITETURA.md).
+- Toda resposta do LLM que cite "Vou puxar", "Deixa eu verificar", "aguarde"
+  etc. **sem retorno ativo** é considerado bug e deve gerar issue. O guard
+  do grafo LangGraph bloqueia esses placeholders antes do envio.
 
 ## 6. Áudio
 

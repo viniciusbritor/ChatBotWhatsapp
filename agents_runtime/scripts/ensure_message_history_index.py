@@ -39,7 +39,7 @@ def main() -> int:
 
     client = firestore_admin.FirestoreAdminClient()
     parent = f"projects/{args.project}/databases/(default)/collectionGroups/{args.collection}"
-    index_id = f"owner_hash_asc_created_at_desc"
+    index_id = "owner_hash_asc_created_at_desc"
 
     index = firestore_admin.Index(
         query_scope=firestore_admin.Index.QueryScope.COLLECTION,

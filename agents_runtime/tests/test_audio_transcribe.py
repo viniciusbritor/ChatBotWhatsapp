@@ -1,152 +1,257 @@
+"""Tests for the audio transcription cascade (MiniMax -> Gemini fallback)."""
 import base64
+import socket
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 
-class TestAudioValidation:
-    def test_rejects_unknown_mimetype(self):
-        from tools.audio_transcribe import AudioValidationError, _validate_mimetype
+class TestMimetypeValidation:
+    def test_accepts_ogg(self):
+        from core.audio_transcribe import _validate_mimetype
 
-        with pytest.raises(AudioValidationError, match="audio_mimetype_not_allowed"):
+        assert _validate_mimetype("audio/ogg") == "audio/ogg"
+
+    def test_accepts_mp3_with_charset(self):
+        from core.audio_transcribe import _validate_mimetype
+
+        assert _validate_mimetype("audio/mpeg; codecs=mp3") == "audio/mpeg"
+
+    def test_rejects_unknown_mimetype(self):
+        from core.audio_transcribe import _validate_mimetype
+
+        with pytest.raises(ValueError, match="audio_mimetype_not_allowed"):
             _validate_mimetype("application/octet-stream")
 
+    def test_rejects_video_mimetype(self):
+        from core.audio_transcribe import _validate_mimetype
+
+        with pytest.raises(ValueError, match="audio_mimetype_not_allowed"):
+            _validate_mimetype("video/mp4")
+
+    def test_normalizes_uppercase(self):
+        from core.audio_transcribe import _validate_mimetype
+
+        assert _validate_mimetype("AUDIO/OGG") == "audio/ogg"
+
+
+class TestBase64Decode:
+    def test_accepts_valid_base64(self):
+        from core.audio_transcribe import transcribe_base64
+
+        audio_bytes = b"\x00\x01\x02hello" * 100
+        b64 = base64.b64encode(audio_bytes).decode("ascii")
+
+        async def fake_transcribe(audio, mime, instance):
+            return {"transcript": "hello world", "provider": "minimax", "reason": ""}
+
+        with patch("core.audio_transcribe.transcribe_bytes", side_effect=fake_transcribe):
+            import asyncio
+            result = asyncio.run(transcribe_base64(b64, "audio/ogg", "Jennifer"))
+
+        assert result["transcript"] == "hello world"
+
     def test_rejects_invalid_base64(self):
-        from tools.audio_transcribe import AudioValidationError, _decode_base64
+        from core.audio_transcribe import transcribe_base64
 
-        with pytest.raises(AudioValidationError, match="audio_base64_invalid"):
-            _decode_base64("not-valid-base64")
+        with pytest.raises(Exception):
+            import asyncio
+            asyncio.run(transcribe_base64("not-valid-base64!@#", "audio/ogg", "Jennifer"))
 
-    def test_rejects_large_audio(self, monkeypatch):
-        from tools.audio_transcribe import AudioValidationError, _validate_size
+    def test_accepts_minimax_format(self):
+        from core.audio_transcribe import transcribe_base64
 
-        monkeypatch.setattr("tools.audio_transcribe.AUDIO_MAX_BYTES", 3)
-        with pytest.raises(AudioValidationError, match="audio_too_large"):
-            _validate_size(b"1234")
+        audio_bytes = b"\xff\xfe\xfd" * 50
+        b64 = base64.b64encode(audio_bytes).decode("ascii")
 
-    def test_requires_https_url(self):
-        from tools.audio_transcribe import AudioValidationError, _validate_audio_url
+        async def fake_transcribe(audio, mime, instance):
+            assert len(audio) == 150
+            return {"transcript": "ok", "provider": "minimax", "reason": ""}
 
-        with pytest.raises(AudioValidationError, match="audio_url_https_required"):
+        with patch("core.audio_transcribe.transcribe_bytes", side_effect=fake_transcribe):
+            import asyncio
+            asyncio.run(transcribe_base64(b64, "audio/mp3", "Jennifer"))
+
+
+class TestSizeValidation:
+    def test_rejects_oversized_payload(self):
+        from core.audio_transcribe import transcribe_bytes
+
+        audio_bytes = b"\x00" * (30 * 1024 * 1024)
+        import asyncio
+        result = asyncio.run(transcribe_bytes(audio_bytes, "audio/ogg", "Jennifer"))
+        assert result["reason"] == "too_large"
+        assert result["provider"] == "none"
+
+    def test_accepts_normal_payload(self):
+        from core.audio_transcribe import transcribe_bytes
+
+        def fake_transcribe(audio, mime, instance):
+            return {"transcript": "ok", "provider": "minimax", "reason": ""}
+
+        async def fake_to_thread(func, *args, **kwargs):
+            return func(*args, **kwargs)
+
+        with patch("core.audio_transcribe._transcribe", side_effect=fake_transcribe):
+            with patch("core.audio_transcribe.asyncio.to_thread", side_effect=fake_to_thread):
+                import asyncio
+                result = asyncio.run(transcribe_bytes(b"\x00" * 100, "audio/ogg", "Jennifer"))
+        assert result["transcript"] == "ok"
+
+    def test_rejects_empty_payload(self):
+        from core.audio_transcribe import transcribe_bytes
+
+        import asyncio
+        result = asyncio.run(transcribe_bytes(b"", "audio/ogg", "Jennifer"))
+        assert result["reason"] == "empty"
+
+
+class TestURLValidation:
+    def test_requires_https(self):
+        from core.audio_transcribe import _validate_audio_url
+
+        with pytest.raises(ValueError, match="audio_url_https_required"):
             _validate_audio_url("http://evolution.coherenceai.com.br/audio.ogg")
 
-    def test_rejects_host_outside_allowlist(self):
-        from tools.audio_transcribe import AudioValidationError, _validate_audio_url
+    def test_rejects_userinfo(self):
+        from core.audio_transcribe import _validate_audio_url
 
-        with pytest.raises(AudioValidationError, match="audio_url_host_not_allowed"):
-            _validate_audio_url("https://example.com/audio.ogg")
+        with pytest.raises(ValueError, match="audio_url_invalid"):
+            _validate_audio_url("https://user:pass@evolution.coherenceai.com.br/audio.ogg")
 
-    def test_rejects_private_dns_resolution(self):
-        from tools.audio_transcribe import AudioValidationError, _validate_audio_url
+    def test_rejects_unknown_host(self, monkeypatch):
+        from core.audio_transcribe import _validate_audio_url
 
-        with patch(
-            "tools.audio_transcribe.socket.getaddrinfo",
-            return_value=[(2, 1, 6, "", ("127.0.0.1", 0))],
-        ):
-            with pytest.raises(AudioValidationError, match="audio_url_private_address"):
-                _validate_audio_url("https://evolution.coherenceai.com.br/audio.ogg")
+        monkeypatch.setattr(
+            "core.audio_transcribe._validate_public_host",
+            lambda host: (_ for _ in ()).throw(ValueError("audio_url_host_not_allowed")),
+        )
+        with pytest.raises(ValueError):
+            _validate_audio_url("https://unknown-host.example/audio.ogg")
 
-    def test_accepts_allowlisted_public_host(self):
-        from tools.audio_transcribe import _validate_audio_url
+    def test_accepts_allowlisted_host(self, monkeypatch):
+        from core.audio_transcribe import _validate_audio_url
 
-        with patch(
-            "tools.audio_transcribe.socket.getaddrinfo",
-            return_value=[(2, 1, 6, "", ("8.8.8.8", 0))],
-        ):
-            result = _validate_audio_url("https://evolution.coherenceai.com.br/audio.ogg")
-
-        assert result == "https://evolution.coherenceai.com.br/audio.ogg"
+        monkeypatch.setattr(
+            "core.audio_transcribe._validate_public_host", lambda host: None
+        )
+        url = _validate_audio_url("https://evolution.coherenceai.com.br/audio.ogg")
+        assert url.startswith("https://evolution.coherenceai.com.br")
 
 
-class TestAudioTranscription:
-    @pytest.mark.asyncio
-    async def test_base64_decodes_and_uses_local_transcriber(self):
-        from tools.audio_transcribe import transcribe_base64
+class TestPublicHostCheck:
+    def test_allows_evolution_hostname(self, monkeypatch):
+        from core import audio_transcribe
 
-        encoded = base64.b64encode(b"audio-bytes").decode()
-        with patch(
-            "tools.audio_transcribe.transcribe_bytes",
-            new_callable=AsyncMock,
-            return_value="transcricao",
-        ) as transcribe:
-            result = await transcribe_base64(encoded, "audio/ogg")
+        monkeypatch.setattr(
+            audio_transcribe,
+            "AUDIO_URL_ALLOWED_HOSTS",
+            {"evolution.coherenceai.com.br"},
+        )
+        monkeypatch.setattr(
+            "socket.getaddrinfo",
+            lambda *a, **kw: [(None, None, None, None, ("8.8.8.8", 443))],
+        )
+        audio_transcribe._validate_public_host("evolution.coherenceai.com.br")
 
-        assert result == "transcricao"
-        assert transcribe.await_args.args[0] == b"audio-bytes"
+    def test_rejects_localhost(self):
+        from core import audio_transcribe
 
-    @pytest.mark.asyncio
-    async def test_transcribe_bytes_removes_temporary_file(self):
-        from tools.audio_transcribe import transcribe_bytes
+        monkeypatch_holder = audio_transcribe.AUDIO_URL_ALLOWED_HOSTS | {"localhost"}
+        with patch.object(audio_transcribe, "AUDIO_URL_ALLOWED_HOSTS", monkeypatch_holder):
+            with patch(
+                "socket.getaddrinfo",
+                return_value=[(None, None, None, None, ("127.0.0.1", 0))],
+            ):
+                with pytest.raises(ValueError, match="audio_url_private_address"):
+                    audio_transcribe._validate_public_host("localhost")
 
-        captured = []
+    def test_rejects_private_ip(self):
+        from core import audio_transcribe
 
-        def fake_transcribe(file_path):
-            captured.append(file_path)
-            return "texto"
-
-        with patch("tools.audio_transcribe._transcribe_file", side_effect=fake_transcribe):
-            result = await transcribe_bytes(b"audio-bytes", "audio/ogg")
-
-        assert result == "texto"
-        assert captured
-        assert not __import__("os").path.exists(captured[0])
-
-    def test_probe_rejects_audio_over_five_minutes(self):
-        from tools.audio_transcribe import AudioValidationError, _probe_duration
-
-        process = MagicMock(returncode=0, stdout='{"format":{"duration":"301.0"}}')
-        with patch("tools.audio_transcribe.subprocess.run", return_value=process):
-            with pytest.raises(AudioValidationError, match="audio_too_long"):
-                _probe_duration("audio.ogg")
+        monkeypatch_holder = audio_transcribe.AUDIO_URL_ALLOWED_HOSTS | {"any-host.example"}
+        with patch.object(audio_transcribe, "AUDIO_URL_ALLOWED_HOSTS", monkeypatch_holder):
+            with patch(
+                "socket.getaddrinfo",
+                return_value=[(None, None, None, None, ("192.168.1.1", 0))],
+            ):
+                with pytest.raises(ValueError, match="audio_url_private_address"):
+                    audio_transcribe._validate_public_host("any-host.example")
 
 
-class TestGeminiAudioFallback:
-    """23/07/2026: Gemini e fallback controlado do Whisper quando o
-    Whisper falha tecnicamente e o consentimento (env ou flag) esta ativo.
-    """
+class TestCascadeTranscribe:
+    def test_returns_minimax_result_when_successful(self):
+        from core.audio_transcribe import _transcribe
 
-    def test_cascade_uses_gemini_as_fallback(self, monkeypatch):
-        from core.llm_provider import LLMProvider
+        def fake_minimax(*args, **kwargs):
+            return "hello world"
 
-        monkeypatch.setenv("MINIMAX_API_KEY", "minimax-test")
-        monkeypatch.setenv("GEMINI_API_KEY", "gemini-test")
-        provider = LLMProvider()
-        providers = provider._build_cascade_providers("MiniMax-M2.7-highspeed")
+        with patch("core.audio_transcribe._transcribe_with_minimax", side_effect=fake_minimax):
+            result = _transcribe(b"audio", "audio/ogg", "Jennifer")
+        assert result["transcript"] == "hello world"
+        assert result["provider"].startswith("minimax:")
+        assert result["reason"] == ""
 
-        names = [item[0] for item in providers]
-        assert "minimax-hs" in names
-        assert "gemini-2.5-flash" in names
-        assert provider.gemini_available() is True
+    def test_falls_back_to_gemini_when_minimax_fails(self):
+        from core.audio_transcribe import _transcribe
 
-    @pytest.mark.asyncio
-    async def test_llm_provider_delegates_base64_to_whisper(self, monkeypatch):
-        from core.llm_provider import LLMProvider
+        def fake_minimax(*args, **kwargs):
+            raise RuntimeError("minimax_stt_failed")
 
-        monkeypatch.setenv("MINIMAX_API_KEY", "minimax-test")
-        provider = LLMProvider()
-        with patch(
-            "tools.audio_transcribe.transcribe_base64",
-            new_callable=AsyncMock,
-            return_value="texto",
-        ) as transcribe:
-            result = await provider.transcribe_audio_base64(
-                "YXVkaW8=", "audio/ogg"
-            )
+        def fake_gemini(*args, **kwargs):
+            return "fallback transcript"
 
-        assert result == "texto"
-        transcribe.assert_awaited_once_with("YXVkaW8=", "audio/ogg")
+        with patch("core.audio_transcribe._transcribe_with_minimax", side_effect=fake_minimax):
+            with patch("core.audio_transcribe._transcribe_with_gemini", side_effect=fake_gemini):
+                result = _transcribe(b"audio", "audio/ogg", "Jennifer")
+        assert result["transcript"] == "fallback transcript"
+        assert result["provider"].startswith("gemini:")
+        assert "minimax_" in result["reason"]
 
-    @pytest.mark.asyncio
-    async def test_gemini_call_requires_key(self, monkeypatch):
-        """23/07/2026: Gemini e fallback controlado do Whisper.
+    def test_raises_when_both_providers_fail(self):
+        from core.audio_transcribe import _transcribe
 
-        Quando a chave nao esta configurada, o provider levanta
-        ``gemini_key_not_configured`` em vez de fazer request.
-        """
-        from core.llm_provider import LLMError, LLMProvider
+        def fake_minimax(*args, **kwargs):
+            raise RuntimeError("minimax_stt_failed")
 
-        monkeypatch.setenv("MINIMAX_API_KEY", "minimax-test")
-        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-        provider = LLMProvider()
-        with pytest.raises(LLMError, match="gemini_key_not_configured"):
-            await provider._stt_gemini(b"fake-audio", "audio/ogg")
+        def fake_gemini(*args, **kwargs):
+            raise RuntimeError("gemini_stt_failed")
+
+        with patch("core.audio_transcribe._transcribe_with_minimax", side_effect=fake_minimax):
+            with patch("core.audio_transcribe._transcribe_with_gemini", side_effect=fake_gemini):
+                with pytest.raises(RuntimeError, match="minimax_stt_failed"):
+                    _transcribe(b"audio", "audio/ogg", "Jennifer")
+
+    def test_falls_back_to_gemini_when_minimax_returns_empty(self):
+        from core.audio_transcribe import _transcribe
+
+        def fake_minimax(*args, **kwargs):
+            raise RuntimeError("minimax_empty_response")
+
+        def fake_gemini(*args, **kwargs):
+            return "recovered transcript"
+
+        with patch("core.audio_transcribe._transcribe_with_minimax", side_effect=fake_minimax):
+            with patch("core.audio_transcribe._transcribe_with_gemini", side_effect=fake_gemini):
+                result = _transcribe(b"audio", "audio/ogg", "Jennifer")
+        assert result["transcript"] == "recovered transcript"
+
+
+class TestGeminiFallbackConfiguration:
+    def test_gemini_endpoint_uses_generativelanguage(self, monkeypatch):
+        monkeypatch.setenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com")
+        monkeypatch.setenv("GEMINI_STT_MODEL", "gemini-2.5-flash")
+        import importlib
+        import core.audio_transcribe as at
+        importlib.reload(at)
+        assert at.GEMINI_STT_ENDPOINT.startswith("https://generativelanguage.googleapis.com")
+        assert "gemini-2.5-flash" in at.GEMINI_STT_ENDPOINT
+
+    def test_fallback_stats_exposes_cascade_config(self):
+        from core.audio_transcribe import fallback_stats
+
+        stats = fallback_stats()
+        assert stats["primary"] == "MiniMax-M3"
+        assert stats["fallback"] == "gemini-2.5-flash"
+        assert stats["max_bytes"] >= 1024 * 1024
+        assert stats["max_duration_sec"] >= 60

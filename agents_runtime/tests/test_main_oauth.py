@@ -12,6 +12,12 @@ def _request(query):
     request = MagicMock()
     request.query_params = query
     request.url_for.return_value = "https://agents-runtime.example.run.app/oauth/callback"
+    request.headers = {
+        "x-forwarded-proto": "https",
+        "x-forwarded-host": "agents-runtime.example.run.app",
+    }
+    request.url.scheme = "https"
+    request.url.hostname = "agents-runtime.example.run.app"
     return request
 
 

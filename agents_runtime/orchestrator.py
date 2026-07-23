@@ -424,7 +424,7 @@ def _extract_search_terms(text: str) -> str:
     return " ".join(terms[:10])
 
 
-async def _prefetch_calendar(phone: str) -> Optional[str]:
+async def _prefetch_calendar(phone: str, instance: str = "") -> Optional[str]:
     """Fase B: pre-busca eventos do dia sem LLM."""
     try:
         from tools.google_calendar import list_events
@@ -436,6 +436,7 @@ async def _prefetch_calendar(phone: str) -> Optional[str]:
             time_min=hoje.strftime("%Y-%m-%dT00:00:00-03:00"),
             time_max=hoje.strftime("%Y-%m-%dT23:59:59-03:00"),
             max_results=50,
+            instance=instance,
         )
         events = result.get("events", [])
         if not events:
@@ -446,11 +447,16 @@ async def _prefetch_calendar(phone: str) -> Optional[str]:
         return None
 
 
-async def _prefetch_email(phone: str) -> Optional[str]:
+async def _prefetch_email(phone: str, instance: str = "") -> Optional[str]:
     """Fase B: pre-busca ultimos emails sem LLM."""
     try:
         from tools.google_gmail import search_messages
-        result = await search_messages(phone, "in:inbox newer_than:30d", max_results=10)
+        result = await search_messages(
+            phone,
+            "in:inbox newer_than:30d",
+            max_results=10,
+            instance=instance,
+        )
         messages = result.get("messages", [])
         if not messages:
             return None
@@ -460,11 +466,11 @@ async def _prefetch_email(phone: str) -> Optional[str]:
         return None
 
 
-async def _prefetch_drive(phone: str, query_text: str = "") -> Optional[str]:
+async def _prefetch_drive(phone: str, query_text: str = "", instance: str = "") -> Optional[str]:
     """Fase B: pre-busca arquivos no Drive sem LLM."""
     try:
         from tools.google_drive import search_files
-        result = await search_files(phone, query_text or "", max_results=20)
+        result = await search_files(phone, query_text or "", max_results=20, instance=instance)
         files = result.get("files", [])
         if not files:
             return None
@@ -474,16 +480,16 @@ async def _prefetch_drive(phone: str, query_text: str = "") -> Optional[str]:
         return None
 
 
-async def _prefetch_drive_multi(phone: str, text: str) -> Optional[str]:
+async def _prefetch_drive_multi(phone: str, text: str, instance: str = "") -> Optional[str]:
     """D1: 3 queries paralelas no Drive, usa a com mais resultados."""
     query1 = _extract_search_terms(text)
     query2 = " ".join(w for w in text.lower().split()
                       if len(w.strip(",.!?;:")) > 3)[:5]
     results = await asyncio.gather(
-        _prefetch_drive(phone, query1),
-        _prefetch_drive(phone, query2),
-        _prefetch_drive_docs(phone, query1),
-        _prefetch_drive_docs(phone, query2),
+        _prefetch_drive(phone, query1, instance),
+        _prefetch_drive(phone, query2, instance),
+        _prefetch_drive_docs(phone, query1, instance),
+        _prefetch_drive_docs(phone, query2, instance),
         return_exceptions=True,
     )
     best, best_count = None, 0
@@ -498,7 +504,7 @@ async def _prefetch_drive_multi(phone: str, text: str) -> Optional[str]:
     return best
 
 
-async def _prefetch_drive_docs(phone: str, query_text: str = "") -> Optional[str]:
+async def _prefetch_drive_docs(phone: str, query_text: str = "", instance: str = "") -> Optional[str]:
     """Prefetch so documentos e apresentacoes do Drive (atas, slides)."""
     try:
         from tools.google_drive import search_files
@@ -506,8 +512,20 @@ async def _prefetch_drive_docs(phone: str, query_text: str = "") -> Optional[str
         if query_text:
             query_parts.append(f"name contains '{query_text}'")
         query_parts.append("mimeType contains 'document' or mimeType contains 'presentation'")
-        result = await search_files(phone, query_text or "", mime_type="application/vnd.google-apps.document", max_results=20)
-        alt = await search_files(phone, query_text or "", mime_type="application/vnd.google-apps.presentation", max_results=20)
+        result = await search_files(
+            phone,
+            query_text or "",
+            mime_type="application/vnd.google-apps.document",
+            max_results=20,
+            instance=instance,
+        )
+        alt = await search_files(
+            phone,
+            query_text or "",
+            mime_type="application/vnd.google-apps.presentation",
+            max_results=20,
+            instance=instance,
+        )
         all_files = result.get("files", []) + alt.get("files", [])
         if not all_files:
             return None
@@ -885,17 +903,50 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
             agent_copy = dict(agent)
             prefetch_data = None
 
-            if _is_read_query(masked_text):
+            guard_result = await _run_guard_graph(payload, masked_text, intent)
+            guard_verdict = (guard_result or {}).get("verdict", "noop")
+            if guard_verdict in {"deny", "request_oauth"}:
+                decision = (guard_result or {}).get("decision") or {}
+                link = decision.get("oauth_link", "")
+                if guard_verdict == "request_oauth" and link:
+                    reply = (
+                        "Oi! Para acessar " + decision.get("capability", "essa ferramenta") +
+                        ", preciso que voce autorize sua conta Google. "
+                        f"Acesse este link e faca o login: {link}"
+                    )
+                else:
+                    reply = (
+                        "Oi! Essa acao so pode ser executada pelo proprietario "
+                        "da conta WhatsApp."
+                    )
+                return {
+                    "reply": reply,
+                    "delay_ms": 0,
+                    "presence": "composing",
+                    "metadata": {
+                        "agent_id": "access_guardian",
+                        "guardian_verdict": guard_verdict,
+                        "guardian_reason": decision.get("reason", ""),
+                        "guardian_capability": decision.get("capability", ""),
+                        "response_identity": "Jennifer",
+                        "blocked": True,
+                    },
+                }
+
+            if guard_result.get("prefetch"):
+                prefetch_data = guard_result["prefetch"]
+
+            if prefetch_data is None and _is_read_query(masked_text):
                 try:
                     if intent["is_calendar"]:
                         prefetch_data = await asyncio.wait_for(
-                            _prefetch_calendar(phone), timeout=8)
+                            _prefetch_calendar(phone, instance), timeout=8)
                     elif intent["is_email"]:
                         prefetch_data = await asyncio.wait_for(
-                            _prefetch_email(phone), timeout=8)
+                            _prefetch_email(phone, instance), timeout=8)
                     elif intent["is_drive"]:
                         prefetch_data = await asyncio.wait_for(
-                            _prefetch_drive_multi(phone, masked_text), timeout=8)
+                            _prefetch_drive_multi(phone, masked_text, instance), timeout=8)
                 except asyncio.TimeoutError:
                     logger.warning(f"Prefetch timeout for {specialist_id}")
                     prefetch_data = None
@@ -1180,7 +1231,6 @@ def _extract_tool_calls(reply_text: str, available_tools: List[str]) -> List[Dic
     """Best-effort detection of tool calls mentioned in reply.
 
     Checks both resource name (calendar) and method (list_events).
-    For MVP, we detect by name pattern. Real Agno tool-calling would be JSON.
     """
     tool_calls: List[Dict[str, Any]] = []
     if not reply_text or not available_tools:
@@ -1221,3 +1271,62 @@ def _error_response(status_code: int, error: str, message: str) -> Dict[str, Any
             "response_identity": "Jennifer",
         },
     }
+
+
+async def _run_guard_graph(payload: Dict[str, Any], masked_text: str, intent: Dict[str, bool]) -> Dict[str, Any]:
+    """Run the LangGraph guard pipeline for a single turn.
+
+    Returns a normalized decision dict with ``verdict`` (``allow`` /
+    ``request_oauth`` / ``deny`` / ``noop``) and an optional ``reply``
+    the orchestrator should use when the verdict blocks the user.
+    """
+    try:
+        from agent_orchestration.access_guardian import decide_guardian
+        from agent_orchestration.graph import build_graph
+    except Exception as exc:
+        logger.warning("agent_orchestration unavailable, skipping guard: %s", exc)
+        return {"verdict": "noop", "trace": [], "reason": f"graph_unavailable:{exc}"}
+
+    capability = _intent_to_capability(intent)
+    initial_state = {
+        "instance": payload.get("instance", ""),
+        "phone": payload.get("phone", ""),
+        "sender_name": payload.get("sender_name", ""),
+        "text": payload.get("text", ""),
+        "masked_text": masked_text,
+        "remote_jid": payload.get("extra", {}).get("remote_jid", ""),
+        "intent": dict(intent),
+        "capability": capability,
+    }
+
+    try:
+        graph = build_graph()
+        final = await graph.ainvoke(initial_state) if hasattr(graph, "ainvoke") else graph.invoke(initial_state)
+    except Exception as exc:
+        logger.warning("guard graph execution failed: %s", exc)
+        decision = decide_guardian(
+            instance=payload.get("instance", ""),
+            phone=payload.get("phone", ""),
+            capability=capability or "noop",
+        )
+        return {"verdict": decision.verdict, "decision": decision.to_dict(), "reason": exc.__class__.__name__}
+
+    decision = (final or {}).get("guardian_decision") or {}
+    verdict = decision.get("verdict", "allow")
+    prefetch = (final or {}).get("prefetch")
+    return {
+        "verdict": verdict,
+        "decision": decision,
+        "prefetch": prefetch,
+        "trace": (final or {}).get("trace", []),
+    }
+
+
+def _intent_to_capability(intent: Dict[str, bool]) -> str:
+    if intent.get("is_calendar"):
+        return "calendar.list_events"
+    if intent.get("is_email"):
+        return "gmail.search_messages"
+    if intent.get("is_drive"):
+        return "drive.search_files"
+    return ""

@@ -4,7 +4,6 @@ We hit the actual endpoint shapes used by core/evolution_client.py
 to find out *exactly* which one returns 4xx.
 """
 import asyncio
-import os
 
 import httpx
 from google.cloud import secretmanager

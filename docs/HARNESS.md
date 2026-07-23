@@ -15,6 +15,13 @@
 > `readMessages: [{id, fromMe, remoteJid}]`. Não usar o plural
 > `markMessagesAsRead` — esta versão da Evolution retorna 404.
 
+> **Importante — Orquestracao LangGraph 23/07/2026:** a partir da Fase H,
+> a orquestração interna usa um grafo `StateGraph` definido em
+> `agents_runtime/agent_orchestration/graph.py`. Jennifer e o agente
+> mestre; `access_guardian` e o subagente que valida owner + OAuth + scopes
+> antes de cada tool Google. Tools Google podem confiar que o guard já
+> autorizou. O guard determinístico `core.owner_guard` foi descontinuado.
+
 ## GCP Project & Recursos
 
 - **Project:** `coherence-ominichannel-fs`
@@ -36,9 +43,14 @@
   - `whatsapp-messages` / `whatsapp-messages-dlq` (legado; service `whatsapp-agente` foi deletado em 23/07/2026 — topicos podem ser removidos na proxima janela)
 
 
-## Arquitetura consolidada (2026-07-22)
+## Arquitetura consolidada (2026-07-23 — Fase H)
 
-O projeto `viniciusbritor/ChatBotWhatsapp` contém **apenas** o serviço de agentes. O proxy Evolution foi consolidado dentro do próprio `agents-runtime` via endpoint `POST /webhook` que publica no Pub/Sub `chatbotwhatsapp-messages`. A idempotencia e feita por ledger Firestore (`message-processing/{message_id}`) e o retry do Pub/Sub e 503-only. A pipeline ponta-a-ponta e:
+O projeto `viniciusbritor/ChatBotWhatsapp` contém **apenas** o serviço de agentes. O proxy Evolution foi consolidado dentro do próprio `agents-runtime` via endpoint `POST /webhook` que publica no Pub/Sub `chatbotwhatsapp-messages`. A idempotencia e feita por ledger Firestore (`message-processing/{message_id}`) e o retry do Pub/Sub e 503-only.
+
+A partir de 23/07/2026 (Fase H) a orquestração interna usa um grafo
+**LangGraph** (`agent_orchestration.graph`) onde Jennifer e o agente mestre
+e `access_guardian` e o subagente que decide owner + OAuth + scopes antes
+de cada tool Google:
 
 ```
 Celular
@@ -52,8 +64,10 @@ agents-runtime-test (Cloud Run, projeto ChatBotWhatsapp)
 Pub/Sub chatbotwhatsapp-messages
   ↕ (push subscription agents-runtime-consumer → /pubsub/push)
 agents-runtime-test (POST /pubsub/push, ledger claim, orchestrate)
+  ↕ (LangGraph: jennifier_node -> classify_intent -> guard_node -> manager -> reply)
+  ↕ (access_guardian: resolve owner + check google_oauth_token + check scopes)
   ↕ (Whisper local; fallback Gemini 2.5 Flash somente sob consentimento)
-  ↕ (LLM cascade MiniMax M2.7 Highspeed → M3 → DeepSeek V4 Flash)
+  ↕ (LLM cascade MiniMax M2.7-highspeed -> Gemini 2.5 Flash)
 Evolution /message/sendText + /chat/markMessagesAsRead
   ↕ (resposta + tick azul)
 Celular
@@ -531,8 +545,6 @@ pytest -q                                  # backend
 | `agents-runtime-url` | marcado para revisao (Cloud Run identity) | ativo |
 | `OAUTH_CLIENT_SECRET` | `agents-runtime` (OAuth per-user) | ativo |
 | `OAUTH_STATE_SECRET` | `agents-runtime` (HMAC state) | ativo |
-| `COHERENCE_18_PLUS_OAUTH_CLIENT_ID` | `agents-runtime` (OAuth per-user) | ativo |
-| `COHERENCE_18_PLUS_OAUTH_CLIENT_SECRET` | `agents-runtime` (OAuth per-user) | ativo |
 | `PROACTIVE_WORKER_PHONES` | `proactive-worker` (CSV) | ativo |
 | `ATA_WORKER_PHONES` | `ata-worker` (CSV) | ativo |
 | `evolution-api-key` | `agents-runtime` (envio de mensagens) | **necessita key real** (nao foi exposta) |
@@ -577,8 +589,8 @@ Checklist:
 
 Sintoma: `oauth refresh failed: ...` em loop.
 
-Verificar se `OAUTH_CLIENT_SECRET` e `COHERENCE_18_PLUS_OAUTH_CLIENT_SECRET`
-batem com os valores configurados no Google Cloud Console.
+Verificar se `OAUTH_CLIENT_SECRET` bate com o valor configurado no
+Google Cloud Console.
 
 Sintoma: prefetch retorna `None` para Calendar/Email/Drive.
 

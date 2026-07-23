@@ -1,7 +1,12 @@
-"""Pytest conftest: ensure the project root is on sys.path for integration tests."""
-import os
-import sys
+"""Test configuration: filter third-party warnings that are out of our control."""
+import warnings
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
+try:
+    from langchain_core._api.deprecation import LangChainPendingDeprecationWarning
+    warnings.filterwarnings(
+        "ignore",
+        category=LangChainPendingDeprecationWarning,
+        message="The default value of `allowed_objects`",
+    )
+except ImportError:
+    pass

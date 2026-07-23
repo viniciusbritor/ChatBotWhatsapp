@@ -2,7 +2,8 @@
 
 > Última revisão: **2026-07-23** — diagrama visual completo do caminho
 > ponta-a-ponta (WhatsApp → resposta) com Firestore plain para
-> histórico de chat e Firestore Vector restrito a documentos.
+> histórico de chat, Firestore Vector restrito a documentos e grafo
+> **LangGraph** para a orquestração Jennifer → Access Guardian → Manager.
 > Ver `docs/DIARIO_BORDO.md` para o histórico completo do dia.
 
 ## 0. Diagrama visual (ponta a ponta)
@@ -22,13 +23,15 @@ flowchart LR
         subgraph RUNTIME["Container agents-runtime"]
             WEBHOOK["POST /webhook"]
             PUSH["POST /pubsub/push"]
-            ORCH["Jennifer Orchestrator"]
+            ORCH["orchestrator.py (tool loop)"]
+            GRAPH["LangGraph StateGraph\njennifier -> classify ->\nguardian -> manager -> reply"]
+            JENNIFIER["Jennifer agent (system prompt)"]
+            GUARDIAN["access_guardian agent\n(decide owner + OAuth + scopes)"]
             ADMIN["GET/POST /admin/* (Bearer SA)"]
             UI["HTML do modulo Agentes Omnichannel"]
-            WHISPER["Whisper (faster-whisper base)"]
+            WHISPER["Whisper local + Gemini STT fallback"]
             EMBED["OpenAI Embeddings (somente ingestao)"]
             SUBF["Tools: calendar/drive/gmail/web/nickname"]
-            GUARD["Owner Guard (resolve owner_phone)"]
         end
 
         subgraph PUBSUB["Pub/Sub"]
@@ -40,9 +43,8 @@ flowchart LR
             S_OPENAI["OPENAI_API_KEY"]
             S_EVO["EVOLUTION_API_KEY"]
             S_MINIMAX["MINIMAX_API_KEY"]
-            S_DEEPSEEK["DEEPSEEK_API_KEY"]
+            S_GEMINI["GEMINI_API_KEY (LLM fallback + STT)"]
             S_SA["agents-runtime-sa-token"]
-            S_GEMINI["GEMINI_API_KEY (STT fallback)"]
         end
 
         subgraph FIRESTORE["Firestore coherence-ominichannel-fs"]
@@ -76,39 +78,55 @@ flowchart LR
     PUSH -- "ledger.claim (lease 120s)" --> LEDGER
     PUSH --> ORCH
 
-    ORCH --> GUARD
-    GUARD --> ACCOUNTS
-    ORCH --> WHISPER
+    ORCH --> GRAPH
+    GRAPH --> JENNIFIER
+    GRAPH --> GUARDIAN
+    GUARDIAN --> ACCOUNTS
+    GUARDIAN --> USERS
+    GRAPH -- "prefetch Calendar/Email/Drive" --> SUBF
+    SUBF --> WHISPER
+    SUBF -- "OAuth per-user" --> USERS
+    SUBF -- "Calendar/Drive/Gmail" --> USER
+
     WHISPER -. "OPENAI_API_KEY" .-> S_OPENAI
     EMBED -. "OPENAI_API_KEY (somente ingestao)" .-> S_OPENAI
-    ORCH --> SUBF
-    SUBF -. "refresh_token por owner" .-> USERS
-    SUBF -- "Calendar/Drive/Gmail" --> USER
+    JENNIFIER -. "MiniMax M2.7-highspeed -> Gemini 2.5 Flash" .-> S_MINIMAX
+    JENNIFIER -. "fallback cascade" .-> S_GEMINI
+
     ORCH -- "history.write (always, plain)" --> HISTORY
     ORCH -- "history.read (where owner_hash == ...)" --> HISTORY
 
     ADMIN -- "Bearer SA" --> S_SA
-    S_OPENAI --> EMBED
     S_EVO --> EVO_API
-    S_MINIMAX --> ORCH
-    S_DEEPSEEK --> ORCH
 
     GCS -- "scripts/ingest_owner_knowledge.py" --> KNOWLEDGE
     GCS -- "scripts/ingest_collective_memory.py" --> COLLECTIVE
-    KNOWLEDGE -- "search_legal_knowledge (kNN, owner_hash filter)" --> ORCH
-    COLLECTIVE -- "search_collective (kNN, no owner_hash)" --> ORCH
-    PUBLIC -- "search_knowledge (kNN)" --> ORCH
+    KNOWLEDGE -- "search_legal_knowledge (kNN, owner_hash filter)" --> GRAPH
+    COLLECTIVE -- "search_collective (kNN, no owner_hash)" --> GRAPH
+    PUBLIC -- "search_knowledge (kNN)" --> GRAPH
 
     UI --> ADMIN
-    ACCOUNTS --> GUARD
     NICKNAMES --> ORCH
-    USERS --> SUBF
 
     CLOUD_BUILD -- "git push origin/test" --> EDGE
     EDGE -- "deploy" --> RUNTIME
     AUDIT -- "log_action (5y retencao)" --> RUNTIME
 
     TOPIC -. "5 tentativas" .-> DLQ
+```
+
+### 0.0.1. Grafo LangGraph (Fase H)
+
+```mermaid
+flowchart LR
+    START([inbound turn]) --> J["jennifier_node\n(identity)"]
+    J --> C["classify_intent_node\n(detect calendar/email/drive)"]
+    C --> G["guard_node\n(access_guardian.decide_guardian)"]
+    G -- "verdict=allow" --> M["manager_node\n(_prefetch_calendar/email/drive)"]
+    G -- "verdict=request_oauth" --> R["reply_node\n(link OAuth)"]
+    G -- "verdict=deny" --> R
+    M --> R
+    R --> END([reply enviado ao WhatsApp])
 ```
 
 ### 0.1. Caminho do webhook em sequência (numerada no diagrama)
@@ -151,11 +169,12 @@ coherence-ominichannel-fs
 
 Um único runtime FastAPI (`agents-runtime`) responde a mensagens do
 WhatsApp via Evolution API, orquestra capacidades por agente
-(configuração em Firestore), consulta Gmail/Drive/Calendar
-**somente para o proprietário da conta Evolution** e mantém uma base
-vetorial privada por proprietário em Firestore Vector. A documentação
-oficial é **somente esta pasta `docs/` na raiz**; cópias em
-`agents_runtime/docs/` foram removidas em 22/07/2026.
+(configuração em Firestore) usando um **grafo LangGraph** onde Jennifer
+é o agente mestre e `access_guardian` é o subagente que decide
+autorização de Gmail/Drive/Calendar. Toda leitura vetorial é filtrada
+por `owner_hash` e o histórico de chat é mantido em Firestore plain.
+A documentação oficial é **somente esta pasta `docs/` na raiz**; cópias
+em `agents_runtime/docs/` foram removidas em 22/07/2026.
 
 ## 2. Stack
 
@@ -167,8 +186,11 @@ oficial é **somente esta pasta `docs/` na raiz**; cópias em
   arquivos-fonte da base de conhecimento.
 - **Embeddings**: OpenAI `text-embedding-3-small` (1536d), coleção
   `*-v2`.
-- **LLM**: cascata MiniMax M2.7 Highspeed → MiniMax M3 → DeepSeek V4
-  Flash.
+- **Orquestração**: LangGraph `StateGraph` (Fase H, 23/07/2026).
+  Jennifer → `access_guardian` → manager → reply.
+- **LLM**: cascata `MiniMax-M2.7-highspeed` (primário) →
+  `gemini-2.5-flash` (fallback). Regra atualizada em 23/07/2026
+  (GUARDRAILS.md §1).
 - **STT**: Whisper local (`faster-whisper`, `base/int8`). Fallback
   controlado para Gemini 2.5 Flash apenas em falha técnica do Whisper
   **e** com consentimento explícito.
@@ -200,14 +222,17 @@ flowchart LR
 | Componente | Responsabilidade |
 | --- | --- |
 | `main.py` | FastAPI, lifecycle, endpoints `/webhook`, `/pubsub/push`, `/chat`, `/admin/*`. |
-| `orchestrator.py` | Detecção de intenção, roteamento para capabilities, prefetch Calendar/Email/Drive, indexação RAG. |
+| `orchestrator.py` | Detecção de intenção, roteamento para capabilities, prefetch Calendar/Email/Drive, indexação RAG, integração com `_run_guard_graph`. |
+| `agent_orchestration/jennifier.py` | Definição do agente mestre Jennifer (system prompt, modelo M2.7-highspeed, fallback Gemini). |
+| `agent_orchestration/access_guardian.py` | Decisão não-determinística de owner + OAuth + scopes (`decide_guardian`). |
+| `agent_orchestration/graph.py` | Grafo LangGraph `StateGraph`: jennifier → classify → guardian → manager → reply. |
 | `agent_loader.py` | Polling 120 s para `agents`, `skills`, `tools` e snapshot atômico. |
 | `core.message_ledger` | Ledger Firestore para idempotência transacional de mensagens. |
 | `core.pubsub_dispatcher` | Lease, retry-control e terminalidade por mensagem. |
 | `core.evolution_client` | `send_text` e `mark_messages_read` na Evolution v2. |
 | `core.audio_transcribe` | Wrapper Whisper com fallback controlado para Gemini 2.5 Flash. |
-| `core.owner` + `core.owner_guard` | Resolução do proprietário da instância Evolution e aplicação do guard em Gmail/Drive/Calendar. |
-| `tools/google_*` | Integrações Google com escopos mínimos e guard do proprietário. |
+| `core.owner` | Resolução do proprietário da instância Evolution. |
+| `tools/google_*` | Integrações Google com escopos mínimos. A checagem de owner foi centralizada no `access_guardian` (Fase H). |
 | `core.rag` | Embeddings OpenAI e busca vetorial filtrada por `owner_hash`. |
 | `core.module_ui` | Plano de controle HTML renderizado em `/admin/dashboard`. |
 | `scripts/ingest_owner_knowledge.py` | Ingestão de livros/editais em GCS para a coleção do proprietário. |

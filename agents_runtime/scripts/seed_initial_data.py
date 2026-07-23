@@ -17,8 +17,8 @@ DEFAULT_AGENTS = [
         "name": "Jennifer",
         "role": "orchestrator",
         "parent_id": None,
-        "model": "MiniMax-M3",
-        "model_escalation": "MiniMax-M3",
+        "model": "MiniMax-M2.7-highspeed",
+        "model_escalation": "gemini-2.5-flash",
         "escalation_threshold": -2,
         "no_escalation": False,
         "thinking": "disabled",
@@ -31,13 +31,15 @@ DEFAULT_AGENTS = [
             "REGRAS: use so primeiro nome. Apelido so com consentimento explicito. "
             "NUNCA improvise nada depreciativo. Anti-alucinacao: jamais invente dados, datas, nomes. "
             "Mensagens: max 4 linhas, pt-BR, 1-2 emojis. Fuso America/Sao_Paulo. LGPD: nao exponha PII.\n\n"
-            "Delega para managers: calendar, drive, email, web."
+            "Delega para managers: calendar, drive, email, web. "
+            "O agente access_guardian valida owner + OAuth antes de cada tool Google."
         ),
         "skills": [
             "skill-motivacao-pre-reuniao",
             "skill-busca-contexto",
         ],
         "delegates_to": [
+            "agent-access-guardian",
             "manager-calendar",
             "manager-drive",
             "manager-email",
@@ -46,7 +48,7 @@ DEFAULT_AGENTS = [
         "tools": [],
         "instances": ["jennifer"],
         "enabled": True,
-        "system_prompt_version": 1,
+        "system_prompt_version": 2,
         "last_learned_at": None,
         "created_at": _now_iso(),
         "updated_at": _now_iso(),
@@ -56,8 +58,8 @@ DEFAULT_AGENTS = [
         "name": "Calendar Manager",
         "role": "manager",
         "parent_id": "jennifier",
-        "model": "MiniMax-M3",
-        "model_escalation": None,
+        "model": "MiniMax-M2.7-highspeed",
+        "model_escalation": "gemini-2.5-flash",
         "escalation_threshold": -2,
         "no_escalation": False,
         "thinking": "disabled",
@@ -80,7 +82,7 @@ DEFAULT_AGENTS = [
         ],
         "instances": ["jennifer"],
         "enabled": True,
-        "system_prompt_version": 1,
+        "system_prompt_version": 2,
         "created_at": _now_iso(),
         "updated_at": _now_iso(),
     },
@@ -89,8 +91,8 @@ DEFAULT_AGENTS = [
         "name": "Drive Manager",
         "role": "manager",
         "parent_id": "jennifier",
-        "model": "MiniMax-M3",
-        "model_escalation": None,
+        "model": "MiniMax-M2.7-highspeed",
+        "model_escalation": "gemini-2.5-flash",
         "escalation_threshold": -2,
         "no_escalation": False,
         "thinking": "disabled",
@@ -115,7 +117,7 @@ DEFAULT_AGENTS = [
         ],
         "instances": ["jennifer"],
         "enabled": True,
-        "system_prompt_version": 1,
+        "system_prompt_version": 2,
         "created_at": _now_iso(),
         "updated_at": _now_iso(),
     },
@@ -124,8 +126,8 @@ DEFAULT_AGENTS = [
         "name": "Email Manager",
         "role": "manager",
         "parent_id": "jennifier",
-        "model": "MiniMax-M3",
-        "model_escalation": None,
+        "model": "MiniMax-M2.7-highspeed",
+        "model_escalation": "gemini-2.5-flash",
         "escalation_threshold": -2,
         "no_escalation": False,
         "thinking": "disabled",
@@ -144,6 +146,37 @@ DEFAULT_AGENTS = [
             "gmail.get_thread",
             "gmail.send_message",
         ],
+        "instances": ["jennifer"],
+        "enabled": True,
+        "system_prompt_version": 2,
+        "created_at": _now_iso(),
+        "updated_at": _now_iso(),
+    },
+    {
+        "id": "agent-access-guardian",
+        "name": "Access Guardian",
+        "role": "specialist",
+        "parent_id": "jennifier",
+        "model": "MiniMax-M2.7-highspeed",
+        "model_escalation": "gemini-2.5-flash",
+        "escalation_threshold": -2,
+        "no_escalation": False,
+        "thinking": "disabled",
+        "system_prompt": (
+            "Voce e o guardiao de acesso da Jennifer. Recebe pedidos de tools "
+            "Google (gmail.*, drive.*, calendar.*) e decide se a Jennifer pode executar. "
+            "Regras:\n"
+            "1. Apenas o owner_phone registrado em whatsapp_accounts pode acessar.\n"
+            "2. Se nao houver google_oauth_token vinculado em usuarios/{phone}, "
+            "responda 'request_oauth' e inclua o link /oauth/google?phone=...\n"
+            "3. Se os scopes do token nao cobrirem a capability, responda "
+            "'request_oauth' com o link.\n"
+            "4. Caso contrario, responda 'allow'.\n"
+            "Sempre devolva JSON estruturado, sem texto extra."
+        ),
+        "skills": [],
+        "delegates_to": [],
+        "tools": [],
         "instances": ["jennifer"],
         "enabled": True,
         "system_prompt_version": 1,

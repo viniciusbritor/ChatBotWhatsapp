@@ -52,13 +52,6 @@ async def lifespan(app: FastAPI):
     """Application lifespan: init/cleanup."""
     logger.info(f"agents_runtime v{VERSION} starting (commit={COMMIT_SHA})")
 
-    try:
-        from tools.audio_transcribe import warm_up
-        warm_up()
-        logger.info("Whisper warm-up triggered")
-    except Exception as e:
-        logger.warning(f"Whisper warm-up failed: {e}")
-
     start_loader()
     logger.info("Agent loader started")
 
@@ -173,57 +166,32 @@ async def chat(request: Request):
 
     if has_audio:
         try:
-            from tools.audio_transcribe import (
-                AudioProcessingError,
-                AudioValidationError,
-                transcribe_bytes,
-            )
             from core.audio_transcribe import (
-                STT_PRIMARY,
-                transcribe_with_fallback,
+                transcribe_base64,
+                transcribe_url,
             )
 
             mimetype = extra.get("audio_mimetype", "audio/ogg")
             if extra.get("audio_base64"):
-                from tools.audio_transcribe import _decode_base64
-                audio_bytes = _decode_base64(extra["audio_base64"])
-
-                async def _run_primary():
-                    return await transcribe_bytes(audio_bytes, mimetype)
-
-                result = await transcribe_with_fallback(
-                    _run_primary,
-                    audio_bytes=audio_bytes,
-                    mimetype=mimetype,
+                result = await transcribe_base64(
+                    extra["audio_base64"],
+                    mimetype,
                     instance=body.get("instance", "Jennifer"),
-                    consent=bool(extra.get("audio_consent_external")),
                 )
-                transcript = result["transcript"]
                 source = "base64"
-                extra["audio_provider"] = result.get("provider", STT_PRIMARY)
-                extra["audio_provider_reason"] = result.get("reason", "")
-                extra["audio_provider_latency_ms"] = result.get("latency_ms", 0)
             elif extra.get("audio_url"):
-                from tools.audio_transcribe import _download_audio
-                audio_bytes = await _download_audio(extra["audio_url"])
-
-                async def _run_primary():
-                    return await transcribe_bytes(audio_bytes, mimetype)
-
-                result = await transcribe_with_fallback(
-                    _run_primary,
-                    audio_bytes=audio_bytes,
-                    mimetype=mimetype,
+                result = await transcribe_url(
+                    extra["audio_url"],
+                    mimetype,
                     instance=body.get("instance", "Jennifer"),
-                    consent=bool(extra.get("audio_consent_external")),
                 )
-                transcript = result["transcript"]
                 source = "url"
-                extra["audio_provider"] = result.get("provider", STT_PRIMARY)
-                extra["audio_provider_reason"] = result.get("reason", "")
-                extra["audio_provider_latency_ms"] = result.get("latency_ms", 0)
             else:
-                raise AudioValidationError("audio_payload_missing")
+                raise ValueError("audio_payload_missing")
+
+            transcript = result["transcript"]
+            extra["audio_provider"] = result.get("provider", "minimax:MiniMax-M3")
+            extra["audio_provider_reason"] = result.get("reason", "")
             body["text"] = mask_pii(transcript)
             extra["audio_transcribed"] = True
             extra["audio_source"] = source
@@ -234,7 +202,7 @@ async def chat(request: Request):
                 extra.get("audio_provider"),
                 len(body["text"]),
             )
-        except (AudioValidationError, AudioProcessingError) as e:
+        except (ValueError, RuntimeError) as e:
             logger.warning("Audio transcription rejected: code=%s message_id=%s", str(e), body.get("message_id", ""))
             if not body.get("text"):
                 audit_result = await index_audio_failure_for_audit(body, str(e))
@@ -999,7 +967,12 @@ OAUTH_REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI", "").strip()
 
 
 def _oauth_redirect_uri(request: Request) -> str:
-    return OAUTH_REDIRECT_URI or str(request.url_for("oauth_callback"))
+    if OAUTH_REDIRECT_URI:
+        return OAUTH_REDIRECT_URI
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").strip().lower()
+    scheme = forwarded_proto or request.url.scheme
+    host = request.headers.get("x-forwarded-host") or request.url.hostname
+    return f"{scheme}://{host}/oauth/callback"
 
 
 @app.get("/oauth/google")

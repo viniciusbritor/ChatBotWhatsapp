@@ -106,11 +106,24 @@ def deny_if_not_owner(resolution: Optional[OwnerResolution], inbound_phone: str,
         resolution.instance if resolution else "-",
         normalize_phone(inbound_phone),
     )
+    if resolution is None:
+        message = (
+            f"Para acessar {capability}, preciso saber qual instancia WhatsApp voce esta usando. "
+            "Tente novamente em alguns segundos; se persistir, chame no privado."
+        )
+    else:
+        oauth_link = (
+            "Para liberar, acesse este link e autorize sua conta Google (Gmail, Drive e Calendar): "
+            f"https://agents-runtime-test-c5nbfc5meq-uc.a.run.app/oauth/google?phone={inbound_phone}"
+        )
+        message = (
+            f"A busca {capability} precisa que a sua conta Google esteja vinculada. "
+            f"{oauth_link}"
+        )
     return {
         "error": "owner_only_capability",
         "capability": capability,
-        "message": (
-            "Esta acao so pode ser executada pelo proprietario da conta. "
-            "Acesse o Portal Coherence para autorizar a sua conta."
-        ),
+        "message": message,
+        "instance": resolution.instance if resolution else "",
+        "phone": normalize_phone(inbound_phone),
     }

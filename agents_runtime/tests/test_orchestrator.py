@@ -209,23 +209,24 @@ class TestPrivacyGuard:
         with patch("orchestrator._detect_intent", return_value=_calendar_intent()):
             with patch("tools.group.get_member_confirmation", AsyncMock(return_value=True)):
                 with patch("orchestrator.get_user", return_value={"phone": "5511966830020"}):
-                    with patch("orchestrator._resolve_agent_for_intent", return_value="manager-calendar"):
-                        with patch("orchestrator.get_agent", return_value={"id": "manager-calendar", "tools": []}):
-                            with patch("orchestrator._execute_agent", new_callable=AsyncMock) as mock_exec:
-                                with patch("orchestrator._schedule_indexing", side_effect=close_coroutine):
-                                    mock_exec.return_value = {
-                                        "reply": "Voce tem 2 eventos hoje",
-                                        "delay_ms": 100,
-                                        "presence": "composing",
-                                        "metadata": {"agent_id": "manager-calendar"},
-                                    }
-                                    await orchestrate({
-                                        "instance": "jennifer",
-                                        "phone": "5511966830020",
-                                        "text": "minha agenda",
-                                        "sender_name": "Vini",
-                                        "extra": {"remote_jid": "120363123456@g.us"},
-                                    })
+                    with patch("orchestrator._run_guard_graph", AsyncMock(return_value={"verdict": "allow"})):
+                        with patch("orchestrator._resolve_agent_for_intent", return_value="manager-calendar"):
+                            with patch("orchestrator.get_agent", return_value={"id": "manager-calendar", "tools": []}):
+                                with patch("orchestrator._execute_agent", new_callable=AsyncMock) as mock_exec:
+                                    with patch("orchestrator._schedule_indexing", side_effect=close_coroutine):
+                                        mock_exec.return_value = {
+                                            "reply": "Voce tem 2 eventos hoje",
+                                            "delay_ms": 100,
+                                            "presence": "composing",
+                                            "metadata": {"agent_id": "manager-calendar"},
+                                        }
+                                        await orchestrate({
+                                            "instance": "jennifer",
+                                            "phone": "5511966830020",
+                                            "text": "minha agenda",
+                                            "sender_name": "Vini",
+                                            "extra": {"remote_jid": "120363123456@g.us"},
+                                        })
 
         assert mock_exec.called
         assert mock_exec.call_args[0][0]["id"] == "manager-calendar"
@@ -236,23 +237,24 @@ class TestPrivacyGuard:
 
         with patch("orchestrator._detect_intent", return_value=_calendar_intent()):
             with patch("orchestrator.get_user", return_value={"phone": "5511966830020"}):
-                with patch("orchestrator._resolve_agent_for_intent", return_value="manager-calendar"):
-                    with patch("orchestrator.get_agent", return_value={"id": "manager-calendar", "tools": []}):
-                        with patch("orchestrator._execute_agent", new_callable=AsyncMock) as mock_exec:
-                            with patch("orchestrator._schedule_indexing", side_effect=close_coroutine):
-                                mock_exec.return_value = {
-                                    "reply": "ok",
-                                    "delay_ms": 100,
-                                    "presence": "composing",
-                                    "metadata": {"agent_id": "manager-calendar"},
-                                }
-                                await orchestrate({
-                                    "instance": "jennifer",
-                                    "phone": "5511966830020",
-                                    "text": "minha agenda",
-                                    "sender_name": "Vini",
-                                    "extra": {},
-                                })
+                with patch("orchestrator._run_guard_graph", AsyncMock(return_value={"verdict": "allow"})):
+                    with patch("orchestrator._resolve_agent_for_intent", return_value="manager-calendar"):
+                        with patch("orchestrator.get_agent", return_value={"id": "manager-calendar", "tools": []}):
+                            with patch("orchestrator._execute_agent", new_callable=AsyncMock) as mock_exec:
+                                with patch("orchestrator._schedule_indexing", side_effect=close_coroutine):
+                                    mock_exec.return_value = {
+                                        "reply": "ok",
+                                        "delay_ms": 100,
+                                        "presence": "composing",
+                                        "metadata": {"agent_id": "manager-calendar"},
+                                    }
+                                    await orchestrate({
+                                        "instance": "jennifer",
+                                        "phone": "5511966830020",
+                                        "text": "minha agenda",
+                                        "sender_name": "Vini",
+                                        "extra": {},
+                                    })
 
         assert mock_exec.called
 
@@ -322,3 +324,116 @@ class TestResponseCleanup:
         out = _normalize_response_identity(dirty)
         assert "[<minimax>" not in out
         assert "sou a Jennifer".casefold() in out.casefold()
+
+
+def _calendar_intent_full() -> Dict[str, bool]:
+    return {
+        "is_gross": False,
+        "is_assault_related": False,
+        "is_correction": False,
+        "is_calendar": True,
+        "is_drive": False,
+        "is_email": False,
+        "is_web_search": False,
+        "is_intimacy": False,
+        "is_personal_access": True,
+    }
+
+
+def _email_intent_full() -> Dict[str, bool]:
+    base = _calendar_intent_full()
+    base["is_calendar"] = False
+    base["is_email"] = True
+    return base
+
+
+def _drive_intent_full() -> Dict[str, bool]:
+    base = _calendar_intent_full()
+    base["is_calendar"] = False
+    base["is_drive"] = True
+    return base
+
+
+class TestPrefetchInstancePropagation:
+    """Ensure the orchestrator propagates ``instance`` to Google prefetch
+    functions so that the per-instance ``owner_guard`` does not block the
+    owner phone from Gmail/Drive/Calendar access."""
+
+    @pytest.mark.asyncio
+    async def test_prefetch_calendar_passes_instance(self):
+        from orchestrator import _prefetch_calendar
+        with patch("tools.google_calendar.list_events", new_callable=AsyncMock) as mock_list:
+            mock_list.return_value = {"events": [{"id": "e1"}]}
+            await _prefetch_calendar("5511966830020", instance="Jennifer")
+            assert mock_list.called
+            kwargs = mock_list.call_args.kwargs
+            assert kwargs.get("instance") == "Jennifer"
+
+    @pytest.mark.asyncio
+    async def test_prefetch_email_passes_instance(self):
+        from orchestrator import _prefetch_email
+        with patch("tools.google_gmail.search_messages", new_callable=AsyncMock) as mock_search:
+            mock_search.return_value = {"messages": [{"id": "m1"}]}
+            await _prefetch_email("5511966830020", instance="Jennifer")
+            assert mock_search.called
+            kwargs = mock_search.call_args.kwargs
+            assert kwargs.get("instance") == "Jennifer"
+
+    @pytest.mark.asyncio
+    async def test_prefetch_drive_passes_instance(self):
+        from orchestrator import _prefetch_drive
+        with patch("tools.google_drive.search_files", new_callable=AsyncMock) as mock_search:
+            mock_search.return_value = {"files": [{"id": "f1"}]}
+            await _prefetch_drive("5511966830020", "ata", instance="Jennifer")
+            assert mock_search.called
+            kwargs = mock_search.call_args.kwargs
+            assert kwargs.get("instance") == "Jennifer"
+
+    @pytest.mark.asyncio
+    async def test_prefetch_drive_docs_passes_instance(self):
+        from orchestrator import _prefetch_drive_docs
+        with patch("tools.google_drive.search_files", new_callable=AsyncMock) as mock_search:
+            mock_search.side_effect = [
+                {"files": []},
+                {"files": []},
+            ]
+            await _prefetch_drive_docs("5511966830020", "ata", instance="Jennifer")
+            assert mock_search.call_count >= 1
+            for call in mock_search.call_args_list:
+                assert call.kwargs.get("instance") == "Jennifer"
+
+    @pytest.mark.asyncio
+    async def test_prefetch_drive_multi_passes_instance(self):
+        from orchestrator import _prefetch_drive_multi
+        with patch("tools.google_drive.search_files", new_callable=AsyncMock) as mock_search:
+            mock_search.return_value = {"files": [{"id": "f1"}]}
+            await _prefetch_drive_multi("5511966830020", "atas recentes", instance="Jennifer")
+            assert mock_search.call_count >= 1
+            for call in mock_search.call_args_list:
+                assert call.kwargs.get("instance") == "Jennifer"
+
+    @pytest.mark.asyncio
+    async def test_orchestrate_calendar_intent_passes_instance_to_prefetch(self):
+        from orchestrator import orchestrate
+
+        with patch("orchestrator._detect_intent", return_value=_calendar_intent_full()):
+            with patch("orchestrator.get_user", return_value={"phone": "5511966830020"}):
+                with patch("orchestrator._run_guard_graph", AsyncMock(return_value={"verdict": "allow"})):
+                    with patch("orchestrator._resolve_agent_for_intent", return_value="manager-calendar"):
+                        with patch("orchestrator.get_agent", return_value={"id": "manager-calendar", "name": "Calendar", "tools": ["calendar.list_events"], "system_prompt": "Test", "enabled": True}):
+                            with patch("orchestrator._prefetch_calendar", new_callable=AsyncMock) as mock_prefetch:
+                                with patch("orchestrator._execute_agent", new_callable=AsyncMock) as mock_exec:
+                                    with patch("orchestrator._schedule_indexing", side_effect=close_coroutine):
+                                        mock_prefetch.return_value = "[{\"id\":\"e1\"}]"
+                                        mock_exec.return_value = {"reply": "ok", "delay_ms": 0, "presence": "composing", "metadata": {"agent_id": "manager-calendar"}}
+                                        await orchestrate({
+                                            "instance": "Jennifer",
+                                            "phone": "5511966830020",
+                                            "text": "compromissos de hoje",
+                                            "sender_name": "Vinicius",
+                                            "extra": {},
+                                        })
+                                        assert mock_prefetch.called, "_prefetch_calendar should have been called for calendar intent"
+                                        called_args = mock_prefetch.call_args
+                                        assert called_args.args[0] == "5511966830020"
+                                        assert called_args.args[1] == "Jennifer"
