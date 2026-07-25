@@ -26,6 +26,16 @@
 
 - **Project:** `coherence-ominichannel-fs`
 - **Region:** `us-central1`
+- **Service Account operacional do projeto (Guardrail 59 — vigente 25/07/2026):**
+  - **SA obrigatória:** `admin-omnichannel@coherence-ominichannel-fs.iam.gserviceaccount.com`.
+  - Esta SA e usada por todos os Cloud Build triggers, deploys de Cloud Run, jobs de Cloud Run e scripts locais de manutencao (upload de secrets, Firestore ops, refresh de OAuth per-user).
+  - **Nunca usar `894828119087-compute@developer.gserviceagent.com** ou outras SAs default — foram criadas pelo Cloud Build para subir imagens de build (Docker layer cache, Cloud Build service agent), nao para deploy/runtime.
+  - Para impersonar localmente: `gcloud config set auth/impersonate_service_account admin-omnichannel@coherence-ominichannel-fs.iam.gserviceaccount.com`. Para revogar: `gcloud config unset auth/impersonate_service_account`.
+  - Concessor necessario: o usuario que impersona precisa de `roles/iam.serviceAccountTokenCreator` no escopo da SA. Sem isso, `gcloud ...` retorna `PERMISSION_DENIED: Failed to impersonate`.
+- **Isolamento contra projetos vizinhos (Guardrail 60 — vigente 25/07/2026):**
+  - **Nada neste repo pode referenciar `coherence-18-plus` ou seu OAuth client.** Aquele projeto hospeda o produto 18+ e tem client/secret totalmente separados.
+  - O arquivo `Keys/coherence18plus_oauth_credentials.json` e de outro projeto e NAO deve ser usado aqui — usar apenas `Secrets/google-oauth-token` do projeto `coherence-ominichannel-fs` (client_id `894828119087-...apps.googleusercontent.com`).
+  - Verificacao periodica: `grep -ri "coherence-18-plus\|coherence18plus\|410168162390" agents_runtime/ docs/` deve retornar 0 matches.
 - **Servicos Cloud Run (DEV / TEST - Scale to Zero Mandatory):**
   - `agents-runtime-test` (2Gi, min=0, max=3, cpu-throttling=true) — ambiente de dev do ChatBotWhatsapp (recebe webhook do Evolution em dev, processa com LLM, retorna resposta)
   - `agents-runtime-prod` — **DELETADO (22/07/2026)** para eliminar duplicidades e custos
