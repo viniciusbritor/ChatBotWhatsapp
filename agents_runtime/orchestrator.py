@@ -185,19 +185,23 @@ CORRECTION_KEYWORDS = [
     "na verdade", "não é assim", "nao e assim", "errado", "errada",
 ]
 CALENDAR_KEYWORDS = [
-    "agenda", "reuniao", "evento", "compromisso", "lembrete",
-    "calendario", "disponivel", "semana que vem", "proxima semana",
+    "agenda", "reuniao", "evento", "eventos", "compromisso",
+    "compromissos", "lembrete", "calendario", "disponivel",
+    "semana que vem", "proxima semana", "agenda de hoje",
 ]
 DRIVE_KEYWORDS = [
-    "drive", "documento", "arquivo", "pasta", "upload",
-    "omnichannel", "atividades", "baixar", "encontrar arquivo",
-    "meus arquivos", "meus documentos", "buscar arquivo",
-    "procurar documento", "lista de arquivos", "mostrar arquivos",
-    "ata", "minuta", "relatorio", "apresentação", "apresentacao",
+    "drive", "documento", "documentos", "arquivo", "arquivos",
+    "pasta", "upload", "omnichannel", "atividades", "baixar",
+    "encontrar arquivo", "meus arquivos", "meus documentos",
+    "buscar arquivo", "procurar documento", "lista de arquivos",
+    "mostrar arquivos", "ata", "minuta", "relatorio",
+    "apresentação", "apresentacao",
 ]
 EMAIL_KEYWORDS = [
-    "email", "e-mail", "caixa de entrada", "gmail",
-    "ler email", "enviar email", "ultimos emails",
+    "email", "e-mail", "emails", "e-mails",
+    "caixa de entrada", "caixa postal", "correio", "inbox",
+    "gmail", "ler email", "enviar email", "ultimos emails",
+    "ultima mensagem", "mensagens",
 ]
 WEB_KEYWORDS = [
     "pesquisar", "buscar na internet", "busque na internet", "procure na web",
@@ -225,7 +229,7 @@ def _matches_keyword(text: str, keyword: str) -> bool:
     normalized_keyword = _normalize_text(keyword)
     if not normalized_keyword:
         return False
-    pattern = rf"(?<!\w){re.escape(normalized_keyword)}(?!\w)"
+    pattern = rf"(?<!\w){re.escape(normalized_keyword)}s?(?!\w)"
     return re.search(pattern, text) is not None
 
 

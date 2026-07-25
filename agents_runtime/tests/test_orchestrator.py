@@ -34,6 +34,32 @@ class TestDetectIntent:
         assert intent["is_correction"] is True
 
 
+class TestIntentPluralTolerance:
+    """Regression: keywords like ``email`` must match ``emails`` and ``e-mails``
+    in user messages. The ``_matches_keyword`` regex now accepts an optional
+    trailing ``s`` so plural pt-BR forms like ``e-mails`` resolve."""
+
+    def test_email_intent_with_plural_hyphen(self):
+        from orchestrator import _detect_intent
+        intent = _detect_intent("quero meus ultimos 3 e-mails mais recente")
+        assert intent["is_email"] is True
+
+    def test_email_intent_with_modifier(self):
+        from orchestrator import _detect_intent
+        intent = _detect_intent("mostrar meus emails")
+        assert intent["is_email"] is True
+
+    def test_drive_intent_with_plural(self):
+        from orchestrator import _detect_intent
+        intent = _detect_intent("lista de arquivos do drive")
+        assert intent["is_drive"] is True
+
+    def test_calendar_intent_with_plural(self):
+        from orchestrator import _detect_intent
+        intent = _detect_intent("compromissos de amanha")
+        assert intent["is_calendar"] is True
+
+
 class TestResolveAgentForIntent:
     def test_gross_routes_to_morality(self):
         from orchestrator import _resolve_agent_for_intent
