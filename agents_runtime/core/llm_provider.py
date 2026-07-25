@@ -1,10 +1,9 @@
 """LLM provider: DeepSeek V4 Flash (single provider, no cascade).
 
-Every agent in the runtime uses DeepSeek V4 Flash through ``chat()``,
-``chat_escalating()`` and ``chat_with_tools()``. The default model is
-``deepseek-v4-flash`` and the endpoint is OpenAI-compatible
-(``/chat/completions``), so native ``tool_calls`` are returned in the
-structured field without any inline parser.
+Every agent in the runtime uses DeepSeek V4 Flash through ``chat()``
+and ``chat_with_tools()``. The default model is ``deepseek-v4-flash``
+and the endpoint is OpenAI-compatible (``/chat/completions``), so native
+``tool_calls`` are returned in the structured field without any inline parser.
 
 Audio transcription is intentionally NOT handled here; it lives in
 ``core.audio_transcribe`` and uses Gemini 2.5 Flash directly.
@@ -114,7 +113,7 @@ class LLMProvider:
         system_prompt: str,
         user_prompt: str,
         fast_model: str = DEFAULT_MODEL,
-        pro_model: str = DEFAULT_MODEL,
+        pro_model: str = "",
         threshold: int = -2,
         no_escalation: bool = True,
         json_mode: bool = False,
@@ -123,18 +122,13 @@ class LLMProvider:
         thinking_disabled: bool = True,
         scoring_fn=None,
     ) -> Dict[str, Any]:
-        """DeepSeek-only. No escalation path. ``fast_model``, ``pro_model``,
-        ``threshold`` and ``scoring_fn`` are kept for caller compatibility but
-        the method always answers with the single DeepSeek provider."""
+        """Alias for ``chat()``. Accepted for caller compatibility; the
+        signature is preserved but only DeepSeek v4-flash is used
+        regardless of the ``fast_model`` / ``pro_model`` arguments.
+        """
         result = await self.chat(
             system_prompt, user_prompt, fast_model, json_mode, temperature, max_tokens, thinking_disabled
         )
-        if scoring_fn is not None and not no_escalation:
-            try:
-                score = scoring_fn(result["content"])
-                result["confidence_score"] = score
-            except Exception as e:
-                logger.warning("scoring_fn_failed: %s", e)
         result["escalated"] = False
         return result
 
@@ -241,12 +235,20 @@ class LLMProvider:
                 args_str = func.get("arguments", "{}")
                 try:
                     args = json.loads(args_str) if isinstance(args_str, str) else args_str
+                    safe_args = {k: str(v)[:120] for k, v in args.items()}
+                except Exception:
+                    args = {}
+                    safe_args = {"raw": args_str[:120]}
+                logger.info("tool_start round=%d tool=%s args=%s", tool_count + 1, name, safe_args)
+                try:
                     if tool_executor:
                         tool_result = await tool_executor(name, args)
                     else:
                         tool_result = json.dumps({"error": "tool_executor_not_configured"})
                 except Exception as e:
                     tool_result = json.dumps({"error": str(e)})
+                result_preview = str(tool_result)[:200]
+                logger.info("tool_result round=%d tool=%s result=%s", tool_count + 1, name, result_preview)
                 messages.append({
                     "role": "tool",
                     "content": str(tool_result) if isinstance(tool_result, str) else json.dumps(tool_result),

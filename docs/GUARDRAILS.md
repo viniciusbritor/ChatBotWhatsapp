@@ -11,10 +11,10 @@
   precisam ser rotacionadas antes do próximo deploy.
 - **Upload de secrets**: APENAS `gcloud secrets versions add`. Nunca `versions
   update` (bug 12/07/2026 corrompeu chave DeepSeek).
-- **Gemini API é permitida como fallback LLM do cascade MiniMax M2.7-highspeed
-  → Gemini 2.5 Flash** (regra atualizada em 23/07/2026). STT Gemini permanece
-  como fallback da transcrição quando Whisper falha tecnicamente **e** há
-  consentimento registrado.
+- **Gemini API é usada exclusivamente para transcrição de áudio**
+  (STT fallback quando Whisper falha tecnicamente **e** há consentimento
+  registrado). Gemini não é mais usado como fallback LLM — cascade removido
+  em 25/07/2026, apenas DeepSeek V4 Flash é o provedor de LLM.
 - **`agents_runtime` não expõe Swagger público** (`/docs`, `/redoc`,
   `/openapi.json` proibidos).
 - **`/admin/*`, `/chat`, `/proactive/send` exigem Bearer SA token ou Firebase

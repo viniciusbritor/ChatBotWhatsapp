@@ -24,7 +24,6 @@ from typing import Dict, Any, Optional, List
 
 from core.llm_provider import LLMProvider, LLMError
 from core.masker import mask_pii
-from core.escalation import compute_confidence_score
 from core.delay_calculator import calculate_delay_ms, calculate_presence
 from core.commands import detect_command, apply_command
 from tool_registry import get_tool, get_tool_schema, is_user_scoped_tool
@@ -1133,10 +1132,8 @@ async def _execute_agent(
         record_agent_failure(agent_id, execution_started, "llm_unavailable")
         return _error_response(503, "llm_unavailable", "Nenhum provedor LLM configurado")
 
-    threshold = agent.get("escalation_threshold", -2)
-    no_escalation = agent.get("no_escalation", False)
     thinking = agent.get("thinking", "disabled") == "enabled"
-    fast_model = agent.get("model", "MiniMax-M2.7-highspeed")
+    fast_model = agent.get("model", "deepseek-v4-flash")
 
     tool_schemas = []
     for tid in available_tools:
@@ -1172,17 +1169,13 @@ async def _execute_agent(
                 max_tool_rounds=5,
             )
         else:
-            result = await llm.chat_escalating(
+            result = await llm.chat(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                fast_model=fast_model,
-                pro_model=agent.get("model_escalation") or "gemini-2.5-flash",
-                threshold=threshold,
-                no_escalation=no_escalation,
+                model=fast_model,
                 temperature=0.7,
                 max_tokens=500,
                 thinking_disabled=not thinking,
-                scoring_fn=lambda t: compute_confidence_score(t),
             )
 
         reply_text = result["content"]

@@ -1523,3 +1523,37 @@ proibido `gcloud builds submit` manual.
 recentes (incluindo `latest` = `ef2640bb`).
 
 ---
+
+### Remoção do cascateamento LLM — DeepSeek V4 Flash single-provider — 25/07/2026 13:00 BRT
+
+**Decisão do operador:** remover o cascade MiniMax M2.7-highspeed → Gemini
+2.5 Flash. Usar exclusivamente DeepSeek V4 Flash como provedor de LLM.
+
+**Mudanças:**
+
+- `core/llm_provider.py::chat_escalating`: assinatura preservada para
+  compatibilidade, mas agora é alias puro de `chat()`. Removida execução
+  de `scoring_fn` e `confidence_score`.
+- `orchestrator.py::_execute_agent`: removidas leituras de
+  `escalation_threshold` e `no_escalation`. Chamada sem tools agora usa
+  `llm.chat()` diretamente (não `chat_escalating`). Removido import de
+  `compute_confidence_score`.
+- `orchestrator.py::_execute_agent`: `fast_model` default alterado de
+  `MiniMax-M2.7-highspeed` para `deepseek-v4-flash`.
+- **Logs de tool call adicionados** em `chat_with_tools`: cada rodada do
+  loop agora emite `tool_start` e `tool_result` com nome da tool, args
+  truncados e preview do resultado (200 chars). Permite diagnosticar
+  por que o loop não converge.
+- `test_dialog_runtime_status.py::test_manager_execution_keeps_jennifer_identity`:
+  atualizado para mockar `chat` em vez de `chat_escalating`.
+- `docs/GUARDRAILS.md`: regra Gemini atualizada (uso exclusivo STT).
+
+**Suite:** 352 passed, 30 skipped, 0 failures.
+
+**Implantações pendentes:**
+- `JENNIFER_MODEL_ID` e `JENNIFER_FALLBACK_MODEL_ID` no cloudbuild são
+  mantidos como inertes (não quebram, apenas não são consultados).
+- Secrets `MINIMAX_API_KEY` e `NVIDIA_API_KEY` mantidos no Secret Manager
+  (não consultados pelo provider atual, mas mantidos para histórico).
+
+---

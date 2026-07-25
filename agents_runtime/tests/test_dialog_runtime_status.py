@@ -163,11 +163,11 @@ class TestResponseIdentity:
         }
         llm = MagicMock()
         llm.is_available.return_value = True
-        llm.chat_escalating = AsyncMock(
+        llm.chat = AsyncMock(
             return_value={
                 "content": "Sou o Web Manager da Jennifer.",
-                "model_used": "MiniMax-M3",
-                "provider": "minimax",
+                "model_used": "deepseek-v4-flash",
+                "provider": "deepseek-v4-flash",
             }
         )
         with patch("orchestrator.LLMProvider", return_value=llm):
@@ -180,7 +180,7 @@ class TestResponseIdentity:
                         {},
                     )
 
-        system_prompt = llm.chat_escalating.await_args.kwargs["system_prompt"]
+        system_prompt = llm.chat.await_args.kwargs["system_prompt"]
         assert "componente interno da Jennifer" in system_prompt
         assert "Web Manager" not in result["reply"]
         assert result["metadata"]["executed_agent_id"] == "manager-web"
