@@ -87,20 +87,27 @@ Os repos `viniciusbritor/EvolutionWhatsapp` (hospeda o Evolution API) e `viniciu
 
 ## CI/CD (Cloud Build triggers)
 
-> **Modo operacional vigente (23/07/2026):** todos os triggers do projeto
-> ChatBotWhatsapp estão **desabilitados**. Builds e deploys do módulo são
-> iniciados manualmente pelo operador após validação local. A reativação de
-> qualquer trigger desta tabela exige justificativa registrada em
-> `docs/DIARIO_BORDO.md`.
+> **Modo operacional vigente (25/07/2026):** o trigger
+> `deploy-agents-runtime-test` está **ativo** (2nd-gen, região
+> `us-central1`). O fluxo correto para deploy em test é:
+> `git commit` → `git push origin test` → trigger dispara automaticamente.
+> **É proibido executar `gcloud builds submit` manualmente** — ver
+> GUARDRAILS.md §10.
 
-| Trigger | Repo | Branch | Build config | Service Account | Status |
-|---|---|---|---|---|---|
-| `deploy-agents-runtime-test` | ChatBotWhatsapp | `^test$` | `agents_runtime/cloudbuild-test.yaml` | `admin-omnichannel@coherence-ominichannel-fs.iam.gserviceaccount.com` | **desabilitado** |
-| `EvolutionWhatsapp-test` | EvolutionWhatsapp | `^test$` | (do repo EvolutionWhatsapp) | (compute default) | monitorar |
-| `EvolutionWhatsapp-prod` | EvolutionWhatsapp | `^main$` | (do repo EvolutionWhatsapp) | (compute default) | monitorar |
-| `deploy-monitoria-whisper-worker` | `Monitoria_Chamadas` | `^test$` | (externo, fora de escopo) | (externo) | **não modificar** |
-| `deploy-monitoria-worker-prod` | `Monitoria_Chamadas` | `^main$` | (externo, fora de escopo) | (externo) | **não modificar** |
-| `deploy-monitoria-prod` | `Monitoria_Chamadas` | `^main$` | (externo, fora de escopo) | (externo) | **não modificar** |
+| Trigger | Geração | Repo | Branch | Build config | Região | Status |
+|---|---|---|---|---|---|---|
+| `deploy-agents-runtime-test` | 2nd-gen | ChatBotWhatsapp | `^test$` | `agents_runtime/cloudbuild-test.yaml` | `us-central1` | **ativo** |
+| `deploy-agents-runtime-prod` | (a criar) | ChatBotWhatsapp | `^main$` | `agents_runtime/cloudbuild-prod.yaml` | `us-central1` | pendente |
+| `EvolutionWhatsapp-test` | 1st-gen | EvolutionWhatsapp | `^test$` | (do repo EvolutionWhatsapp) | global | monitorar |
+| `EvolutionWhatsapp-prod` | 1st-gen | EvolutionWhatsapp | `^main$` | (do repo EvolutionWhatsapp) | global | monitorar |
+| `deploy-monitoria-whisper-worker` | 1st-gen | `Monitoria_Chamadas` | `^test$` | (externo, fora de escopo) | global | **não modificar** |
+| `deploy-monitoria-worker-prod` | 1st-gen | `Monitoria_Chamadas` | `^main$` | (externo, fora de escopo) | global | **não modificar** |
+| `deploy-monitoria-prod` | 1st-gen | `Monitoria_Chamadas` | `^main$` | (externo, fora de escopo) | global | **não modificar** |
+
+> **Conexão 2nd-gen:** o trigger `deploy-agents-runtime-test` usa a
+> connection `github-connection` (installation ID `138074470`) com o
+> repositório `chat-bot-whatsapp` vinculado. A 1st-gen usa o GitHub App
+> legado que está instalado apenas no `Monitoria_Chamadas`.
 
 > ⚠️ **Repositórios de Monitoria fora de escopo.** Não tocar nos triggers
 > de `Monitoria_Chamadas`; mudanças precisam passar pela coordenação do
@@ -348,57 +355,23 @@ pytest -q tests/
 
 Resultado local da Fase 5 em 18/07/2026: 30 testes especificos e 212 testes totais passaram; 9 foram ignorados. O teste integrado com audio real do WhatsApp permanece como smoke test do ambiente implantado.
 
-### Deploy Cloud Run (TEST) — modo manual
+### Deploy Cloud Run (TEST)
 
-> ⚠️ Trigger `deploy-agents-runtime-test` está **desabilitado**. Builds
-> são iniciados manualmente pelo operador. A seção abaixo é o **único**
-> fluxo aprovado.
+> Trigger `deploy-agents-runtime-test` está **ativo** (2nd-gen, `us-central1`).
+> O deploy é automático no push para a branch `test`. NÃO usar
+> `gcloud builds submit` — viola GUARDRAILS.md §10.
 
-Pré-condições:
-
-1. Ter `gcloud auth login` feito e projeto
-   `coherence-ominichannel-fs` selecionado.
-2. Estar em branch `test` local sem mudanças não commitadas.
-3. Ter rodado `scripts/check_lgpd_compliance.py`, `ruff` e `pytest` com
-   0 falhas.
-
-Comandos (na raiz do repositório `C:\Users\vinic\workspace_antigravity\ChatBotWhatsapp`):
+Fluxo aprovado:
 
 ```bash
-gcloud config set project coherence-ominichannel-fs
-
-# 1. Lint + tests + gate (precisa estar verde)
-cd agents_runtime
-pip install -q -r requirements.txt -r requirements-dev.txt
-python scripts/check_lgpd_compliance.py
-ruff check core/ main.py orchestrator.py agent_loader.py tool_registry.py
-pytest -q tests/
-
-# 2. Commit e push
-cd ..
+cd C:\Users\vinic\workspace_antigravity\ChatBotWhatsapp
 git checkout test
 git add -A
-git commit -m "feat(scope): ..."
+git commit -m "feat(scope): descricao"
 git push origin test
-
-# 3. Build MANUAL (substitui o trigger desabilitado)
-gcloud builds submit \
-  --config=agents_runtime/cloudbuild-test.yaml \
-  --substitutions=COMMIT_SHA=$(git rev-parse --short HEAD),SHORT_SHA=$(git rev-parse --short HEAD) \
-  --project=coherence-ominichannel-fs \
-  --region=us-central1
-
-# 4. Acompanhar
-gcloud builds list --project=coherence-ominichannel-fs --limit=1
-gcloud run services describe agents-runtime-test \
-  --region=us-central1 --project=coherence-ominichannel-fs
+# O trigger deploy-agents-runtime-test dispara automaticamente
+# Acompanhar: gcloud builds list --region=us-central1 --limit=3
 ```
-
-> Se for necessário reativar o trigger:
-> `gcloud builds triggers update deploy-agents-runtime-test
-> --project=coherence-ominichannel-fs
-> --no-validate-trigger --update-fingerprint=$(gcloud builds triggers describe deploy-agents-runtime-test --project=coherence-ominichannel-fs --format='value(fingerprint)')`
-> (somente registrar justificativa em `DIARIO_BORDO.md`).
 
 ### Smoke Test
 

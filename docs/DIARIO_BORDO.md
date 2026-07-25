@@ -1153,7 +1153,7 @@ Pipeline pronto para commit, push e smoke real.
 
 ### Status
 Suite verde na branch `test`. Proximo: commit, push, acompanhar Cloud Build e executar smoke real `/admin/agents/status` e `/admin/agents/{id}/status`.
-## 22/07/2026 BRT � Contencao da tempestade Pub/Sub + simplificacao
+## 22/07/2026 BRT � Contencao da tempestade Pub/Sub + simplificacao
 
 ### Escopo
 - Substitui o dedupe em memoria por um **ledger Firestore** (`core/message_ledger.py`) com lease de 120 s e renovacao automatica. Cada mensagem passa por `register_or_load -> claim -> dispatch -> mark_response/mark_delivered`.
@@ -1180,7 +1180,7 @@ Branch `test` pronta para deploy do fix do Pub/Sub. Apos deploy, executar `gclou
 - Remocao completa do proxy `WhatsappAgente`.
 - Atualizar `agents_runtime/README.md` com a nova contagem de testes.
 
-## 23/07/2026 BRT � Firestore plain obrigatorio + historico por owner_hash
+## 23/07/2026 BRT � Firestore plain obrigatorio + historico por owner_hash
 
 ### Escopo
 - `core/rag.py`: `index_conversation_message` agora grava **sempre** em Firestore plain (`message-history/{history_id}`) com `owner_hash = sha256(digits)[:32]`. Firestore Vector e restrito a documentos (livros, editais, coletivo, publico).
@@ -1206,7 +1206,7 @@ Branch `test` pronta para deploy do fix do Pub/Sub. Apos deploy, executar `gclou
 - Decidir sobre o destino da colecao legada `conversation-memory-v2` (continuar vazia, renomear, ou remover).
 - Backfill da memoria coletiva inicial (ex.: manual de onboarding).
 
-## 23/07/2026 BRT (continuacao) � Diagrama visual completo + deploy
+## 23/07/2026 BRT (continuacao) � Diagrama visual completo + deploy
 
 ### Escopo
 - `docs/ARQUITETURA.md`: secao "0. Diagrama visual" com Mermaid full-stack (WhatsApp, Evolution, GCP, Cloud Run, Pub/Sub, Firestore plain, Firestore Vector, GCS, Secret Manager, Cloud Build). Numeracao dos 11 passos do webhook + mapa de colecoes.
@@ -1217,7 +1217,7 @@ Branch `test` pronta para deploy do fix do Pub/Sub. Apos deploy, executar `gclou
 ### Build verde
 - Build `e0cb2715-82c2-4d3a-8466-14615b42bc31` comecou e terminou em `SUCCESS` as 03:45:38Z (~7 min).
 - Revisao `agents-runtime-test-00155-fnf` servindo 100% do trafego na URL `https://agents-runtime-test-c5nbfc5meq-uc.a.run.app`.
-- Smoke test externo: `GET /` retorna o manifest JSON (200); `/healthz` continua retornando 404 no Cloud Run Gateway (problema de roteamento independente do container � o container local responde 200 ao `/healthz`). Acoes tomadas: alias `/health` adicionado no main.py para servir o mesmo payload.
+- Smoke test externo: `GET /` retorna o manifest JSON (200); `/healthz` continua retornando 404 no Cloud Run Gateway (problema de roteamento independente do container � o container local responde 200 ao `/healthz`). Acoes tomadas: alias `/health` adicionado no main.py para servir o mesmo payload.
 
 ### Testes
 - `pytest -q tests/`: 331 passed, 10 skipped em 5,03 s.
@@ -1226,15 +1226,15 @@ Branch `test` pronta para deploy do fix do Pub/Sub. Apos deploy, executar `gclou
 
 ### Status
 - Build verde + deployado. Trigger `deploy-agents-runtime-test` reativado (push -> build automatico).
-- T�picos legados `whatsapp-messages` e `whatsapp-messages-dlq` deletados.
+- T�picos legados `whatsapp-messages` e `whatsapp-messages-dlq` deletados.
 - Versoes expostas reabilitadas (DEEPSEEK, MINIMAX, NVIDIA, agents-runtime-sa-token).
-- Diagrama visual documentado em `docs/ARQUITETURA.md` � "0. Diagrama visual (ponta a ponta)".
+- Diagrama visual documentado em `docs/ARQUITETURA.md` � "0. Diagrama visual (ponta a ponta)".
 
 ### Pendencias
 - Investigar e corrigir o `/healthz` que retorna 404 no Cloud Run Gateway mesmo com container respondendo 200 localmente (suspeita: cache CDN ou routing do front-end).
 - Confirmar se `whatsapp-messages` subscriptions orfas foram removidas.
 
-## 23/07/2026 BRT (continuacao) � Tick azul e reply da Jennifer confirmados
+## 23/07/2026 BRT (continuacao) � Tick azul e reply da Jennifer confirmados
 
 ### Causa raiz diagnosticada
 - `POST /chat/markMessagesAsRead/{instance}` (plural) retorna **404
@@ -1274,8 +1274,8 @@ Branch `test` pronta para deploy do fix do Pub/Sub. Apos deploy, executar `gclou
 - Log `evolution_mark_read_ok message_id=FIX-1784788595
   remote_jid=5511966830020@s.whatsapp.net` apareceu as 06:37:17Z.
 - Resposta da Jennifer no WhatsApp confirmada pelo usuario com duplo
-  tick azul e mensagem: "Oi Vinicius! Recebido T� por aqui, tudo
-  certo. Se precisar de algo, � s� falar".
+  tick azul e mensagem: "Oi Vinicius! Recebido T� por aqui, tudo
+  certo. Se precisar de algo, � s� falar".
 - O caminho ponta-a-ponta **WhatsApp -> Evolution -> Cloud Run ->
   Pub/Sub -> Orchestrator -> Firestore plain -> Evolution ->
   resposta** esta integralmente verde.
@@ -1480,5 +1480,46 @@ Os 29 skipped restantes sao:
 - 19 audio legacy (dependem de `AudioValidationError` ou paths do Whisper)
 - 9 proatividade (allowlist vazia, pre-existente)
 - 1 collection skip do collection
+
+---
+
+### Fix `instance` nas Google tools + trigger CI/CD ativo — 25/07/2026 14:30 BRT
+
+**Sintoma:** usuário recebia "probleminha de instância" ou "Máximo de
+execuções atingido" ao pedir calendário, emails ou drive no WhatsApp.
+
+**Causa raiz:** `_bind_tool_args` em `orchestrator.py:1066-1070` injetava
+`phone` mas nunca `instance` nas ferramentas Google. O `_owner_guard` em
+cada `tools/google_*.py` recebia `instance=""` → `resolve_owner("")`
+retornava `None` → erro `instance_unresolved`. O LLM reexecutava a tool
+até estourar `max_tool_rounds=5` → "Máximo de execuções atingido".
+
+**Correções aplicadas:**
+
+- `orchestrator.py::_bind_tool_args`: adicionado parâmetro `instance` e
+  injeção nos args de ferramentas com escopo de usuário.
+- `orchestrator.py::tool_executor`: passando `payload.get("instance", "")`
+  para `_bind_tool_args`.
+
+**Suite após correção:** 352 passed, 30 skipped, 0 failures.
+
+**Trigger CI/CD:** o trigger `deploy-agents-runtime-test` (2nd-gen,
+`us-central1`, connection `github-connection`) já existia e estava ativo,
+monitorando branch `^test$`. Build `808b4874` (commit `db12c47`) disparou
+automaticamente, deployou revisão `00180-9jt` às 14:38 BRT.
+
+**Violação de guardrail (25/07/2026):** builds manuais `97a5128d` (falhou,
+`--no-source`) e `ef2640bb` (sucesso) foram executados com `gcloud builds
+submit` fora da esteira CI/CD. Registrada guardrail em GUARDRAILS.md §10:
+proibido `gcloud builds submit` manual.
+
+**Docs atualizados:**
+- `HARNESS.md`: CI/CD corrigido (trigger ativo, 2nd-gen, fluxo automático)
+- `GUARDRAILS.md` §10: proibição de builds manuais
+- `ARQUITETURA.md`: (sem alterações necessárias)
+
+**Limpeza de imagens:** 91 imagens antigas deletadas de
+`gcr.io/coherence-ominichannel-fs/agents-runtime`. Mantidas as 5 mais
+recentes (incluindo `latest` = `ef2640bb`).
 
 ---

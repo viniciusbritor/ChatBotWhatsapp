@@ -175,6 +175,12 @@ em Firestore plain (`message-history/{history_id}`) com indexação por
 - Integração Pub/Sub real (`RUN_PUBSUB_E2E=1`) roda no Cloud Build da branch
   `test`.
 - Carga Locust fica em `tests/load/` e só roda com `RUN_LOAD_TEST=1`.
+- **PROIBIDO executar `gcloud builds submit` manualmente.** Todo deploy deve
+  passar exclusivamente pelo trigger CI/CD (`deploy-agents-runtime-test` na
+  branch `test`, 2nd-gen, região `us-central1`). O fluxo correto é:
+  `git commit` → `git push origin test` → trigger dispara build → Cloud Run
+  deploy. Builds manuais fora da esteira quebram rastreabilidade, reprodutibilidade
+  e auditoria. Violação registrada em 25/07/2026 (builds `97a5128d` e `ef2640bb`).
 
 ## 11. Pendências
 
