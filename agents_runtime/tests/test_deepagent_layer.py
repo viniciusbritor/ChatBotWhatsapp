@@ -85,8 +85,9 @@ class TestGetDeepAgentCaching:
 
 
 class TestBuildModel:
-    def test_build_model_uses_deepseek_base_url(self):
+    def test_build_model_uses_deepseek_base_url(self, monkeypatch):
         from unittest.mock import patch, MagicMock
+        monkeypatch.delenv("DEEPSEEK_BASE_URL", raising=False)
         with patch("langchain_adapter.models.get_secret", return_value="sk-test"):
             with patch("langchain_openai.ChatOpenAI") as mock_chat:
                 mock_chat.return_value = MagicMock()
@@ -96,6 +97,17 @@ class TestBuildModel:
                 assert call_kwargs["model"] == "deepseek-v4-flash"
                 assert call_kwargs["base_url"] == "https://api.deepseek.com/v1"
                 assert call_kwargs["api_key"] == "sk-test"
+
+    def test_build_model_respects_env_base_url_override(self, monkeypatch):
+        from unittest.mock import patch, MagicMock
+        monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
+        with patch("langchain_adapter.models.get_secret", return_value="sk-test"):
+            with patch("langchain_openai.ChatOpenAI") as mock_chat:
+                mock_chat.return_value = MagicMock()
+                from langchain_adapter import build_default_chat_model
+                build_default_chat_model()
+                call_kwargs = mock_chat.call_args.kwargs
+                assert call_kwargs["base_url"] == "https://api.deepseek.com/v1"
 
 
 class TestExecuteDeepAgent:
