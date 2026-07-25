@@ -66,14 +66,14 @@ MANAGER_PROMPTS: Dict[str, str] = {
 }
 
 
-def _model_string() -> str:
-    """Return the LangChain model identifier for DeepSeek v4-flash.
+def _build_model():
+    """Return the LangChain chat model for DeepSeek v4-flash.
 
-    DeepAgents uses ``provider:model`` format. We map our internal
-    ``deepseek-v4-flash`` to ``openai:deepseek-v4-flash`` because the
-    DeepSeek API is OpenAI-compatible.
+    Delegates to ``langchain_adapter.build_default_chat_model`` so the
+    endpoint, API key, and base URL are configured in one place.
     """
-    return f"openai:{AGENT_MODEL}"
+    from langchain_adapter import build_default_chat_model
+    return build_default_chat_model()
 
 
 def _build_agent(manager_id: str):
@@ -95,14 +95,15 @@ def _build_agent(manager_id: str):
         return None
 
     try:
+        model = _build_model()
         agent = create_deep_agent(
-            model=_model_string(),
+            model=model,
             system_prompt=system_prompt,
             tools=tools,
         )
         logger.info(
             "deep_agent_built manager_id=%s model=%s tools=%d",
-            manager_id, _model_string(), len(tools),
+            manager_id, AGENT_MODEL, len(tools),
         )
         return agent
     except Exception:

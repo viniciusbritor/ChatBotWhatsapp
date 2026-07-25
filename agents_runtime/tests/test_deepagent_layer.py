@@ -84,11 +84,18 @@ class TestGetDeepAgentCaching:
             assert get_deep_agent("manager-fictional") is None
 
 
-class TestModelString:
-    def test_default_is_deepseek(self):
-        from deepagent_layer.agents import _model_string
-        with patch.dict("os.environ", {"JENNIFER_MODEL_ID": "deepseek-v4-flash"}):
-            assert _model_string() == "openai:deepseek-v4-flash"
+class TestBuildModel:
+    def test_build_model_uses_deepseek_base_url(self):
+        from unittest.mock import patch, MagicMock
+        with patch("langchain_adapter.models.get_secret", return_value="sk-test"):
+            with patch("langchain_openai.ChatOpenAI") as mock_chat:
+                mock_chat.return_value = MagicMock()
+                from langchain_adapter import build_default_chat_model
+                build_default_chat_model()
+                call_kwargs = mock_chat.call_args.kwargs
+                assert call_kwargs["model"] == "deepseek-v4-flash"
+                assert call_kwargs["base_url"] == "https://api.deepseek.com/v1"
+                assert call_kwargs["api_key"] == "sk-test"
 
 
 class TestExecuteDeepAgent:
