@@ -938,7 +938,17 @@ async def admin_cache_stats():
 
 @app.get("/")
 async def root_redirect(request: Request):
-    """Return the service metadata. The Portal opens ``/admin/dashboard`` directly."""
+    """Return the service metadata for plain API clients, or the HTML module
+    UI when the caller authenticates (Bearer header or ``?token=`` query). The
+    Portal opens the runtime via this URL with a token; detecting the token
+    and serving ``render_dashboard()`` keeps the integration zero-config.
+    """
+    token = _bearer_token(request)
+    if not token:
+        token = request.query_params.get("token", "")
+    if token:
+        from core.module_ui import render_dashboard
+        return HTMLResponse(content=render_dashboard(COMMIT_SHA, DEPLOYED_AT, token))
     return JSONResponse(content={
         "service": "agents_runtime",
         "version": VERSION,

@@ -3,8 +3,11 @@ from unittest.mock import patch
 from core.auth import _is_valid_firebase_jwt, is_path_protected
 
 
-def test_oauth_start_is_protected_and_callback_is_public():
-    assert is_path_protected("/oauth/google") is True
+def test_oauth_start_and_callback_are_public():
+    """Both /oauth/google (start) and /oauth/callback are public so end users
+    can re-authorize without holding the SA token. State is HMAC-signed with
+    expiration, so the redirect itself does not need protection."""
+    assert is_path_protected("/oauth/google") is False
     assert is_path_protected("/oauth/callback") is False
 
 
