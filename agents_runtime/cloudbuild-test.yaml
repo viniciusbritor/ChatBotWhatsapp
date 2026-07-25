@@ -6,7 +6,7 @@ steps:
     entrypoint: "bash"
     args:
       - "-c"
-      - "export REPO_ROOT=/workspace && cd agents_runtime && pip install -q -r requirements.txt && pip install -q -r requirements-dev.txt && DEEPSEEK_API_KEY=test DEEPSEEK_MODEL=deepseek-v4-flash DEEPSEEK_BASE_URL=https://api.deepseek.com pytest -q tests/ && python scripts/check_lgpd_compliance.py"
+      - "export REPO_ROOT=/workspace && cd agents_runtime && pip install -q langgraph '>=1.0.0,<2.0.0' 'langchain>=1.3.11,<2.0.0' 'langchain-core>=1.4.8,<2.0.0' 'langchain-anthropic>=1.4.7,<2.0.0' 'langchain-openai>=0.3.0' 'deepagents>=0.6.12,<0.7' 'langchain-mcp-adapters>=0.1.0' && pip install -q -r requirements.txt && pip install -q -r requirements-dev.txt && DEEPSEEK_API_KEY=test DEEPSEEK_MODEL=deepseek-v4-flash DEEPSEEK_BASE_URL=https://api.deepseek.com pytest -q tests/ && python scripts/check_lgpd_compliance.py"
 
   - name: "gcr.io/cloud-builders/docker"
     args:
