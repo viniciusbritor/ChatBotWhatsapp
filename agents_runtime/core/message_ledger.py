@@ -22,10 +22,9 @@ import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
+from core.timezone import now_brt
 
 logger = logging.getLogger(__name__)
-
-BRT = timezone(timedelta(hours=-3))
 
 _LEDGER_COLLECTION = os.getenv("PUBSUB_LEDGER_COLLECTION", "message-processing")
 _LEASE_SECONDS = int(os.getenv("PUBSUB_LEASE_SECONDS", "120"))
@@ -67,7 +66,7 @@ class LedgerEntry:
 
 
 def _now_brt() -> datetime:
-    return datetime.now(BRT)
+    return now_brt()
 
 
 def _now_iso() -> str:

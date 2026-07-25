@@ -2,12 +2,12 @@ import logging
 import os
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 from core.llm_provider import LLMProvider as _LLMProvider
+from core.timezone import BRT, now_brt, to_brt
 
-BRT = timezone(timedelta(hours=-3))
 HEALTH_WINDOW_SEC = int(os.getenv("AGENT_HEALTH_WINDOW_SEC", "86400"))
 
 _HARDCODED_ROUTES = {
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
-    return datetime.now(BRT).isoformat()
+    return now_brt().isoformat()
 
 
 def _model_provider_ready(model: str) -> bool:
@@ -109,8 +109,8 @@ def _recent_success(telemetry: Dict[str, Any]) -> bool:
     if not value:
         return False
     try:
-        timestamp = datetime.fromisoformat(value)
-        return (datetime.now(BRT) - timestamp.astimezone(BRT)).total_seconds() <= HEALTH_WINDOW_SEC
+        timestamp = to_brt(datetime.fromisoformat(value))
+        return (now_brt() - timestamp).total_seconds() <= HEALTH_WINDOW_SEC
     except Exception:
         return False
 

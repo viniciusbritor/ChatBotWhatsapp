@@ -9,6 +9,7 @@ import secrets
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
+from core.timezone import BRT, now_brt
 
 import requests
 from google.oauth2.credentials import Credentials
@@ -19,9 +20,6 @@ GCP_PROJECT = os.getenv("GCP_PROJECT", "coherence-ominichannel-fs")
 TOKEN_REFRESH_BEFORE_SEC = int(os.getenv("OAUTH_REFRESH_BEFORE_SEC", "300"))
 OAUTH_STATE_TTL_SEC = int(os.getenv("OAUTH_STATE_TTL_SEC", str(7 * 24 * 60 * 60)))
 OAUTH_USER_COLLECTION = os.getenv("OAUTH_USER_COLLECTION", "usuarios")
-BRT = timezone(timedelta(hours=-3))
-
-
 def _oauth_client_id() -> str:
     return os.getenv("OAUTH_CLIENT_ID", "").strip()
 
@@ -149,7 +147,7 @@ def _persist_token(db, phone: str, token_data: Dict[str, Any]) -> None:
         for key, value in token_data.items()
         if key not in {"client_id", "client_secret"}
     }
-    persisted["updated_at"] = datetime.now(BRT).isoformat()
+    persisted["updated_at"] = now_brt().isoformat()
     try:
         db.collection(OAUTH_USER_COLLECTION).document(phone).set(
             {"google_oauth_token": persisted},

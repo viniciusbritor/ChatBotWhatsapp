@@ -28,10 +28,9 @@ import requests
 
 from core.masker import mask_pii
 from core.secrets import get_secret
+from core.timezone import now_brt
 
 logger = logging.getLogger(__name__)
-
-BRT = timezone(timedelta(hours=-3))
 
 EMBEDDING_MODEL = os.getenv("RAG_EMBEDDING_MODEL", "text-embedding-3-small")
 EMBEDDING_DIM = int(os.getenv("RAG_EMBEDDING_DIM", "1536"))
@@ -61,7 +60,7 @@ EMBEDDING_CONCURRENCY = int(os.getenv("RAG_EMBEDDING_CONCURRENCY", "4"))
 
 
 def _now_brt() -> datetime:
-    return datetime.now(BRT)
+    return now_brt()
 
 
 def _owner_hash(phone: str) -> str:

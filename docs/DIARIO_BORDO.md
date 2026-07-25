@@ -1658,3 +1658,67 @@ de langchain 0.3 → 1.4.
 funcional (commit `d4bead2` ou `c85c193` revertido).
 
 ---
+
+### DeepAgents base_url fix + Timezone centralizado — 25/07/2026 (Fase N)
+
+**Contexto:** após o deploy da Fase M, o `manager-email` falhava com
+`HTTP 400 Bad Request` para `https://api.openai.com/v1/responses`. O
+DeepAgents estava passando `model="openai:deepseek-v4-flash"` que
+LangChain roteava para o endpoint OpenAI, não DeepSeek. Alem disso,
+`deepseek-v4-pro` ainda aparecia em dois seed agents (ata-generator e
+agent-learning), contrariando o padrao "deepseek-v4-flash para tudo".
+
+**Mudancas (commit `f18a782`):**
+
+- `langchain_adapter/models.py` (NOVO): `build_default_chat_model()` que
+  retorna `ChatOpenAI(model=deepseek-v4-flash, base_url=api.deepseek.com)`.
+  Centraliza a configuracao do LLM em um lugar so.
+- `deepagent_layer/agents.py`: `_build_model()` agora chama
+  `langchain_adapter.build_default_chat_model()`. NUNCA mais passa
+  string `openai:...` para `create_deep_agent`.
+- `tests/test_deepagent_layer.py`: `TestModelString` substituida por
+  `TestBuildModel` que mocka `langchain_openai.ChatOpenAI` e verifica
+  kwargs (model, base_url, api_key).
+
+**Suite:** 368 passed, 30 skipped, 0 failures.
+
+---
+
+### Timezone centralizado em `core/timezone.py` + padrao unico DeepSeek — 25/07/2026 (Fase N+)
+
+**Contexto:** o codigo tinha 18 arquivos duplicando
+`BRT = timezone(timedelta(hours=-3))`. Alem disso, o usuario pediu
+"deepseek flash e o llm padrao para tudo" — sem excecao.
+
+**Mudancas:**
+
+- `core/timezone.py` (NOVO): modulo centralizado com `BRT`, `now_brt()`,
+  `today_brt()`, `to_brt()`. Toda operacao de datetime passa por aqui.
+- 14 arquivos refatorados para usar `core.timezone` em vez de criar
+  `BRT` local: `agent_loader.py`, `main.py`, `orchestrator.py`,
+  `ata_worker/main.py`, `proactive_worker/main.py`, `core/agent_status.py`,
+  `core/lgpd.py`, `core/memory_manager.py`, `core/message_ledger.py`,
+  `core/oauth_per_user.py`, `core/pending_actions.py`, `core/rag.py`,
+  `tools/nickname.py`, `scripts/ingest_collective_memory.py`,
+  `scripts/seed_config.py`, `scripts/seed_initial_data.py`,
+  `scripts/seed_private_rag.py`.
+- `ata_worker/main.py:172`: `deepseek-v4-pro` → `deepseek-v4-flash`.
+- `scripts/seed_initial_data.py`: dois seed agents (`agent-learning`,
+  `ata-generator`) ajustados de `deepseek-v4-pro` para `deepseek-v4-flash`.
+
+**Bug encontrado durante refactor (P3):** o script `oauth_callback`
+em `main.py:1063` tinha `now_brt = now_brt()` que sobrescrevia o
+`now_brt` importado (UnboundLocalError). Renomeado para `now_brt_dt`.
+Mesma armadilha em `proactive_worker/scan_upcoming_events`.
+
+**Suite:** 368 passed, 30 skipped, 0 failures.
+
+**Convencao para o futuro:**
+- Toda chamada LLM: `deepseek-v4-flash` via `ChatOpenAI(base_url=DeepSeek)`.
+- Toda referencia a timezone: `from core.timezone import BRT, now_brt, to_brt`.
+- Proibido `datetime.now(timezone(timedelta(hours=-3)))` ou similar.
+- Proibido `model="openai:deepseek-..."` (sempre usar base_url explicito).
+
+**Diagrama visual:** `docs/FLUXO_ARQUITETURA.md` (mermaid completo).
+
+---

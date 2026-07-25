@@ -26,6 +26,7 @@ from core.proactive_gate import (
 )
 from tools.google_calendar import list_events
 from core.secrets import get_secret
+from core.timezone import now_brt
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger("proactive_worker")
@@ -47,14 +48,12 @@ def _known_phones() -> List[str]:
 
 async def scan_upcoming_events(phone: str) -> List[Dict[str, Any]]:
     """Scan Calendar for events in next 1h, 3h, 24h for the given user."""
-    now = datetime.now(timezone.utc)
-    brt_offset = timedelta(hours=-3)
-    now_brt = now + brt_offset
+    now = now_brt()
 
     windows = [
-        ("1h", now_brt, now_brt + timedelta(hours=1)),
-        ("3h", now_brt + timedelta(hours=1), now_brt + timedelta(hours=3)),
-        ("24h", now_brt + timedelta(hours=3), now_brt + timedelta(hours=24)),
+        ("1h", now, now + timedelta(hours=1)),
+        ("3h", now + timedelta(hours=1), now + timedelta(hours=3)),
+        ("24h", now + timedelta(hours=3), now + timedelta(hours=24)),
     ]
 
     candidates = []

@@ -52,6 +52,7 @@ from google.cloud import storage  # type: ignore  # noqa: E402
 
 from core.masker import mask_pii  # noqa: E402
 from core.rag import (  # noqa: E402
+from core.timezone import now_brt
     EMBEDDING_DIM,
     EMBEDDING_MODEL,
     PRIVATE_COLLECTION,
@@ -98,7 +99,7 @@ async def _index_chunks(db: firestore.Client, chunks: list[str], *, title: str, 
     """Index chunks durably in Firestore plain; embed as bonus."""
     from google.cloud.firestore_v1.vector import Vector  # type: ignore
 
-    now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-3))).isoformat()
+    now = now_brt().isoformat()
     written = 0
     plain_batch = db.batch()
     vector_batch = db.batch()

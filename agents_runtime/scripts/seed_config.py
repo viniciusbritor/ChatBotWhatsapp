@@ -1,3 +1,4 @@
+from core.timezone import now_brt
 """Seed config/, new agents, and new skills into Firestore (upsert mode)."""
 import os
 import sys
@@ -12,8 +13,7 @@ os.environ["GCP_PROJECT"] = "coherence-ominichannel-fs"
 from google.cloud import firestore
 db = firestore.Client(project="coherence-ominichannel-fs")
 datetime_module = __import__("datetime")
-BRT = datetime_module.timezone(datetime_module.timedelta(hours=-3))
-now = datetime_module.datetime.now(BRT).isoformat()
+now = datetime_module.now_brt().isoformat()
 
 # === CONFIG/ROUTING ===
 routing_rules = [

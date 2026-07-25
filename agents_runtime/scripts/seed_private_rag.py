@@ -18,9 +18,7 @@ from core.rag import (
 )
 from google.cloud.firestore_v1.vector import Vector
 from core.masker import mask_pii
-
-BRT = timezone(timedelta(hours=-3))
-
+from core.timezone import now_brt
 
 DEFAULT_DOCS = [
     {
@@ -65,7 +63,7 @@ def seed_for_phone(phone: str, docs=DEFAULT_DOCS, dry_run: bool = False):
     if db is None:
         print(f"[{phone}] firestore unavailable")
         return 0
-    now = datetime.now(BRT).isoformat()
+    now = now_brt().isoformat()
     written = 0
     for index, doc in enumerate(docs):
         text = mask_pii(doc["text_content"])

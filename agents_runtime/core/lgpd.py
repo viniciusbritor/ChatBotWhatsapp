@@ -10,12 +10,12 @@ import os
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any
+from core.timezone import now_brt
 
 logger = logging.getLogger(__name__)
 
 RETENTION_DAYS = int(os.getenv("RETENTION_DAYS", "90"))
 AUDIT_RETENTION_DAYS = int(os.getenv("AUDIT_RETENTION_DAYS", str(365 * 5)))
-BRT = timezone(timedelta(hours=-3))
 RAG_MEMORY_COLLECTION = os.getenv("RAG_MEMORY_COLLECTION", "conversation-memory-v2")
 RAG_PRIVATE_COLLECTION = os.getenv("RAG_PRIVATE_COLLECTION", "agent-knowledge-v2")
 PENDING_ACTION_COLLECTION = os.getenv("PENDING_ACTION_COLLECTION", "pending-actions")
@@ -58,7 +58,7 @@ def cleanup_old_history(batch_limit: int = 500) -> Dict[str, Any]:
     Returns:
         {"deleted": int, "scanned": int, "duration_sec": float}
     """
-    start = datetime.now(timezone.utc)
+    start = now_brt()
     db = _get_firestore()
     if db is None:
         return {"deleted": 0, "scanned": 0, "error": "firestore_unavailable"}
@@ -84,7 +84,7 @@ def cleanup_old_history(batch_limit: int = 500) -> Dict[str, Any]:
                 batch.commit()
             scanned += batch_count
 
-        expires_at = datetime.now(BRT).isoformat()
+        expires_at = now_brt().isoformat()
         memory_query = _filtered_query(
             db.collection(RAG_MEMORY_COLLECTION),
             "expires_at",
@@ -98,7 +98,7 @@ def cleanup_old_history(batch_limit: int = 500) -> Dict[str, Any]:
         logger.exception(f"cleanup_old_history error: {e}")
         return {"deleted": deleted, "scanned": scanned, "error": str(e)}
 
-    duration = (datetime.now(timezone.utc) - start).total_seconds()
+    duration = (now_brt() - start).total_seconds()
     logger.info(f"cleanup_old_history: deleted={deleted} scanned={scanned} duration={duration:.2f}s")
     return {"deleted": deleted, "scanned": scanned, "duration_sec": duration}
 
@@ -109,7 +109,7 @@ def cleanup_old_audit(batch_limit: int = 500) -> Dict[str, Any]:
     Returns:
         {"deleted": int, "scanned": int}
     """
-    start = datetime.now(timezone.utc)
+    start = now_brt()
     db = _get_firestore()
     if db is None:
         return {"deleted": 0, "scanned": 0, "error": "firestore_unavailable"}
@@ -135,7 +135,7 @@ def cleanup_old_audit(batch_limit: int = 500) -> Dict[str, Any]:
         logger.exception(f"cleanup_old_audit error: {e}")
         return {"deleted": deleted, "scanned": scanned, "error": str(e)}
 
-    duration = (datetime.now(timezone.utc) - start).total_seconds()
+    duration = (now_brt() - start).total_seconds()
     logger.info(f"cleanup_old_audit: deleted={deleted} scanned={scanned} duration={duration:.2f}s")
     return {"deleted": deleted, "scanned": scanned, "duration_sec": duration}
 
@@ -166,7 +166,7 @@ def export_user_data(phone: str) -> Dict[str, Any]:
 
     result = {
         "phone": phone,
-        "exported_at": datetime.now(BRT).isoformat(),
+        "exported_at": now_brt().isoformat(),
         "contact": contact_doc.to_dict() if contact_doc.exists else None,
         "history": [],
         "corrections": [],

@@ -29,6 +29,7 @@ from core.commands import detect_command, apply_command
 from tool_registry import get_tool, get_tool_schema, is_user_scoped_tool
 from agent_loader import get_agent, get_skill, list_agents, get_user, get_config, has_nickname
 from core.audit import log_action
+from core.timezone import BRT, now_brt
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,7 @@ async def _finalize_orchestration(
     })
     phone = payload.get("phone", "")
     _interaction_history.append({
-        "timestamp": datetime.now(timezone(timedelta(hours=-3))).isoformat(),
+        "timestamp": now_brt().isoformat(),
         "phone": phone,
         "text_preview": masked_text[:80],
         "sender": mask_pii(sender_name),
@@ -652,7 +653,7 @@ async def index_audio_failure_for_audit(body: Dict[str, Any], error_code: str) -
         message_id = body.get("message_id") or (body.get("extra") or {}).get("message_id") or ""
         if not phone:
             return {"status": "skipped", "reason": "missing_phone"}
-        timestamp_brt = datetime.now(timezone(timedelta(hours=-3))).isoformat(timespec="minutes")
+        timestamp_brt = now_brt().isoformat(timespec="minutes")
         marker_text = mask_pii(
             f"[audio transcription failed at {timestamp_brt} reason={error_code}]"
         )

@@ -3,8 +3,10 @@ import os
 import time
 import logging
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from typing import Dict, Any, Optional, List
+
+from core.timezone import BRT, now_brt
 
 logger = logging.getLogger(__name__)
 
@@ -21,11 +23,10 @@ _config_generation: int = 0
 _loader_thread: Optional[threading.Thread] = None
 _stop_event = threading.Event()
 _cache_lock = threading.RLock()
-BRT = timezone(timedelta(hours=-3))
 
 
 def _now_iso() -> str:
-    return datetime.now(BRT).isoformat()
+    return now_brt().isoformat()
 
 
 def _get_firestore_client():

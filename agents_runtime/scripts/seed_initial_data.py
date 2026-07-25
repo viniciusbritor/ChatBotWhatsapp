@@ -3,12 +3,10 @@
 Used by agent_loader.seed_default_data() on first startup.
 """
 from datetime import datetime, timedelta, timezone
-
-BRT = timezone(timedelta(hours=-3))
-
+from core.timezone import now_brt
 
 def _now_iso():
-    return datetime.now(BRT).isoformat()
+    return now_brt().isoformat()
 
 
 DEFAULT_AGENTS = [
@@ -254,7 +252,7 @@ DEFAULT_AGENTS = [
         "name": "Learning Agent",
         "role": "specialist",
         "parent_id": "jennifier",
-        "model": "deepseek-v4-pro",
+        "model": "deepseek-v4-flash",
         "model_escalation": None,
         "escalation_threshold": -2,
         "no_escalation": True,
@@ -310,7 +308,7 @@ DEFAULT_AGENTS = [
         "name": "Ata Generator",
         "role": "specialist",
         "parent_id": "jennifier",
-        "model": "deepseek-v4-pro",
+        "model": "deepseek-v4-flash",
         "model_escalation": None,
         "escalation_threshold": -2,
         "no_escalation": True,

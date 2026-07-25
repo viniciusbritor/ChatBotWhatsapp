@@ -7,10 +7,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from core.masker import mask_pii
+from core.timezone import BRT, now_brt, to_brt
 
 logger = logging.getLogger(__name__)
 
-BRT = timezone(timedelta(hours=-3))
 MEMORY_COLLECTION = os.getenv("RAG_MEMORY_COLLECTION", "conversation-memory-v2")
 PRIVATE_COLLECTION = os.getenv("RAG_PRIVATE_COLLECTION", "agent-knowledge-v2")
 MEMORY_TTL_DAYS = int(os.getenv("MEMORY_TTL_DAYS", "90"))
@@ -22,7 +22,7 @@ def _owner_hash(phone: str) -> str:
 
 
 def _now_brt() -> datetime:
-    return datetime.now(BRT)
+    return now_brt()
 
 
 def _get_firestore():

@@ -1,7 +1,7 @@
 # Guardrails e Regras Inegociáveis — ChatBotWhatsapp
 
 > Regras DURAS que todos os agentes IA e humanos devem obedecer neste projeto.
-> Última atualização: **2026-07-22**.
+> Última atualização: **2026-07-25**.
 
 ## 1. Segurança
 
@@ -15,6 +15,19 @@
   (STT fallback quando Whisper falha tecnicamente **e** há consentimento
   registrado). Gemini não é mais usado como fallback LLM — cascade removido
   em 25/07/2026, apenas DeepSeek V4 Flash é o provedor de LLM.
+- **DeepSeek V4 Flash é o ÚNICO LLM em todo o sistema.** Padrão irrestrito
+  em 25/07/2026 (Fase N). Qualquer chamada LLM DEVE usar
+  `ChatOpenAI(model='deepseek-v4-flash', base_url='https://api.deepseek.com/v1')`
+  via `langchain_adapter.build_default_chat_model()`. Proibido:
+  `model='openai:deepseek-...'`, `model='deepseek-v4-pro'`, `model='gemini-...'`
+  em produção. LangChain `openai:` prefix roteia para `api.openai.com` —
+  causa HTTP 400 silencioso. Use sempre o adapter com `base_url` explícito.
+- **Timezone único: BRT (`America/Sao_Paulo`, UTC-3).** Toda referência a
+  datetime DEVE usar `from core.timezone import BRT, now_brt, to_brt`.
+  Proibido `datetime.now(timezone(timedelta(hours=-3)))` ou
+  `BRT = timezone(timedelta(hours=-3))` espalhado pelo código.
+  Audit-periodico: `grep -rn "timedelta(hours=-3)" agents_runtime/` deve
+  retornar 0 matches fora de `core/timezone.py`.
 - **`agents_runtime` não expõe Swagger público** (`/docs`, `/redoc`,
   `/openapi.json` proibidos).
 - **`/admin/*`, `/chat`, `/proactive/send` exigem Bearer SA token ou Firebase

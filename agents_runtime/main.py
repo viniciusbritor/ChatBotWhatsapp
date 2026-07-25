@@ -25,6 +25,7 @@ from core.auth import auth_middleware
 from core.delay_calculator import calculate_delay_ms
 from core.logging import configure_logging
 from core.masker import mask_pii
+from core.timezone import now_brt
 from core import metrics
 from agent_loader import start_loader, stop_loader, list_agents, list_skills, list_tools, get_agent
 from agent_loader import upsert_agent, delete_agent, upsert_skill, upsert_tool
@@ -648,7 +649,7 @@ async def _write_account(account_id: str, body: Dict[str, Any]) -> bool:
         "owner_phone": phone,
         "owner_uid": str(body.get("owner_uid", "")).strip() or phone,
         "status": str(body.get("status", "active")),
-        "updated_at": datetime.now(timezone(timedelta(hours=-3))).isoformat(),
+        "updated_at": now_brt().isoformat(),
     }
     db.collection("whatsapp_accounts").document(account_id).set(payload, merge=True)
     return True
@@ -1033,7 +1034,8 @@ async def oauth_google(request: Request):
 @app.get("/oauth/callback")
 async def oauth_callback(request: Request):
     import requests
-    from core.oauth_per_user import BRT, parse_oauth_state
+    from core.oauth_per_user import parse_oauth_state
+    from core.timezone import BRT
 
     code = request.query_params.get("code", "")
     state = request.query_params.get("state", "")
@@ -1058,21 +1060,21 @@ async def oauth_callback(request: Request):
         if "error" in token_response or not token_response.get("access_token"):
             return HTMLResponse(content="<h2>Erro ao obter autorizacao</h2>", status_code=502)
 
-        now_brt = datetime.now(BRT)
+        now_brt_dt = now_brt()
         token_data = {
             "token": token_response["access_token"],
             "refresh_token": token_response.get("refresh_token", ""),
             "token_uri": "https://oauth2.googleapis.com/token",
             "scopes": OAUTH_SCOPES,
             "expiry": str(time.time() + token_response.get("expires_in", 3600)),
-            "linked_at": now_brt.isoformat(),
+            "linked_at": now_brt_dt.isoformat(),
         }
         from agent_loader import save_user
         saved = save_user(phone, {
             "phone": phone,
             "google_oauth_token": token_data,
             "scopes": OAUTH_SCOPES,
-            "google_oauth_linked_at": now_brt.isoformat(),
+            "google_oauth_linked_at": now_brt_dt.isoformat(),
         })
         if not saved:
             return HTMLResponse(content="<h2>Erro ao salvar autorizacao</h2>", status_code=503)

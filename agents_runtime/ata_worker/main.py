@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.llm_provider import LLMProvider, LLMError
 from core.masker import mask_pii
+from core.timezone import now_brt
 from tools.ata_helper import generate_ata_markdown, save_ata_to_drive, notify_organizer
 from tools.google_calendar import list_events
 from tools.google_gmail import search_messages, get_thread
@@ -93,7 +94,7 @@ def _mark_processed(event_id: str, status: str, drive_file_id: Optional[str] = N
 
 async def find_recent_meetings(phone: str) -> List[Dict[str, Any]]:
     """Find meetings that ended 30±10 minutes ago for the given user."""
-    now = datetime.now(timezone.utc)
+    now = now_brt()
     brt_offset = timedelta(hours=-3)
     now_brt = now + brt_offset
     window_start_brt = now_brt - timedelta(minutes=ATA_LOOKBACK_MIN + ATA_LOOKBACK_WINDOW_MIN)
@@ -169,7 +170,7 @@ async def generate_ata_via_llm(event: Dict[str, Any], emails: List[Dict[str, Any
         result = await llm.chat(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            model="deepseek-v4-pro",
+            model="deepseek-v4-flash",
             temperature=0.3,
             max_tokens=2500,
             thinking_disabled=False,

@@ -4,8 +4,8 @@ import os
 import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
+from core.timezone import now_brt
 
-BRT = timezone(timedelta(hours=-3))
 PENDING_ACTION_TTL_SEC = int(os.getenv("PENDING_ACTION_TTL_SEC", "300"))
 PENDING_ACTION_COLLECTION = os.getenv("PENDING_ACTION_COLLECTION", "pending-actions")
 _local_actions: Dict[str, Dict[str, Any]] = {}
@@ -31,7 +31,7 @@ def _get_firestore():
 
 def _is_expired(action: Dict[str, Any]) -> bool:
     try:
-        return datetime.fromisoformat(action["expires_at"]) <= datetime.now(BRT)
+        return datetime.fromisoformat(action["expires_at"]) <= now_brt()
     except Exception:
         return True
 
@@ -43,7 +43,7 @@ async def set_pending_action(
     ttl_sec: int = PENDING_ACTION_TTL_SEC,
 ) -> Dict[str, Any]:
     owner_hash = _owner_hash(phone)
-    now = datetime.now(BRT)
+    now = now_brt()
     action = {
         "owner_hash": owner_hash,
         "action_type": action_type,
