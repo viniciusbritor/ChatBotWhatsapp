@@ -65,19 +65,27 @@ class LLMProvider:
     ) -> Dict[str, Any]:
         """Single call to DeepSeek V4 Flash. No cascade. The ``model`` arg is
         accepted for backward compatibility but always resolves to
-        ``self.deepseek_model`` (env-configurable via ``DEEPSEEK_MODEL``)."""
+        ``self.deepseek_model`` (env-configurable via ``DEEPSEEK_MODEL``).
+
+        NOTE: ``thinking`` field is intentionally NOT sent. DeepSeek rejects
+        with HTTP 400 when ``thinking`` is combined with ``tools`` or with
+        JSON mode in v4-flash; leaving it out lets the model use its default
+        behaviour and is the only configuration that works for tool calling.
+        """
         if not self.deepseek_key:
             raise LLMError("deepseek_key_not_configured")
         url = f"{self.deepseek_base}/chat/completions"
+        sys_content = system_prompt or ""
+        if json_mode and "json" not in sys_content.lower():
+            sys_content = "JSON: " + sys_content
         payload = {
             "model": self.deepseek_model,
             "temperature": temperature,
             "max_tokens": max_tokens,
             "messages": [
-                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": sys_content},
                 {"role": "user", "content": user_prompt},
             ],
-            "thinking": {"type": "disabled"} if thinking_disabled else {"type": "enabled"},
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
@@ -152,7 +160,13 @@ class LLMProvider:
         max_tool_rounds: int = 5,
     ) -> Dict[str, Any]:
         """Native OpenAI-compatible tool calling. ``tool_calls`` arrive in the
-        structured field; no inline parser is required."""
+        structured field; no inline parser is required.
+
+        Tool names use ``resource.method`` convention (e.g. ``calendar.list_events``).
+        DeepSeek v4-flash rejects tool names containing a dot with HTTP 400,
+        so we transparently rewrite ``.`` -> ``_`` on the wire and translate
+        back when the model calls the tool.
+        """
         if not self.deepseek_key:
             raise LLMError("deepseek_key_not_configured")
         url = f"{self.deepseek_base}/chat/completions"
@@ -163,13 +177,27 @@ class LLMProvider:
         model_id = self.deepseek_model
         tool_count = 0
 
+        wire_to_real: Dict[str, str] = {}
+        if tools:
+            wire_tools = []
+            for tool in tools:
+                fn = tool.get("function", {}) if isinstance(tool, dict) else {}
+                real_name = fn.get("name", "")
+                wire_name = real_name.replace(".", "_")
+                if wire_name != real_name:
+                    wire_to_real[wire_name] = real_name
+                wire_tools.append({
+                    "type": tool.get("type", "function"),
+                    "function": {**fn, "name": wire_name},
+                })
+            tools = wire_tools
+
         while tool_count < max_tool_rounds:
             payload = {
                 "model": model_id,
                 "temperature": temperature,
                 "max_tokens": max_tokens,
                 "messages": messages,
-                "thinking": {"type": "disabled"} if thinking_disabled else {"type": "enabled"},
             }
             if json_mode:
                 payload["response_format"] = {"type": "json_object"}
@@ -201,6 +229,11 @@ class LLMProvider:
                     "tool_rounds": tool_count,
                     "provider": self.PROVIDER_TAG,
                 }
+            for tc in tool_calls:
+                func = tc.get("function", {})
+                wire_name = func.get("name", "")
+                real_name = wire_to_real.get(wire_name, wire_name)
+                func["name"] = real_name
             messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
             for tc in tool_calls:
                 func = tc.get("function", {})

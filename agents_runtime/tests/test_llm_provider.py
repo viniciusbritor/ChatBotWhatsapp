@@ -233,3 +233,55 @@ class TestDefaults:
             provider = LLMProvider()
             assert provider.deepseek_model == "deepseek-v4-pro"
             assert provider.deepseek_base == "https://api.deepseek.example/v1"
+
+
+class TestToolNameTranslation:
+    @pytest.mark.asyncio
+    async def test_tool_call_name_translates_underscore_back_to_dot(self, monkeypatch):
+        """DeepSeek v4-flash rejects tool names with dots (HTTP 400). We rewrite
+        ``.`` -> ``_`` on the wire and translate back when the model calls."""
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        with patch("core.secrets.get_secret", return_value="sk-test"):
+            provider = LLMProvider()
+
+            wire_call = _mock_response(
+                content="",
+                tool_calls=[
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "calendar_list_events",
+                            "arguments": json.dumps({"time_min": "2026-07-25T00:00:00-03:00"}),
+                        },
+                    }
+                ],
+            )
+            wire_done = _mock_response(content="Voce tem 0 eventos hoje.")
+            mock_client = MagicMock()
+            mock_client.post = AsyncMock(side_effect=[wire_call, wire_done])
+
+            captured_payloads = []
+
+            class _CaptureClient(_AsyncContextManagerMock):
+                async def __aenter__(self_inner):
+                    captured_payloads.append(mock_client)
+                    return mock_client
+
+            async def fake_executor(name, args):
+                assert name == "calendar.list_events", f"expected original name, got {name}"
+                return json.dumps({"events": [], "count": 0})
+
+            with patch("core.llm_provider.httpx.AsyncClient", return_value=_CaptureClient(mock_client)):
+                result = await provider.chat_with_tools(
+                    system_prompt="sys",
+                    user_prompt="o que tenho?",
+                    tools=[{"type": "function", "function": {"name": "calendar.list_events", "parameters": {"type": "object", "properties": {}}}}],
+                    tool_executor=fake_executor,
+                )
+
+            assert captured_payloads, "no payload captured"
+            sent_tools = captured_payloads[0].post.await_args.kwargs["json"].get("tools")
+            assert sent_tools[0]["function"]["name"] == "calendar_list_events"
+            assert result["tool_rounds"] == 1
+            assert result["content"] == "Voce tem 0 eventos hoje."
