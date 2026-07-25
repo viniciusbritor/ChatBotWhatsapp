@@ -4,6 +4,7 @@ Accepts:
 - Authorization: Bearer <SA_TOKEN> header
 - ?token=<SA_TOKEN> query string
 - ?token=<FIREBASE_JWT> query string (Portal integration)
+- session_token cookie (set by server on dashboard page load)
 """
 import hmac
 import os
@@ -53,6 +54,7 @@ async def auth_middleware(request: Request, call_next):
     Accepts token via:
     - Authorization: Bearer <token> header (preferred for API calls)
     - ?token=<token> query string (used by Portal frontend via window.open)
+    - session_token cookie (set by server when serving dashboard HTML)
     """
     path = request.url.path
 
@@ -76,6 +78,10 @@ async def auth_middleware(request: Request, call_next):
         query_token = request.query_params.get("token")
         if query_token:
             provided_token = query_token
+        else:
+            cookie_token = request.cookies.get("session_token")
+            if cookie_token:
+                provided_token = cookie_token
 
     if not provided_token:
         return JSONResponse(

@@ -1063,10 +1063,11 @@ def _normalize_response_identity(text: str) -> str:
     return normalized
 
 
-def _bind_tool_args(tool_name: str, tool_args: Dict[str, Any], phone: str) -> Dict[str, Any]:
+def _bind_tool_args(tool_name: str, tool_args: Dict[str, Any], phone: str, instance: str = "") -> Dict[str, Any]:
     effective_args = dict(tool_args)
     if is_user_scoped_tool(tool_name):
         effective_args["phone"] = phone
+        effective_args["instance"] = instance
     return effective_args
 
 
@@ -1148,7 +1149,7 @@ async def _execute_agent(
         if not tool_fn:
             return json.dumps({"error": f"Tool '{tool_name}' not found"})
         try:
-            effective_args = _bind_tool_args(tool_name, tool_args, phone)
+            effective_args = _bind_tool_args(tool_name, tool_args, phone, payload.get("instance", ""))
             if asyncio.iscoroutinefunction(tool_fn):
                 result = await tool_fn(**effective_args)
             else:

@@ -1,12 +1,12 @@
 """HTML template for the ``Agentes Omnichannel`` control-plane.
 
-Renders inside the runtime service but does not depend on ``?token=`` URLs or
-``window.open`` flows. Authentication is performed via ``Authorization: Bearer``
-header or Firebase ID token in the request. Tokens are not echoed in the
-markup or passed via query strings.
+Renders inside the runtime service. Authentication is performed via a
+session cookie set by the server on initial page load. Tokens are never
+exposed in the markup or JavaScript globals.
 
 Template variables:
-- status: dict with deployment metrics (counters, ledger health, etc.)
+- commit: short git SHA or local placeholder
+- deployed_at: timestamp or local placeholder
 """
 from __future__ import annotations
 
@@ -85,7 +85,6 @@ button.secondary { background: transparent; color: var(--accent); border: 1px so
   </section>
 </main>
 <script>
-const AUTH = '__AUTH_TOKEN__';
 const ENDPOINTS = {
   accounts: '/admin/accounts',
   agents: '/admin/agents',
@@ -95,11 +94,8 @@ const ENDPOINTS = {
   knowledge: '/admin/knowledge',
   status: '/admin/status',
 };
-function authHeaders() {
-  return AUTH ? { 'Authorization': 'Bearer ' + AUTH, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
-}
 async function api(path, options = {}) {
-  const r = await fetch(path, { ...options, headers: { ...authHeaders(), ...(options.headers || {}) } });
+  const r = await fetch(path, { ...options, credentials: 'include', headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } });
   if (!r.ok) throw new Error('http_' + r.status);
   return r.json();
 }
@@ -268,17 +264,15 @@ setActive('accounts');
 """
 
 
-def render_dashboard(commit: str, deployed_at: str, auth_token: str = "") -> str:
+def render_dashboard(commit: str, deployed_at: str) -> str:
     payload = {
         "commit": html.escape(commit or "local"),
         "deployed": html.escape(deployed_at or "-"),
-        "auth_token": html.escape(auth_token, quote=True),
     }
     return (
         _TEMPLATE
         .replace("__COMMIT__", payload["commit"])
         .replace("__DEPLOYED__", payload["deployed"])
-        .replace("__AUTH_TOKEN__", payload["auth_token"])
     )
 
 

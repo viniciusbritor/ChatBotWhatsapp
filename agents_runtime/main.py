@@ -547,6 +547,18 @@ def _bearer_token(request: Request) -> str:
     return ""
 
 
+def _set_session_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key="session_token",
+        value=token,
+        httponly=True,
+        secure=True,
+        samesite="none",
+        path="/",
+        max_age=3600,
+    )
+
+
 def _authorise_admin(request: Request) -> bool:
     from core.auth import _is_valid_firebase_jwt, get_sa_token
 
@@ -564,8 +576,13 @@ async def admin_dashboard(request: Request):
     """Render the Agentes Omnichannel control plane."""
     from core.module_ui import render_dashboard
 
-    auth_token = _bearer_token(request)
-    return HTMLResponse(content=render_dashboard(COMMIT_SHA, DEPLOYED_AT, auth_token))
+    token = _bearer_token(request)
+    if not token:
+        token = request.query_params.get("token", "")
+    response = HTMLResponse(content=render_dashboard(COMMIT_SHA, DEPLOYED_AT))
+    if token:
+        _set_session_cookie(response, token)
+    return response
 
 
 @app.get("/admin/status")
@@ -948,7 +965,9 @@ async def root_redirect(request: Request):
         token = request.query_params.get("token", "")
     if token:
         from core.module_ui import render_dashboard
-        return HTMLResponse(content=render_dashboard(COMMIT_SHA, DEPLOYED_AT, token))
+        response = HTMLResponse(content=render_dashboard(COMMIT_SHA, DEPLOYED_AT))
+        _set_session_cookie(response, token)
+        return response
     return JSONResponse(content={
         "service": "agents_runtime",
         "version": VERSION,
