@@ -236,10 +236,8 @@ def get_user_credentials(phone: str) -> Optional[Credentials]:
             _persist_token(db, phone, merged)
     expiry = token_data.get("expiry")
     try:
-        expiry_dt = datetime.fromtimestamp(
-            float(expiry),
-            tz=timezone(timedelta(hours=-3)),
-        ) if expiry else None
+        dt = datetime.fromtimestamp(float(expiry), tz=timezone.utc) if expiry else None
+        expiry_dt = dt.replace(tzinfo=None) if dt else None
     except (TypeError, ValueError):
         expiry_dt = None
     return Credentials(

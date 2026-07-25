@@ -62,7 +62,8 @@ def test_expired_user_token_is_refreshed_and_persisted(monkeypatch):
     assert credentials.token == "access-new"
     assert credentials.client_id == "client-id"
     assert credentials.client_secret == "client-secret"
-    assert credentials.expiry.utcoffset().total_seconds() == -10800
+    assert credentials.expiry is not None
+    assert credentials.expiry.tzinfo is None
     assert db.collection.call_args.args[0] == "usuarios"
     persisted = db.collection().document().set.call_args.args[0]["google_oauth_token"]
     assert "client_secret" not in persisted
