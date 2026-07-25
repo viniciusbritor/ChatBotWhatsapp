@@ -1070,13 +1070,130 @@ def _bind_tool_args(tool_name: str, tool_args: Dict[str, Any], phone: str, insta
     return effective_args
 
 
+async def _execute_deep_agent(
+    agent: Dict[str, Any],
+    text: str,
+    payload: Dict[str, Any],
+    extra: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Execute the agent using DeepAgents harness.
+
+    Returns ``None`` if DeepAgents is not available for this agent id
+    (e.g. ``manager-calendar`` is supported, but a custom agent id is not).
+    Returns the standard reply dict on success, or a fallback error dict
+    on failure.
+    """
+    agent_id = agent.get("id", "unknown-agent")
+    try:
+        from deepagent_layer import get_deep_agent
+    except Exception as exc:
+        logger.warning("deepagent_layer unavailable: %s", exc)
+        return None
+
+    deep_agent = get_deep_agent(agent_id)
+    if deep_agent is None:
+        return None
+
+    from core.agent_status import record_agent_failure, record_agent_success, start_agent_execution
+    execution_started = start_agent_execution(agent_id)
+
+    phone = payload.get("phone", "")
+    first_name = payload.get("first_name", "")
+    brt = timezone(timedelta(hours=-3))
+    hoje = datetime.now(brt)
+
+    user_prompt = (
+        f"User: {payload.get('sender_name', 'user')} (tel: {phone}"
+        + (f", primeiro nome: {first_name}" if first_name else "")
+        + ")\n"
+        f"Mensagem: {text}\n\n"
+        f"DATA ATUAL: {hoje.strftime('%Y-%m-%d')} (horario de Brasilia, BRT, UTC-3). "
+        f"Hora atual: {hoje.strftime('%H:%M')}. "
+        f"Responda em portugues brasileiro, tom caloroso, 1-2 frases, max 4 linhas."
+    )
+
+    config: Dict[str, Any] = {
+        "configurable": {
+            "thread_id": phone or "default",
+        }
+    }
+    if phone:
+        config["configurable"]["phone"] = phone
+
+    try:
+        result = await asyncio.wait_for(
+            deep_agent.ainvoke(
+                {"messages": [{"role": "user", "content": user_prompt}]},
+                config=config,
+            ),
+            timeout=120,
+        )
+    except asyncio.TimeoutError:
+        record_agent_failure(agent_id, execution_started, "deepagent_timeout")
+        return _error_response(504, "deepagent_timeout", "Jennifer demorou demais. Tenta de novo?")
+    except Exception as exc:
+        record_agent_failure(agent_id, execution_started, f"deepagent_error:{type(exc).__name__}")
+        logger.exception("deepagent_failed manager=%s", agent_id)
+        return None
+
+    messages = (result or {}).get("messages", [])
+    reply_text = ""
+    for m in reversed(messages):
+        if getattr(m, "type", "") in {"ai", "AIMessage"} or (
+            isinstance(m, dict) and m.get("role") == "assistant"
+        ):
+            content = getattr(m, "content", "") if not isinstance(m, dict) else m.get("content", "")
+            if isinstance(content, list):
+                content = " ".join(
+                    [c.get("text", "") for c in content if isinstance(c, dict)]
+                )
+            reply_text = str(content or "").strip()
+            break
+
+    if not reply_text:
+        record_agent_failure(agent_id, execution_started, "deepagent_empty")
+        return _error_response(500, "deepagent_empty", "Nao consegui gerar uma resposta.")
+
+    reply_text = re.sub(r'\s*<think>.*?</think>\s*', '', reply_text, flags=re.DOTALL).strip()
+    reply_text = _normalize_response_identity(reply_text)
+    delay_ms = calculate_delay_ms(reply_text)
+    presence = calculate_presence()
+
+    from core import metrics
+    model_used = "deepseek-v4-flash"
+    provider = "deepseek"
+    metrics.record_provider_latency(provider, True, execution_started)
+    record_agent_success(agent_id, execution_started, model_used, provider)
+
+    return {
+        "reply": reply_text,
+        "delay_ms": delay_ms,
+        "presence": presence,
+        "metadata": {
+            "agent_id": agent_id,
+            "executed_agent_id": agent_id,
+            "response_identity": "Jennifer",
+            "model_used": model_used,
+            "provider": provider,
+            "tool_rounds": len([m for m in messages if getattr(m, "type", "") in {"tool", "ToolMessage"}]),
+            "tool_calls": [],
+            "has_audio": extra.get("has_audio", False),
+            "runtime": "deepagents",
+        },
+    }
+
+
 async def _execute_agent(
     agent: Dict[str, Any],
     text: str,
     payload: Dict[str, Any],
     extra: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Execute a specific agent with tool calling loop."""
+    """Execute a specific agent with tool calling loop.
+
+    Tries the DeepAgents harness first; falls back to the legacy
+    LLMProvider path if DeepAgents is unavailable for this agent id.
+    """
     agent_id = agent.get("id", "unknown-agent")
     from core.agent_status import record_agent_failure, record_agent_success, start_agent_execution
 
@@ -1091,6 +1208,14 @@ async def _execute_agent(
         )
 
     phone = payload.get("phone", "")
+
+    try:
+        deep_result = await _execute_deep_agent(agent, text, payload, extra)
+        if deep_result is not None:
+            return deep_result
+    except Exception as exc:
+        logger.warning("deepagent_attempt_failed agent_id=%s exc=%s", agent_id, type(exc).__name__)
+
     history = _get_conversation_history(phone, limit=10)
     mem_rag = await _search_memory(phone, text, limit=5)
     recent = [i for i in _interaction_history[-4:] if i.get("phone") == phone]
@@ -1144,16 +1269,27 @@ async def _execute_agent(
     async def tool_executor(tool_name: str, tool_args: dict) -> str:
         tool_fn = get_tool(tool_name)
         if not tool_fn:
+            logger.warning("tool_unknown tool=%s", tool_name)
             return json.dumps({"error": f"Tool '{tool_name}' not found"})
+        effective_args = _bind_tool_args(tool_name, tool_args, phone, payload.get("instance", ""))
+        logger.info("tool_invoking tool=%s args=%s", tool_name, list(effective_args.keys()))
         try:
-            effective_args = _bind_tool_args(tool_name, tool_args, phone, payload.get("instance", ""))
-            if asyncio.iscoroutinefunction(tool_fn):
-                result = await tool_fn(**effective_args)
+            coro = tool_fn(**effective_args)
+            if asyncio.iscoroutine(coro) or asyncio.iscoroutinefunction(tool_fn):
+                result = await asyncio.wait_for(coro, timeout=30)
             else:
-                result = tool_fn(**effective_args)
-            return mask_pii(json.dumps(result, ensure_ascii=False, default=str))
+                result = coro
+            truncated = mask_pii(json.dumps(result, ensure_ascii=False, default=str))
+            if len(truncated) > 2000:
+                truncated = truncated[:2000] + "...(truncated)"
+            logger.info("tool_result tool=%s length=%d", tool_name, len(truncated))
+            return truncated
+        except asyncio.TimeoutError:
+            logger.error("tool_timeout tool=%s timeout=30s", tool_name)
+            return json.dumps({"error": f"Tool '{tool_name}' timed out after 30s"})
         except Exception as e:
-            return json.dumps({"error": type(e).__name__})
+            logger.exception("tool_error tool=%s", tool_name)
+            return json.dumps({"error": f"{type(e).__name__}: {str(e)[:200]}"})
 
     try:
         if tool_schemas:

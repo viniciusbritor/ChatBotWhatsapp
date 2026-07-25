@@ -181,6 +181,10 @@ em Firestore plain (`message-history/{history_id}`) com indexação por
   `git commit` → `git push origin test` → trigger dispara build → Cloud Run
   deploy. Builds manuais fora da esteira quebram rastreabilidade, reprodutibilidade
   e auditoria. Violação registrada em 25/07/2026 (builds `97a5128d` e `ef2640bb`).
+- **DeepAgents é o harness de produção para managers** (Fase L, 25/07/2026).
+  O tool calling loop manual em `core/llm_provider.py::chat_with_tools` é
+  fallback legacy. Tool executors SEMPRE usam `asyncio.wait_for(..., timeout=30s)`
+  para evitar congelamento. Tool results devem ser truncados a 2000 chars.
 
 ## 11. Pendências
 

@@ -256,12 +256,33 @@ class LLMProvider:
                 })
             tool_count += 1
 
-        return {
-            "content": "Maximo de execucoes atingido.",
-            "model_used": model_id,
-            "tool_rounds": tool_count,
-            "provider": self.PROVIDER_TAG,
-        }
+        logger.warning("tool_loop_exhausted rounds=%d", tool_count)
+        try:
+            fallback_prompt = (
+                "Voce atingiu o limite de chamadas de ferramentas. "
+                "Responda agora em portugues, 1-2 frases, com base SOMENTE nos tool_results abaixo. "
+                "Se faltarem dados, diga ao usuario o que conseguiu obter. NAO invente nada.\n\n"
+                "Tool results acumulados:\n"
+            )
+            for m in messages[-8:]:
+                if m.get("role") == "tool":
+                    content = str(m.get("content", ""))[:500]
+                    fallback_prompt += f"\n- {content}\n"
+            return await self.chat(
+                system_prompt="Voce e a Jennifer, assistente que responde com concisao.",
+                user_prompt=fallback_prompt,
+                model=model_id,
+                temperature=0.5,
+                max_tokens=300,
+            )
+        except Exception as fallback_exc:
+            logger.error("fallback_chat_failed exc=%s", fallback_exc)
+            return {
+                "content": "Maximo de execucoes atingido.",
+                "model_used": model_id,
+                "tool_rounds": tool_count,
+                "provider": self.PROVIDER_TAG,
+            }
 
     async def transcribe_audio_base64(self, audio_b64: str, mimetype: str = "audio/ogg") -> str:
         from tools.audio_transcribe import transcribe_base64

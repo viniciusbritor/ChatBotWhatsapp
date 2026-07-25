@@ -279,8 +279,12 @@ ChatBotWhatsapp/
 │   └── TERMOS.md                      # termos de uso
 └── agents_runtime/                    # runtime FastAPI
     ├── main.py                        # webhook / /pubsub/push / /admin/*
-    ├── orchestrator.py                # roteamento Jennifer
+    ├── orchestrator.py                # roteamento Jennifer + tool loop legacy
     ├── agent_loader.py                # snapshot Firestore
+    ├── deepagent_layer/               # DeepAgents harness (Fase L)
+    │   ├── tools.py                   # LangChain @tool wrappers
+    │   ├── agents.py                  # factory + cache
+    │   └── __init__.py                # export público
     ├── core/
     │   ├── auth.py
     │   ├── evolution_client.py        # sendText + markMessagesAsRead

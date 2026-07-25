@@ -1557,3 +1557,61 @@ recentes (incluindo `latest` = `ef2640bb`).
   (não consultados pelo provider atual, mas mantidos para histórico).
 
 ---
+
+### Migração para DeepAgents — 25/07/2026 13:50 BRT
+
+**Contexto:** o tool calling loop manual em `core/llm_provider.py::chat_with_tools`
+causava dois sintomas recorrentes: (1) "Maximo de execucoes atingido" quando
+o LLM entrava em loop; (2) congelamento sem resposta quando uma tool
+travava (sem timeout). Decisão: substituir o loop manual pelo harness
+DeepAgents (`create_deep_agent` da LangChain), que é battle-tested.
+
+**Mudanças:**
+
+- **Novas dependências** (`requirements.txt`):
+  - `deepagents>=0.7.0a4` (alpha mas em cima de LangGraph maduro)
+  - `langchain-anthropic>=0.3.0` (peer dependency)
+  - `langchain-mcp-adapters>=0.1.0` (preparação para MCP futuro)
+- **Novo módulo `deepagent_layer/`**:
+  - `deepagent_layer/tools.py`: wrappers LangChain `@tool` para todas
+    as funções em `tools/google_*.py` e `tools/web_search.py`.
+  - `deepagent_layer/agents.py`: factory `get_deep_agent(manager_id)` com
+    cache e fallback para `None` se manager desconhecido.
+  - `deepagent_layer/__init__.py`: export público.
+- **`orchestrator.py::_execute_deep_agent`**: nova função que chama
+  `deep_agent.ainvoke()` com timeout de 120s. Retorna a mesma estrutura
+  de reply que o `_execute_agent` legacy.
+- **`orchestrator.py::_execute_agent`**: modificado para tentar
+  `_execute_deep_agent` primeiro. Se retornar `None` (manager
+  desconhecido), faz fallback para o caminho legacy (LLMProvider).
+- **Tool loop legacy (`core/llm_provider.py`)**: agora retorna
+  resposta fallback via `chat()` quando `max_tool_rounds=8` é
+  esgotado (em vez de "Maximo de execucoes" cru).
+- **Tool executor (`orchestrator.py::tool_executor`)**: agora tem
+  `asyncio.wait_for(..., timeout=30s)`, trunca resultados a 2000 chars
+  e loga `tool_invoking`/`tool_result`/`tool_timeout`/`tool_error`.
+
+**StateGraph (Fase H) preservado:** `agent_orchestration/graph.py`,
+`access_guardian.py` e `jennifier.py` permanecem intactos. DeepAgents
+roda **dentro** do LangGraph runtime, não substitui o guard.
+
+**Suite:** 367 passed, 30 skipped, 0 failures (15 novos testes em
+`tests/test_deepagent_layer.py`).
+
+**Riscos conhecidos:**
+
+- DeepAgents é alpha (0.7.0b2) — pode ter breaking changes em releases futuras.
+  Mitigação: vendorizar a versão em `requirements.txt` (sem `>=`).
+- Cache de agents em memória pode ficar stale se o system_prompt mudar.
+  Mitigação: chamar `reset_cache()` ao alterar prompts (Fase futura).
+- Tool `phone` é obrigatória para todas as tools Google. O owner guard
+  continua aplicado via `@_owner_guard` decorator nos tools originais.
+
+**Pendências:**
+
+- Habilitar `interrupt_on` para tools destrutivas (`delete_event`,
+  `send_gmail`, `create_drive_folder`).
+- Adicionar memory e skills aos DeepAgents (backend Firestore).
+- Migrar `core/rag.py` para usar skills do DeepAgents.
+
+---

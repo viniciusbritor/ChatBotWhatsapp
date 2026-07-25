@@ -141,7 +141,7 @@ flowchart LR
 | 6 | `orchestrator` | Detecta intenção, escolhe agente principal, prefetch Calendar/Email/Drive. |
 | 7 | `tools` | Owner Guard valida que o telefone é o `owner_phone` da conta antes de chamar Gmail/Drive/Calendar. |
 | 8 | `orchestrator` | Persistência plain (`message-history/{id}`) com `owner_hash` derivado. |
-| 9 | `orchestrator` | Cascata LLM (MiniMax M2.7 → M3 → DeepSeek V4 Flash) com mascaramento PII. |
+| 9 | `orchestrator` | LLM único DeepSeek V4 Flash via DeepAgents (harness LangGraph). Mascaramento PII. |
 | 10 | `pubsub` | `send_text` na Evolution → resposta + tick azul. |
 | 11 | `pubsub` | `mark_delivered` no ledger. |
 
