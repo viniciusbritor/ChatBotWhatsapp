@@ -281,8 +281,11 @@ ChatBotWhatsapp/
     ├── main.py                        # webhook / /pubsub/push / /admin/*
     ├── orchestrator.py                # roteamento Jennifer + tool loop legacy
     ├── agent_loader.py                # snapshot Firestore
-    ├── deepagent_layer/               # DeepAgents harness (Fase L)
-    │   ├── tools.py                   # LangChain @tool wrappers
+    ├── langchain_adapter/             # wrapper estável (Fase M)
+    │   ├── __init__.py
+    │   └── tools.py                   # @tool wrapper (LangChain 1.x)
+    ├── deepagent_layer/               # DeepAgents harness (Fase L/M)
+    │   ├── tools.py                   # wrappers via langchain_adapter
     │   ├── agents.py                  # factory + cache
     │   └── __init__.py                # export público
     ├── core/

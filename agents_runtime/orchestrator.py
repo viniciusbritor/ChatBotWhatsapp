@@ -1070,6 +1070,58 @@ def _bind_tool_args(tool_name: str, tool_args: Dict[str, Any], phone: str, insta
     return effective_args
 
 
+def _is_ai_message(message: Any) -> bool:
+    """Return True if the message is an AI assistant message.
+
+    Compatible with LangChain 1.x ``AIMessage`` (BaseMessage subclass)
+    and the legacy dict format used by early DeepAgents.
+    """
+    if isinstance(message, dict):
+        return message.get("role") == "assistant"
+    cls_name = type(message).__name__
+    if cls_name == "AIMessage":
+        return True
+    msg_type = getattr(message, "type", "")
+    return msg_type in {"ai", "AIMessage"}
+
+
+def _is_tool_message(message: Any) -> bool:
+    """Return True if the message is a tool result message."""
+    if isinstance(message, dict):
+        return message.get("role") == "tool"
+    cls_name = type(message).__name__
+    if cls_name == "ToolMessage":
+        return True
+    msg_type = getattr(message, "type", "")
+    return msg_type in {"tool", "ToolMessage"}
+
+
+def _extract_message_content(message: Any) -> str:
+    """Extract the text content from an AI message in any supported format.
+
+    LangChain 1.x ``AIMessage`` may carry content as a string OR as a list
+    of blocks (e.g. ``[{"type": "text", "text": "..."}]``). We normalise to
+    a plain string.
+    """
+    if isinstance(message, dict):
+        content = message.get("content", "")
+    else:
+        content = getattr(message, "content", "")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict):
+                text = block.get("text", "")
+                if text:
+                    parts.append(str(text))
+            elif isinstance(block, str):
+                parts.append(block)
+        return " ".join(parts)
+    return str(content or "")
+
+
 async def _execute_deep_agent(
     agent: Dict[str, Any],
     text: str,
@@ -1139,14 +1191,8 @@ async def _execute_deep_agent(
     messages = (result or {}).get("messages", [])
     reply_text = ""
     for m in reversed(messages):
-        if getattr(m, "type", "") in {"ai", "AIMessage"} or (
-            isinstance(m, dict) and m.get("role") == "assistant"
-        ):
-            content = getattr(m, "content", "") if not isinstance(m, dict) else m.get("content", "")
-            if isinstance(content, list):
-                content = " ".join(
-                    [c.get("text", "") for c in content if isinstance(c, dict)]
-                )
+        if _is_ai_message(m):
+            content = _extract_message_content(m)
             reply_text = str(content or "").strip()
             break
 
@@ -1175,7 +1221,7 @@ async def _execute_deep_agent(
             "response_identity": "Jennifer",
             "model_used": model_used,
             "provider": provider,
-            "tool_rounds": len([m for m in messages if getattr(m, "type", "") in {"tool", "ToolMessage"}]),
+            "tool_rounds": len([m for m in messages if _is_tool_message(m)]),
             "tool_calls": [],
             "has_audio": extra.get("has_audio", False),
             "runtime": "deepagents",

@@ -1615,3 +1615,46 @@ roda **dentro** do LangGraph runtime, não substitui o guard.
 - Migrar `core/rag.py` para usar skills do DeepAgents.
 
 ---
+
+### Migração LangChain 0.3 → 1.4 + DeepAgents 0.6.12 (Fase M) — 25/07/2026 14:00 BRT
+
+**Contexto:** `deepagents==0.7.0b2` (alpha) causou dependency hell
+na build `10ba3f33` (16:48 UTC). Decisão: reverter para
+`deepagents==0.6.12` (estável, Jun 25 2026) e fazer upgrade coordenado
+de langchain 0.3 → 1.4.
+
+**Mudanças:**
+
+- **`requirements.txt`:** pins removidos `<0.3`, `<0.4` para langchain*;
+  adicionado `langchain>=1.3.11`, `langchain-anthropic>=1.4.7`. Pinned
+  `deepagents>=0.6.12,<0.7` (estável, fora da alpha 0.7.x).
+- **`langchain_adapter/` (NOVO):** módulo que isola a versão do
+  LangChain. Todos os imports do framework passam por ele.
+  Estabilidade: se a API mudar em upgrade futuro, ajustamos só este.
+- **`agent_orchestration/graph.py`:** `set_entry_point("node")` →
+  `add_edge(START, "node")` (langgraph 1.x). Imports de `START` e
+  `END` agora explícitos.
+- **`orchestrator.py::_execute_deep_agent`:** parsing de `AIMessage`
+  extraído para helpers `_is_ai_message`, `_is_tool_message`,
+  `_extract_message_content` que funcionam com LangChain 1.x
+  (`AIMessage.text()`) e com dict (formato legado).
+- **`deepagent_layer/tools.py`:** `from langchain_core.tools import tool`
+  substituído por `from langchain_adapter import tool` (isolamento).
+- **Zero modificação em:** `core/`, `tools/`, `agent_loader.py`,
+  `ata_worker/`, `proactive_worker/`, `Dockerfile`,
+  `cloudbuild-test.yaml` (não dependem de LangChain).
+
+**Suite:** 367 passed, 30 skipped, 0 failures (sem regressão).
+
+**Versões instaladas localmente:**
+
+- `langchain==1.3.14`
+- `langchain-core==1.5.1`
+- `langchain-anthropic==1.5.2`
+- `langgraph>=1.0.0,<2.0.0`
+- `deepagents==0.6.12`
+
+**Rollback:** `git revert <commit-fase-M>` volta para o estado
+funcional (commit `d4bead2` ou `c85c193` revertido).
+
+---

@@ -35,10 +35,10 @@ logger = logging.getLogger(__name__)
 
 def _build_state_graph():
     try:
-        from langgraph.graph import StateGraph, END
+        from langgraph.graph import StateGraph, START, END
     except ImportError as exc:  # pragma: no cover - defensive
         raise RuntimeError("langgraph is required: pip install langgraph") from exc
-    return StateGraph, END
+    return StateGraph, START, END
 
 
 TurnState = Dict[str, Any]
@@ -167,7 +167,7 @@ def _route_after_guard(state: TurnState) -> str:
 
 
 def build_graph():
-    StateGraph, END = _build_state_graph()
+    StateGraph, START, END = _build_state_graph()
     graph = StateGraph(TurnState)
 
     graph.add_node("jennifier", jennifier_node)
@@ -176,7 +176,7 @@ def build_graph():
     graph.add_node("manager", manager_node)
     graph.add_node("reply", reply_node)
 
-    graph.set_entry_point("jennifier")
+    graph.add_edge(START, "jennifier")
     graph.add_edge("jennifier", "classify_intent")
     graph.add_edge("classify_intent", "guardian")
     graph.add_conditional_edges(

@@ -1,31 +1,18 @@
-"""LangChain tool wrappers for Google Calendar, Gmail, Drive, and Web search.
+"""LangChain 1.x tool wrappers for Google Calendar, Gmail, Drive, and Web search.
 
-Each function is wrapped with the LangChain ``@tool`` decorator so that
-DeepAgents (built on LangGraph) can call them as native tools. The
-underlying business logic stays in ``tools/google_*.py`` and the owner
-guard is preserved.
+Each function is wrapped with the LangChain ``@tool`` decorator (via
+``langchain_adapter``) so that DeepAgents (built on LangGraph 1.x) can
+call them as native tools. The underlying business logic stays in
+``tools/google_*.py`` and the owner guard is preserved.
 
-The DeepAgents harness handles:
-- Tool calling loop (no more manual loop in ``core.llm_provider``)
-- Context offloading for large tool results
-- Sub-agent spawning for parallel tool calls
-- Tool call timeout and retry
-
-These wrappers are THIN: they only convert async/sync callables to the
-LangChain tool format. Owner guard, OAuth and error handling remain in
-the underlying tools.
+Fase M (25/07/2026): langchain 0.3 -> 1.4 + deepagents 0.6.12.
 """
 from __future__ import annotations
 
 import logging
 from typing import Any, Dict, List, Optional
 
-try:
-    from langchain_core.tools import tool
-except ImportError as exc:
-    raise ImportError(
-        "langchain-core is required. Install with: pip install langchain-core>=0.3.0"
-    ) from exc
+from langchain_adapter import tool
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +20,9 @@ logger = logging.getLogger(__name__)
 def _build_langchain_tools_for(manager_id: str) -> List[Any]:
     """Build the LangChain tool list for a given manager.
 
-    Returns the list of wrapped tools. Each tool is a ``langchain_core.tools.BaseTool``
-    instance that can be passed directly to ``create_deep_agent``.
+    Returns the list of wrapped tools. Each tool is a
+    ``langchain_core.tools.BaseTool`` instance that can be passed directly
+    to ``create_deep_agent``.
 
     Args:
         manager_id: One of ``manager-calendar``, ``manager-email``,
