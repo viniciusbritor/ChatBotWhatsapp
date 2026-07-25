@@ -185,7 +185,7 @@ CORRECTION_KEYWORDS = [
     "na verdade", "não é assim", "nao e assim", "errado", "errada",
 ]
 CALENDAR_KEYWORDS = [
-    "agenda", "reuniao", "evento", "eventos", "compromisso",
+    "agenda", "agend", "reuniao", "evento", "eventos", "compromisso",
     "compromissos", "lembrete", "calendario", "disponivel",
     "semana que vem", "proxima semana", "agenda de hoje",
 ]

@@ -51,17 +51,23 @@ class OwnerResolution:
 def resolve_owner(instance: str, fallback_phone: str = "") -> Optional[OwnerResolution]:
     """Look up the owner bound to an Evolution instance.
 
-    The lookup is performed against the ``whatsapp_accounts`` collection. If
-    nothing is configured we fall back to the inbound phone so that single-tenant
-    deployments still work, but tools requiring Google scopes will treat the
-    caller as the owner only when the inbound phone matches ``owner_phone``.
+    Strategy:
+    1. If ``instance`` is provided, query ``whatsapp_accounts`` for the owner.
+    2. If ``instance`` is empty, query ``whatsapp_accounts`` for a row whose
+       ``owner_phone`` matches the normalised ``fallback_phone``.
+    3. If nothing is found, fall back to the inbound phone so single-tenant
+       deployments still work, but tools requiring Google scopes will treat
+       the caller as the owner only when the inbound phone matches the
+       resolved ``owner_phone``.
     """
-    if not instance:
-        return None
     db = _get_firestore_client()
-    if db is not None:
+    instance_norm = (instance or "").strip()
+    fallback_norm = normalize_phone(fallback_phone)
+    if db is not None and instance_norm:
         try:
-            docs = db.collection(WHATSAPP_ACCOUNTS_COLLECTION).where("instance", "==", instance).limit(1).stream()
+            docs = db.collection(WHATSAPP_ACCOUNTS_COLLECTION).where(
+                "instance", "==", instance_norm
+            ).limit(1).stream()
             for doc in docs:
                 data = doc.to_dict() or {}
                 owner_phone = normalize_phone(data.get("owner_phone", ""))
@@ -71,18 +77,32 @@ def resolve_owner(instance: str, fallback_phone: str = "") -> Optional[OwnerReso
                     owner_phone=owner_phone,
                     owner_uid=str(data.get("owner_uid", owner_phone)),
                     account_id=str(data.get("account_id", doc.id)),
-                    instance=instance,
+                    instance=instance_norm,
                 )
         except Exception as exc:  # noqa: BLE001
-            logger.warning("resolve_owner firestore failed: %s", exc)
-    fallback = normalize_phone(fallback_phone)
-    if not fallback:
+            logger.warning("resolve_owner firestore (instance) failed: %s", exc)
+    if db is not None and fallback_norm:
+        try:
+            docs = db.collection(WHATSAPP_ACCOUNTS_COLLECTION).where(
+                "owner_phone", "==", fallback_norm
+            ).limit(1).stream()
+            for doc in docs:
+                data = doc.to_dict() or {}
+                return OwnerResolution(
+                    owner_phone=fallback_norm,
+                    owner_uid=str(data.get("owner_uid", fallback_norm)),
+                    account_id=str(data.get("account_id", doc.id)),
+                    instance=str(data.get("instance", instance_norm)),
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("resolve_owner firestore (owner_phone) failed: %s", exc)
+    if not fallback_norm:
         return None
     return OwnerResolution(
-        owner_phone=fallback,
-        owner_uid=fallback,
-        account_id=f"instance:{instance}",
-        instance=instance,
+        owner_phone=fallback_norm,
+        owner_uid=fallback_norm,
+        account_id=f"fallback:{fallback_norm}",
+        instance=instance_norm or "unknown",
     )
 
 
