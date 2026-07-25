@@ -10,13 +10,15 @@ class TestAgentInventory:
     def test_unverified_agent_is_not_healthy(self, monkeypatch):
         from core.agent_status import build_agent_inventory
 
-        monkeypatch.setenv("MINIMAX_API_KEY", "test-key")
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
         agents = [
             {
                 "id": "jennifier",
                 "name": "Jennifer",
                 "role": "orchestrator",
-                "model": "MiniMax-M3",
+                "model": "deepseek-v4-flash",
                 "enabled": True,
                 "instances": ["jennifer"],
                 "tools": [],
@@ -35,15 +37,17 @@ class TestAgentInventory:
     def test_recent_success_marks_agent_healthy(self, monkeypatch):
         from core.agent_status import build_agent_inventory, record_agent_success, start_agent_execution
 
-        monkeypatch.setenv("MINIMAX_API_KEY", "test-key")
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
         started = start_agent_execution("jennifier")
-        record_agent_success("jennifier", started, "MiniMax-M3", "minimax")
+        record_agent_success("jennifier", started, "deepseek-v4-flash", "deepseek")
         agents = [
             {
                 "id": "jennifier",
                 "name": "Jennifer",
                 "role": "orchestrator",
-                "model": "MiniMax-M3",
+                "model": "deepseek-v4-flash",
                 "enabled": True,
                 "instances": ["jennifer"],
                 "tools": [],
@@ -61,13 +65,15 @@ class TestAgentInventory:
     def test_missing_tool_blocks_operational_status(self, monkeypatch):
         from core.agent_status import build_agent_inventory
 
-        monkeypatch.setenv("MINIMAX_API_KEY", "test-key")
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
         agents = [
             {
                 "id": "manager-web",
                 "name": "Web",
                 "role": "manager",
-                "model": "MiniMax-M3",
+                "model": "deepseek-v4-flash",
                 "enabled": True,
                 "instances": ["jennifer"],
                 "tools": ["missing.tool"],
@@ -87,10 +93,7 @@ class TestAgentInventory:
         from core import agent_status
 
         class FakeLLM:
-            minimax_key = None
             deepseek_key = None
-            nvidia_key = None
-            gemini_key = None
 
             def is_available(self) -> bool:
                 return False
@@ -101,42 +104,30 @@ class TestAgentInventory:
         monkeypatch.setattr(agent_status, "_LLMProvider", FakeLLM)
         with patch("core.rag._validate_embedding", return_value=[0.0] * 1536):
             with patch("core.secrets.get_secret", return_value=None):
-                assert agent_status._model_provider_ready("MiniMax-M2.7-highspeed") is False
                 assert agent_status._model_provider_ready("deepseek-v4-flash") is False
-                assert agent_status._model_provider_ready("nvidia/nemotron") is False
                 assert agent_status._model_provider_ready("anything-else") is False
                 assert agent_status._model_provider_ready("") is False
-                assert agent_status._model_provider_ready("Gemini-2.5-Flash") is False
-
-        class FakeLLMSingleKey(FakeLLM):
-            minimax_key = "sk-test"
-
-            def is_available(self) -> bool:
-                return True
-
-        monkeypatch.setattr(agent_status, "_LLMProvider", FakeLLMSingleKey)
-        assert agent_status._model_provider_ready("MiniMax-M2.7-highspeed") is True
-        assert agent_status._model_provider_ready("anything-else") is True
 
         class FakeLLMAvailable(FakeLLM):
             def is_available(self) -> bool:
                 return True
 
         monkeypatch.setattr(agent_status, "_LLMProvider", FakeLLMAvailable)
-        assert agent_status._model_provider_ready("MiniMax-M2.7-highspeed") is True
         assert agent_status._model_provider_ready("deepseek-v4-flash") is True
         assert agent_status._model_provider_ready("anything-else") is True
 
     def test_google_agent_distinguishes_user_setup(self, monkeypatch):
         from core.agent_status import build_agent_inventory
 
-        monkeypatch.setenv("MINIMAX_API_KEY", "test-key")
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
         agents = [
             {
                 "id": "manager-calendar",
                 "name": "Calendar",
                 "role": "manager",
-                "model": "MiniMax-M3",
+                "model": "deepseek-v4-flash",
                 "enabled": True,
                 "instances": ["jennifer"],
                 "tools": ["calendar.list_events"],

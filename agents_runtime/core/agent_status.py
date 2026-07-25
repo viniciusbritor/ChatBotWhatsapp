@@ -36,8 +36,6 @@ def _now_iso() -> str:
 
 def _model_provider_ready(model: str) -> bool:
     normalized = str(model or "").lower()
-    if "gemini" in normalized:
-        return False
     if not normalized:
         return False
     try:
@@ -45,19 +43,7 @@ def _model_provider_ready(model: str) -> bool:
     except Exception as exc:
         logger.warning("_LLMProvider init failed: %s", exc)
         return False
-    has_minimax = bool(provider.minimax_key)
-    has_gemini = bool(provider.gemini_key)
-    cascade_avail = (
-        has_minimax
-        or has_gemini
-        or provider.is_available()
-    )
-    if any(
-        token in normalized
-        for token in ("minimax", "gemini", "claude", "gpt-")
-    ):
-        return cascade_avail
-    return cascade_avail
+    return provider.is_available()
 
 
 def _execution_mode(agent: Dict[str, Any]) -> str:

@@ -4,12 +4,17 @@ Verifies that the LGPD compliance checker enforces the canonical structure
 required by the Fase C/E gates: mandatory files exist (including worker
 Dockerfiles), mandatory snippets are present in the runtime code, and Cloud
 Build triggers invoke the checker.
+
+LGPD gate disabled in Fase K per product owner direction (velocidade na
+implantacao). Remaining tests below validate the script itself.
 """
+import pytest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.mark.skip(reason="LGPD gate disabled in Fase K — cloudbuild no longer invokes check_lgpd_compliance.py")
 def test_check_lgpd_compliance_passes_in_repo():
     import subprocess
     import sys

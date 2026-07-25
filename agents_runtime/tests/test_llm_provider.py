@@ -1,258 +1,235 @@
-"""Tests for core.llm_provider module (cascade fallback with mocks)."""
+"""Tests for core.llm_provider module (DeepSeek V4 Flash only)."""
 import json
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from unittest.mock import patch, MagicMock
-from core.llm_provider import LLMProvider, LLMError
+
+from core.llm_provider import LLMError, LLMProvider
 
 
-@pytest.fixture
-def mock_responses():
-    """Mock successful response from requests.post."""
-    def _make_response(content="Test response", status_code=200):
-        mock = MagicMock()
-        mock.status_code = status_code
-        mock.json.return_value = {
-            "choices": [{"message": {"content": content}}]
-        }
-        mock.raise_for_status = MagicMock()
-        return mock
-    return _make_response
+class _AsyncContextManagerMock:
+    """Async context manager that returns a given client."""
+
+    def __init__(self, client):
+        self._client = client
+
+    async def __aenter__(self):
+        return self._client
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+def _mock_response(content: str = "ok", tool_calls=None, status_code: int = 200):
+    """Build a fake httpx.Response-like object for AsyncMock."""
+    message: dict = {"role": "assistant", "content": content}
+    if tool_calls is not None:
+        message["tool_calls"] = tool_calls
+    payload = {
+        "id": "test-id",
+        "model": "deepseek-v4-flash",
+        "choices": [{"index": 0, "message": message}],
+        "usage": {"total_tokens": 42},
+    }
+    response = MagicMock()
+    response.status_code = status_code
+    response.json.return_value = payload
+    response.raise_for_status = MagicMock()
+    return response
 
 
 class TestIsAvailable:
-    def test_available_with_minimax(self, monkeypatch):
-        monkeypatch.setenv("MINIMAX_API_KEY", "sk-test")
-        provider = LLMProvider()
-        assert provider.is_available() is True
-
-    def test_available_with_gemini(self, monkeypatch):
-        monkeypatch.setenv("GEMINI_API_KEY", "sk-gemini")
+    def test_available_with_deepseek(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
         provider = LLMProvider()
         assert provider.is_available() is True
 
     def test_not_available_without_keys(self, monkeypatch):
-        for key in ["MINIMAX_API_KEY", "GEMINI_API_KEY"]:
-            monkeypatch.delenv(key, raising=False)
-        monkeypatch.setenv("GCP_PROJECT", "")
-        monkeypatch.setenv("GCLOUD_PROJECT", "")
-        provider = LLMProvider()
-        assert provider.is_available() is False
-
-
-class TestCascade:
-    @pytest.mark.asyncio
-    async def test_minimax_highspeed_first(self, monkeypatch, mock_responses):
-        """MiniMax-M2.7-highspeed is the primary provider."""
-        monkeypatch.setenv("MINIMAX_API_KEY", "minimax-test")
+        monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+        monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-        provider = LLMProvider()
+        with patch("core.secrets.get_secret", return_value=None):
+            provider = LLMProvider()
+            assert provider.is_available() is False
 
-        with patch("requests.post", return_value=mock_responses("MiniMax fast answer")):
-            result = await provider.chat("sys", "user")
 
-        assert result["content"] == "MiniMax fast answer"
-        assert result["provider"] == "minimax-hs"
-        assert result["model_used"] == "MiniMax-M2.7-highspeed"
+class TestChat:
+    @pytest.mark.asyncio
+    async def test_deepseek_primary(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        with patch("core.secrets.get_secret", return_value="sk-test"):
+            provider = LLMProvider()
+
+            mock_response = _mock_response(content="Resposta da Jennifer")
+            mock_client = MagicMock()
+            mock_client.post = AsyncMock(return_value=mock_response)
+
+            with patch("core.llm_provider.httpx.AsyncClient", return_value=_AsyncContextManagerMock(mock_client)):
+                result = await provider.chat("sys", "user")
+
+            assert result["content"] == "Resposta da Jennifer"
+            assert result["provider"] == "deepseek-v4-flash"
+            assert result["model_used"] == "deepseek-v4-flash"
+            assert "deepseek-v4-flash:success" in result["attempts"]
 
     @pytest.mark.asyncio
-    async def test_gemini_fallback_when_minimax_fails(self, monkeypatch):
-        monkeypatch.setenv("MINIMAX_API_KEY", "minimax-test")
-        monkeypatch.setenv("GEMINI_API_KEY", "gemini-test")
-        provider = LLMProvider()
-
-        fail_response = MagicMock()
-        fail_response.status_code = 429
-        fail_response.raise_for_status = MagicMock()
-
-        async def fake_call_gemini(*args, **kwargs):
-            return "Gemini fallback answer"
-
-        with patch("requests.post", return_value=fail_response):
-            with patch("time.sleep"):
-                with patch.object(
-                    provider,
-                    "_call_gemini",
-                    side_effect=fake_call_gemini,
-                ):
-                    result = await provider.chat("sys", "user")
-
-        assert result["content"] == "Gemini fallback answer"
-        assert result["provider"] == "gemini-2.5-flash"
+    async def test_no_provider_key_raises(self, monkeypatch):
+        monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+        with patch("core.secrets.get_secret", return_value=None):
+            provider = LLMProvider()
+            with pytest.raises(LLMError, match="deepseek_key_not_configured"):
+                await provider.chat("sys", "user")
 
     @pytest.mark.asyncio
-    async def test_all_providers_fail(self, monkeypatch):
-        monkeypatch.setenv("MINIMAX_API_KEY", "minimax-test")
-        monkeypatch.setenv("GEMINI_API_KEY", "gemini-test")
-        provider = LLMProvider()
-
-        fail_response = MagicMock()
-        fail_response.status_code = 429
-        fail_response.raise_for_status = MagicMock()
-
-        async def fake_call_gemini(*args, **kwargs):
-            raise LLMError("gemini_quota_exceeded")
-
-        with patch("requests.post", return_value=fail_response):
-            with patch("time.sleep"):
-                with patch.object(provider, "_call_gemini", side_effect=fake_call_gemini):
-                    with pytest.raises(LLMError, match="all_providers_failed"):
-                        await provider.chat("sys", "user")
+    async def test_quota_exceeded_maps_to_llm_error(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        with patch("core.secrets.get_secret", return_value="sk-test"):
+            provider = LLMProvider()
+            response_429 = MagicMock()
+            response_429.status_code = 429
+            response_429.json.return_value = {}
+            response_429.raise_for_status = MagicMock()
+            mock_client = MagicMock()
+            mock_client.post = AsyncMock(return_value=response_429)
+            with patch("core.llm_provider.httpx.AsyncClient", return_value=_AsyncContextManagerMock(mock_client)):
+                with pytest.raises(LLMError, match="deepseek_quota_exceeded"):
+                    await provider.chat("sys", "user")
 
 
 class TestChatEscalating:
     @pytest.mark.asyncio
-    async def test_no_escalation_when_confident(self, monkeypatch, mock_responses):
-        monkeypatch.setenv("MINIMAX_API_KEY", "minimax-test")
-        provider = LLMProvider()
-
-        with patch("requests.post", return_value=mock_responses("Good long answer with many words")):
-            result = await provider.chat_escalating(
-                "sys", "user",
-                fast_model="MiniMax-M2.7-highspeed",
-                pro_model="gemini-2.5-flash",
-                threshold=-2,
-                scoring_fn=lambda t: 0,
-            )
-        assert result["escalated"] is False
-        assert result["provider"] == "minimax-hs"
+    async def test_returns_deepseek_response(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        with patch("core.secrets.get_secret", return_value="sk-test"):
+            provider = LLMProvider()
+            mock_response = _mock_response(content="ok")
+            mock_client = MagicMock()
+            mock_client.post = AsyncMock(return_value=mock_response)
+            with patch("core.llm_provider.httpx.AsyncClient", return_value=_AsyncContextManagerMock(mock_client)):
+                result = await provider.chat_escalating("sys", "user")
+            assert result["provider"] == "deepseek-v4-flash"
+            assert result["escalated"] is False
 
     @pytest.mark.asyncio
-    async def test_escalation_when_low_confidence(self, monkeypatch, mock_responses):
-        monkeypatch.setenv("MINIMAX_API_KEY", "minimax-test")
-        provider = LLMProvider()
-
-        async def fake_call_gemini(*args, **kwargs):
-            return "Gemini better answer"
-
-        with patch("requests.post", return_value=mock_responses("sim")):
-            with patch.object(provider, "_call_gemini", side_effect=fake_call_gemini):
+    async def test_no_escalation_flag_keeps_escalated_false(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        with patch("core.secrets.get_secret", return_value="sk-test"):
+            provider = LLMProvider()
+            mock_response = _mock_response(content="curto")
+            mock_client = MagicMock()
+            mock_client.post = AsyncMock(return_value=mock_response)
+            with patch("core.llm_provider.httpx.AsyncClient", return_value=_AsyncContextManagerMock(mock_client)):
                 result = await provider.chat_escalating(
-                    "sys", "user",
-                    fast_model="MiniMax-M2.7-highspeed",
-                    pro_model="gemini-2.5-flash",
-                    threshold=-2,
-                    scoring_fn=lambda t: -3,
+                    "sys",
+                    "user",
+                    threshold=-10,
+                    no_escalation=True,
+                    scoring_fn=lambda t: -100,
                 )
-        assert result["escalated"] is True
-        assert "fast_response" in result
-        assert result["confidence_score"] == -3
+            assert result["escalated"] is False
 
+
+class TestChatWithTools:
     @pytest.mark.asyncio
-    async def test_no_escalation_flag_disables_escalation(self, monkeypatch, mock_responses):
-        monkeypatch.setenv("MINIMAX_API_KEY", "minimax-test")
-        provider = LLMProvider()
+    async def test_native_openai_tool_call_round(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        with patch("core.secrets.get_secret", return_value="sk-test"):
+            provider = LLMProvider()
 
-        with patch("requests.post", return_value=mock_responses("sim")):
-            result = await provider.chat_escalating(
-                "sys", "user",
-                no_escalation=True,
-                scoring_fn=lambda t: -5,
+            first_call = _mock_response(
+                content="",
+                tool_calls=[
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "calendar.list_events",
+                            "arguments": json.dumps({"time_min": "2026-07-23T00:00:00-03:00"}),
+                        },
+                    }
+                ],
             )
-        assert result["escalated"] is False
+            second_call = _mock_response(content="Voce tem 0 eventos hoje.")
+            mock_client = MagicMock()
+            mock_client.post = AsyncMock(side_effect=[first_call, second_call])
 
+            async def fake_executor(name, args):
+                return json.dumps({"events": [], "count": 0})
 
-class TestExtractMiniMaxToolCalls:
-    def test_extracts_invoke_from_content(self):
-        from core.llm_provider import _extract_minimax_tool_calls
+            with patch("core.llm_provider.httpx.AsyncClient", return_value=_AsyncContextManagerMock(mock_client)):
+                result = await provider.chat_with_tools(
+                    system_prompt="sys",
+                    user_prompt="o que tenho hoje?",
+                    tools=[{"type": "function", "function": {"name": "calendar.list_events"}}],
+                    tool_executor=fake_executor,
+                )
 
-        dirty = (
-            'Vou checar [<minimax>[<tool_call>'
-            '<invoke name="calendar.list_events" date="2026-07-21">'
-            '<action>{"time_min": "2026-07-21T00:00:00-03:00"}</action>'
-            '</invoke>'
-            '</tool_call>]'
-        )
-        tool_calls, cleaned = _extract_minimax_tool_calls(dirty)
-        assert len(tool_calls) == 1
-        assert tool_calls[0]["function"]["name"] == "calendar.list_events"
-        assert json.loads(tool_calls[0]["function"]["arguments"]) == {
-            "time_min": "2026-07-21T00:00:00-03:00"
-        }
-        assert "Vou checar" in cleaned
-        assert "[<minimax>" not in cleaned
-        assert "<tool_call>" not in cleaned
+            assert result["content"] == "Voce tem 0 eventos hoje."
+            assert result["tool_rounds"] == 1
+            assert result["provider"] == "deepseek-v4-flash"
+            assert mock_client.post.await_count == 2
 
-    def test_returns_empty_for_normal_text(self):
-        from core.llm_provider import _extract_minimax_tool_calls
-
-        tool_calls, cleaned = _extract_minimax_tool_calls("Oi tudo bem?")
-        assert tool_calls == []
-        assert cleaned == "Oi tudo bem?"
-
-    def test_handles_invoke_without_action(self):
-        from core.llm_provider import _extract_minimax_tool_calls
-
-        dirty = '<invoke name="calendar.list_events"></invoke>'
-        tool_calls, cleaned = _extract_minimax_tool_calls(dirty)
-        assert len(tool_calls) == 1
-        assert json.loads(tool_calls[0]["function"]["arguments"]) == {}
-        assert cleaned == ""
-
-    def test_extracts_multiple_invocations(self):
-        from core.llm_provider import _extract_minimax_tool_calls
-
-        dirty = (
-            'oi [<minimax>[<tool_call>'
-            '<invoke name="calendar.list_events"></invoke>'
-            '</tool_call>]'
-            ' [<minimax>[<tool_call>'
-            '<invoke name="gmail.search_messages"></invoke>'
-            '</tool_call>]'
-        )
-        tool_calls, cleaned = _extract_minimax_tool_calls(dirty)
-        names = [tc["function"]["name"] for tc in tool_calls]
-        assert names == ["calendar.list_events", "gmail.search_messages"]
-        assert "oi" in cleaned
-        assert "[<minimax>" not in cleaned
-
-
-@pytest.mark.asyncio
-class TestChatWithToolsMiniMaxFallback:
     @pytest.mark.asyncio
-    async def test_extracts_inline_tool_call_when_structured_empty(self, monkeypatch):
-        monkeypatch.setenv("MINIMAX_API_KEY", "sk-mm")
+    async def test_returns_text_when_no_tool_calls(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        with patch("core.secrets.get_secret", return_value="sk-test"):
+            provider = LLMProvider()
+            mock_response = _mock_response(content="Resposta direta sem tool.")
+            mock_client = MagicMock()
+            mock_client.post = AsyncMock(return_value=mock_response)
+            with patch("core.llm_provider.httpx.AsyncClient", return_value=_AsyncContextManagerMock(mock_client)):
+                result = await provider.chat_with_tools(
+                    system_prompt="sys",
+                    user_prompt="oi",
+                    tools=[{"type": "function", "function": {"name": "x"}}],
+                    tool_executor=None,
+                )
+            assert result["content"] == "Resposta direta sem tool."
+            assert result["tool_rounds"] == 0
+            assert result["provider"] == "deepseek-v4-flash"
 
-        provider = LLMProvider()
 
-        dirty_content = (
-            "Vou checar [<minimax>[<tool_call>"
-            '<invoke name="calendar.list_events">'
-            '<action>{"time_min": "2026-07-21T00:00:00-03:00"}</action>'
-            "</invoke></tool_call>]"
-        )
-        clean_content = "Voce tem 0 eventos hoje."
-
-        call_count = {"n": 0}
-
-        async def fake_call_provider(payload, model):
-            call_count["n"] += 1
-            if call_count["n"] == 1:
-                return {
-                    "choices": [
-                        {"message": {"content": dirty_content, "tool_calls": []}}
-                    ]
+class TestParseToolCalls:
+    def test_extracts_tool_calls(self):
+        data = {
+            "choices": [
+                {
+                    "message": {
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {"name": "calendar.list_events", "arguments": "{}"},
+                            }
+                        ]
+                    }
                 }
-            return {
-                "choices": [
-                    {"message": {"content": clean_content, "tool_calls": []}}
-                ]
-            }
+            ]
+        }
+        calls = LLMProvider.parse_tool_calls(data)
+        assert len(calls) == 1
+        assert calls[0]["function"]["name"] == "calendar.list_events"
 
-        async def fake_executor(name, args):
-            return json.dumps({"events": [], "count": 0})
+    def test_empty_choices_returns_empty(self):
+        assert LLMProvider.parse_tool_calls({}) == []
+        assert LLMProvider.parse_tool_calls({"choices": []}) == []
 
-        with patch.object(provider, "_call_provider", side_effect=fake_call_provider):
-            result = await provider.chat_with_tools(
-                system_prompt="sys",
-                user_prompt="user",
-                tools=[{"type": "function", "function": {"name": "calendar.list_events"}}],
-                tool_executor=fake_executor,
-                model="MiniMax-M2.7-highspeed",
-            )
 
-        assert "[<minimax>" not in result["content"]
-        assert "<tool_call>" not in result["content"]
-        assert "<invoke" not in result["content"]
-        assert result["content"] == clean_content
-        assert result["tool_rounds"] == 1
+class TestDefaults:
+    def test_default_model_is_deepseek_v4_flash(self, monkeypatch):
+        monkeypatch.delenv("DEEPSEEK_MODEL", raising=False)
+        monkeypatch.delenv("DEEPSEEK_BASE_URL", raising=False)
+        with patch("core.secrets.get_secret", return_value="sk-test"):
+            provider = LLMProvider()
+            assert provider.deepseek_model == "deepseek-v4-flash"
+            assert provider.deepseek_base == "https://api.deepseek.com"
+
+    def test_env_overrides(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_MODEL", "deepseek-v4-pro")
+        monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://api.deepseek.example/v1")
+        with patch("core.secrets.get_secret", return_value="sk-test"):
+            provider = LLMProvider()
+            assert provider.deepseek_model == "deepseek-v4-pro"
+            assert provider.deepseek_base == "https://api.deepseek.example/v1"
