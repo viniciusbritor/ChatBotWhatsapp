@@ -6,7 +6,7 @@ steps:
     entrypoint: "bash"
     args:
       - "-c"
-      - "export REPO_ROOT=/workspace && cd agents_runtime && pip install --only-binary=:all: --no-build-isolation --prefer-binary --no-cache-dir -q -r requirements.txt && pip install --only-binary=:all: --no-build-isolation --prefer-binary --no-cache-dir -q -r requirements-dev.txt && DEEPSEEK_API_KEY=test DEEPSEEK_MODEL=deepseek-v4-flash DEEPSEEK_BASE_URL=https://api.deepseek.com pytest -q tests/ && python scripts/check_lgpd_compliance.py"
+      - "export REPO_ROOT=/workspace && cd agents_runtime && pip install --prefer-binary -q uv && uv pip install --system -q -r requirements.txt -r requirements-dev.txt && DEEPSEEK_API_KEY=test DEEPSEEK_MODEL=deepseek-v4-flash DEEPSEEK_BASE_URL=https://api.deepseek.com pytest -q tests/ && python scripts/check_lgpd_compliance.py"
 
   - name: "gcr.io/cloud-builders/docker"
     args:
