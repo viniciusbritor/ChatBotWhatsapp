@@ -95,7 +95,7 @@ def _has_required_scope(granted: Iterable[str], required: str) -> bool:
         scope_short = scope.replace("https://www.googleapis.com/auth/", "")
         if scope_short == required_short:
             return True
-        if required_short == "drive.file" and scope_short == "drive":
+        if required_short in ("drive.file", "drive.readonly") and scope_short == "drive":
             return True
     return False
 

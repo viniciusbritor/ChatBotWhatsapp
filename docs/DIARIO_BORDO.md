@@ -1722,3 +1722,100 @@ Mesma armadilha em `proactive_worker/scan_upcoming_events`.
 **Diagrama visual:** `docs/FLUXO_ARQUITETURA.md` (mermaid completo).
 
 ---
+
+## 25/07/2026 — Bug Drive scope_missing no access_guardian (P1)
+
+**Contexto:** usuario reportou que pedidos de Drive retornavam
+`user_google_oauth_required` mesmo com Gmail/Calendar funcionando.
+Tokens ja estavam no Firestore (auth consentido), todos os servicos
+Google ja ativos no console. Suspeita: o `OAUTH_SCOPES` em `main.py`
+foi trocado de `drive.file` para `drive` (full) no commit `8e8a672`,
+mas o `access_guardian._has_required_scope()` nao acompanhou.
+
+### Diagnostico
+
+Em `agents_runtime/agent_orchestration/access_guardian.py:92-100`:
+
+```python
+def _has_required_scope(granted, required):
+    required_short = required.replace("https://www.googleapis.com/auth/", "")
+    for scope in granted:
+        scope_short = scope.replace("https://www.googleapis.com/auth/", "")
+        if scope_short == required_short:
+            return True
+        if required_short == "drive.file" and scope_short == "drive":
+            return True  # <-- bypass para drive.file, mas NAO para drive.readonly
+    return False
+```
+
+Em producao, `main.py:1068` salva os escopos de `OAUTH_SCOPES`
+literalmente, sem normalizar. Hoje `OAUTH_SCOPES = [..., "drive", ...]`.
+Quando o guardian verifica `drive.read` → exige `drive.readonly`:
+
+| escopo requerido | scope_short | bypass ativado? | resultado |
+|---|---|---|---|
+| `drive.readonly` | `drive.readonly` | NAO (codigo so testa `drive.file`) | `scope_missing` |
+| `drive.file` | `drive.file` | SIM | passa |
+| `gmail.readonly` | `gmail.readonly` | n/a (exato match) | passa |
+| `gmail.send` | `gmail.send` | n/a (exato match) | passa |
+| `calendar` | `calendar` | n/a (exato match) | passa |
+| `calendar.events` | `calendar.events` | n/a (exato match) | passa |
+
+Resultado: Gmail/Calendar passam por match exato, so Drive falha no
+bypass incompleto.
+
+### Decisao
+
+Aplicar **fix minimo de uma linha** em `_has_required_scope()`:
+estender o bypass para cobrir `drive.readonly` alem de `drive.file`.
+**NAO** trocar `OAUTH_SCOPES` para `drive.file + drive.readonly` agora
+porque:
+
+1. Forca re-consentimento de todos os usuarios ativos
+2. O guardrail §8 continua atendido se o escopo amplo for apresentado
+   ao Google e mapeado corretamente no guardian
+3. Separacao `drive.file + drive.readonly` exige coordenacao com
+   GUARDRAILS — fazer em fase dedicada
+
+Sem re-consentimento necessario: o token ja tem `drive` (full).
+
+### Risco de regressao
+
+- **Gmail**: match exato ja cobre os 2 escopos, bypass nao e acionado.
+- **Calendar**: match exato ja cobre os 2 escopos, bypass nao e acionado.
+- **Drive**: passa a funcionar para `drive.read` e `drive.write`.
+
+Fix atomico, sem efeito colateral.
+
+---
+
+## 25/07/2026 — Fix drive.readonly bypass no access_guardian (apply)
+
+**Mudanca:** `agents_runtime/agent_orchestration/access_guardian.py:98`
+estendido para cobrir `drive.readonly` alem de `drive.file`.
+
+```diff
+- if required_short == "drive.file" and scope_short == "drive":
++ if required_short in ("drive.file", "drive.readonly") and scope_short == "drive":
+```
+
+**Tests adicionados** (`agents_runtime/tests/test_agent_orchestration.py`):
+
+- `test_has_required_scope_drive_full_covers_drive_readonly` — guarda
+  principal: escopo `drive` cobre `drive.readonly` e `drive.file`.
+- `test_has_required_scope_drive_full_does_not_cover_gmail_or_calendar` —
+  guarda contra regressao: escopo `drive` NAO cobre gmail/calendar.
+- `test_drive_read_allowed_when_full_scope_consented` — caso real:
+  `drive.search_files` allow quando so `drive` foi consentido.
+- `test_drive_write_allowed_when_full_scope_consented` — caso real:
+  `drive.upload_file` allow quando so `drive` foi consentido.
+- `test_gmail_still_allow_with_exact_scope_only` — Gmail continua allow
+  com escopo exato (sem bypass).
+- `test_calendar_still_allow_with_exact_scope_only` — Calendar continua
+  allow com escopo exato (sem bypass).
+
+**Suite:** 374 passed, 30 skipped, 0 failures (antes: 368 passed).
+
+**Deploy:** push em `test` aciona trigger `deploy-agents-runtime-test`
+(2nd-gen, us-central1). Apos deploy Drive passa a funcionar para o
+owner sem re-consentimento.

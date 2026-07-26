@@ -129,6 +129,130 @@ class TestAccessGuardianDecision:
         assert normalize_capability("drive.list_folder") == "drive.read"
         assert normalize_capability("drive.find_omnichannel_atas_folder") == "drive.read"
 
+    def test_has_required_scope_drive_full_covers_drive_readonly(self):
+        """drive (full) consentido deve cobrir drive.readonly alem de drive.file."""
+        from agent_orchestration.access_guardian import _has_required_scope
+
+        granted_full = ["https://www.googleapis.com/auth/drive"]
+        assert _has_required_scope(
+            granted_full, "https://www.googleapis.com/auth/drive.readonly"
+        ) is True
+        assert _has_required_scope(
+            granted_full, "https://www.googleapis.com/auth/drive.file"
+        ) is True
+
+    def test_has_required_scope_drive_full_does_not_cover_gmail_or_calendar(self):
+        """drive (full) NAO cobre gmail/calendar."""
+        from agent_orchestration.access_guardian import _has_required_scope
+
+        granted_full = ["https://www.googleapis.com/auth/drive"]
+        assert _has_required_scope(
+            granted_full, "https://www.googleapis.com/auth/gmail.readonly"
+        ) is False
+        assert _has_required_scope(
+            granted_full, "https://www.googleapis.com/auth/gmail.send"
+        ) is False
+        assert _has_required_scope(
+            granted_full, "https://www.googleapis.com/auth/calendar"
+        ) is False
+        assert _has_required_scope(
+            granted_full, "https://www.googleapis.com/auth/calendar.events"
+        ) is False
+
+    def test_drive_read_allowed_when_full_scope_consented(self):
+        """drive.search_files com so escopo 'drive' no token deve passar (fix)."""
+        from agent_orchestration.access_guardian import decide_guardian
+        from core.owner import OwnerResolution
+
+        resolution = OwnerResolution(
+            owner_phone="5511966830020", owner_uid="5511966830020",
+            account_id="Jennifer", instance="Jennifer",
+        )
+        token = {
+            "token": "ya29.fake",
+            "refresh_token": "rt",
+            "scopes": ["https://www.googleapis.com/auth/drive"],
+            "expiry": "9999999999",
+        }
+        decision = decide_guardian(
+            instance="Jennifer", phone="5511966830020",
+            capability="drive.search_files",
+            resolution=resolution, token_data=token,
+        )
+        assert decision.verdict == "allow"
+
+    def test_drive_write_allowed_when_full_scope_consented(self):
+        """drive.upload_file com so escopo 'drive' deve passar (fix)."""
+        from agent_orchestration.access_guardian import decide_guardian
+        from core.owner import OwnerResolution
+
+        resolution = OwnerResolution(
+            owner_phone="5511966830020", owner_uid="5511966830020",
+            account_id="Jennifer", instance="Jennifer",
+        )
+        token = {
+            "token": "ya29.fake",
+            "refresh_token": "rt",
+            "scopes": ["https://www.googleapis.com/auth/drive"],
+            "expiry": "9999999999",
+        }
+        decision = decide_guardian(
+            instance="Jennifer", phone="5511966830020",
+            capability="drive.upload_file",
+            resolution=resolution, token_data=token,
+        )
+        assert decision.verdict == "allow"
+
+    def test_gmail_still_allow_with_exact_scope_only(self):
+        """Gmail continua funcionando com escopo exato (sem bypass)."""
+        from agent_orchestration.access_guardian import decide_guardian
+        from core.owner import OwnerResolution
+
+        resolution = OwnerResolution(
+            owner_phone="5511966830020", owner_uid="5511966830020",
+            account_id="Jennifer", instance="Jennifer",
+        )
+        token = {
+            "token": "ya29.fake",
+            "refresh_token": "rt",
+            "scopes": [
+                "https://www.googleapis.com/auth/gmail.readonly",
+                "https://www.googleapis.com/auth/gmail.send",
+            ],
+            "expiry": "9999999999",
+        }
+        decision = decide_guardian(
+            instance="Jennifer", phone="5511966830020",
+            capability="gmail.search_messages",
+            resolution=resolution, token_data=token,
+        )
+        assert decision.verdict == "allow"
+
+    def test_calendar_still_allow_with_exact_scope_only(self):
+        """Calendar continua funcionando com escopo exato (sem bypass)."""
+        from agent_orchestration.access_guardian import decide_guardian
+        from core.owner import OwnerResolution
+
+        resolution = OwnerResolution(
+            owner_phone="5511966830020", owner_uid="5511966830020",
+            account_id="Jennifer", instance="Jennifer",
+        )
+        token = {
+            "token": "ya29.fake",
+            "refresh_token": "rt",
+            "scopes": [
+                "https://www.googleapis.com/auth/calendar",
+                "https://www.googleapis.com/auth/calendar.events",
+            ],
+            "expiry": "9999999999",
+        }
+        decision = decide_guardian(
+            instance="Jennifer", phone="5511966830020",
+            capability="calendar.list_events",
+            resolution=resolution, token_data=token,
+        )
+        assert decision.verdict == "allow"
+
 
 class TestGraphNodes:
     """Test individual graph nodes in isolation."""
