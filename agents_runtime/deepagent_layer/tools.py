@@ -268,7 +268,50 @@ def _build_drive_tools() -> List[Any]:
             file_id=file_id,
         )
 
-    return [search_drive_files, list_drive_folder, create_drive_folder, read_drive_file_content]
+    @tool
+    async def deep_search_drive_files(
+        phone: str,
+        query: str,
+        parent_folder_id: str = "root",
+        max_depth: int = 3,
+        max_results: int = 50,
+        include_shared_drives: bool = True,
+    ) -> Dict[str, Any]:
+        """Recursive deep search across ALL Google Drive folders and shared drives.
+
+        Use this as the FIRST tool when the user asks to find something
+        without specifying the exact folder. It scans recursively through
+        folders and subfolders, matching both file AND folder names.
+
+        Use search_drive_files when the user already specifies a known folder.
+        Use list_drive_folder when they want to see what's in a specific folder.
+
+        Examples:
+        - "ache a ata da reuniao" -> deep_search_drive_files(query="ata")
+        - "procure o relatorio de custos" -> deep_search_drive_files(query="relatorio custos")
+        - "busque a apresentacao no omnichannel" -> deep_search_drive_files(query="apresentacao")
+
+        Args:
+            phone: User phone for per-user OAuth.
+            query: Search term (matched against file and folder names).
+            parent_folder_id: Starting folder ID, or "root" for everything.
+            max_depth: How deep to recurse (1=root only, 2=root+subfolders, 3=deep).
+            max_results: Max total files to return.
+            include_shared_drives: Search shared drives too.
+
+        Returns:
+            Dict with files, count, scanned_folders, max_depth_reached.
+        """
+        return await google_drive.deep_search_drive(
+            phone=phone,
+            query=query,
+            parent_folder_id=parent_folder_id,
+            max_depth=max_depth,
+            max_results=max_results,
+            include_shared_drives=include_shared_drives,
+        )
+
+    return [search_drive_files, list_drive_folder, create_drive_folder, read_drive_file_content, deep_search_drive_files]
 
 
 def _build_web_tools() -> List[Any]:

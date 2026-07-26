@@ -483,4 +483,116 @@ async def read_file_content(
     except Exception as e:
         logger.error(f"Drive read_file_content unexpected error: {e}")
         return {"error": f"parse:{type(e).__name__}:{e}", "file_id": file_id}
-        return {"error": str(e)}
+
+
+_FOLDER_NAME_SYNONYMS = {
+    "ata": ["ata", "atas", "minuta", "minutas", "reuniao", "reunioes", "meeting", "minutes"],
+    "relatorio": ["relatorio", "relatorios", "report", "reports"],
+    "projeto": ["projeto", "projetos", "project", "projects"],
+    "orcamento": ["orcamento", "orcamentos", "budget", "custo", "custos", "financeiro"],
+}
+
+_MAX_DEEP_SEARCH_RESULTS = 50
+_DEFAULT_MAX_DEPTH = 3
+
+
+def _match_folder_name(folder_name: str, query: str) -> bool:
+    fn = folder_name.lower().strip()
+    q = query.lower().strip()
+    if q in fn:
+        return True
+    for base, synonyms in _FOLDER_NAME_SYNONYMS.items():
+        if base in q or any(s in q for s in synonyms):
+            if any(s in fn for s in synonyms):
+                return True
+    return False
+
+
+@_owner_guard("drive.deep_search")
+async def deep_search_drive(
+    phone: str,
+    query: str,
+    parent_folder_id: str = "root",
+    max_depth: int = _DEFAULT_MAX_DEPTH,
+    max_results: int = _MAX_DEEP_SEARCH_RESULTS,
+    include_shared_drives: bool = True,
+    instance: str = "",
+) -> Dict[str, Any]:
+    """Recursive search across Drive folders and subfolders.
+
+    Uses BFS to scan folder tree, matching both file names and folder
+    names semantically. Supports shared drives.
+
+    Args:
+        phone: User phone for per-user OAuth token.
+        query: Search query (matched against file AND folder names).
+        parent_folder_id: Starting folder (default: "root" = all drives).
+        max_depth: Maximum recursion depth (default 3).
+        max_results: Maximum total results (default 50).
+        include_shared_drives: Search shared drives too (default True).
+        instance: Evolution instance name.
+
+    Returns:
+        {"files": [...], "count": int, "scanned_folders": int, "max_depth_reached": int}
+    """
+    if not query:
+        return {"files": [], "count": 0, "error": "query_required"}
+
+    try:
+        service = _get_service(phone)
+        queue = [(parent_folder_id, 0)]
+        visited = set()
+        all_files = []
+        scanned = 0
+        max_depth_reached = 0
+
+        while queue and len(all_files) < max_results:
+            current_id, depth = queue.pop(0)
+            if current_id in visited:
+                continue
+            visited.add(current_id)
+            max_depth_reached = max(max_depth_reached, depth)
+            scanned += 1
+
+            extra_params = {}
+            if include_shared_drives and current_id == "root":
+                extra_params["corpora"] = "allDrives"
+                extra_params["includeItemsFromAllDrives"] = True
+                extra_params["supportsAllDrives"] = True
+
+            result = service.files().list(
+                q=f"'{current_id}' in parents and trashed = false",
+                pageSize=min(max_results, 100),
+                fields="files(id, name, mimeType, modifiedTime, size, webViewLink)",
+                orderBy="modifiedTime desc",
+                **extra_params,
+            ).execute()
+            page_files = result.get("files", [])
+
+            for f in page_files:
+                fn = (f.get("name") or "").lower()
+                qt = query.lower()
+                if qt in fn or _match_folder_name(fn, query):
+                    all_files.append(_format_file(f))
+
+            if len(all_files) >= max_results:
+                break
+
+            if depth < max_depth:
+                subfolders = [
+                    f for f in page_files
+                    if f.get("mimeType") == "application/vnd.google-apps.folder"
+                ]
+                for sf in subfolders:
+                    queue.append((sf["id"], depth + 1))
+
+        return {
+            "files": all_files[:max_results],
+            "count": len(all_files[:max_results]),
+            "scanned_folders": scanned,
+            "max_depth_reached": max_depth_reached,
+            "query": query,
+        }
+    except HttpError as e:
+        logger.error(f"Drive deep_search_drive error: {e}")
+        return {"files": [], "count": 0, "error": str(e)}

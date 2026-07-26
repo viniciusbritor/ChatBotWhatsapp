@@ -200,6 +200,29 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
             "required": ["file_id"],
         },
     },
+    "drive.deep_search_drive": {
+        "function": google_drive.deep_search_drive,
+        "implementation": "google_drive",
+        "description": (
+            "Busca recursiva em pastas e subpastas do Google Drive. "
+            "Varre a arvore de pastas a partir de parent_folder_id (ou 'root' para tudo), "
+            "casando nomes de arquivos e pastas com a query. Suporta shared drives. "
+            "Ideal para 'ache a ata', 'procure o relatorio', 'busque o orcamento'. "
+            "Passe o phone do usuario."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Termo de busca (ex: ata, relatorio, orcamento)"},
+                "parent_folder_id": {"type": "string", "description": "Pasta de partida (default: 'root' para todos os drives)"},
+                "max_depth": {"type": "integer", "description": "Profundidade maxima de recursao (default 3)"},
+                "max_results": {"type": "integer", "description": "Maximo de resultados (default 50)"},
+                "include_shared_drives": {"type": "boolean", "description": "Incluir shared drives (default true)"},
+                "phone": {"type": "string", "description": "Telefone do usuario para token OAuth"},
+            },
+            "required": ["query"],
+        },
+    },
     "gmail.search_messages": {
         "function": google_gmail.search_messages,
         "implementation": "google_gmail",

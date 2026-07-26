@@ -310,3 +310,60 @@ class TestPerUserOAuth:
         with patch.object(oauth_per_user, "get_user_credentials", return_value=None):
             with pytest.raises(RuntimeError, match="user_google_oauth_required"):
                 google_drive._get_credentials(PHONE)
+
+
+class TestDeepSearchDrive:
+    """Tests for google_drive.deep_search_drive — recursive folder scan."""
+
+    @pytest.mark.asyncio
+    async def test_deep_search_shallow(self, mock_drive_service):
+        """Busca rasa encontra arquivo no root."""
+        from tools.google_drive import deep_search_drive
+
+        mock_drive_service.files().list().execute.return_value = {
+            "files": [
+                {"id": "f1", "name": "Ata 2026-07-21.docx",
+                 "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+                {"id": "f2", "name": "Relatorio.pdf", "mimeType": "application/pdf"},
+                {"id": "d1", "name": "Omnichannel", "mimeType": "application/vnd.google-apps.folder"},
+            ],
+        }
+        result = await deep_search_drive(PHONE, "ata", instance="jennifer", max_depth=1)
+        assert result["count"] >= 1
+        assert any("Ata" in f["name"] for f in result["files"])
+        assert result["scanned_folders"] >= 1
+
+    @pytest.mark.asyncio
+    async def test_deep_search_recursive(self, mock_drive_service):
+        """Busca recursiva desce em subpastas."""
+        from tools.google_drive import deep_search_drive
+
+        root_response = {"files": [
+            {"id": "d1", "name": "Omnichannel", "mimeType": "application/vnd.google-apps.folder"},
+        ]}
+        sub_response = {"files": [
+            {"id": "f1", "name": "Ata 2026-07-13.docx",
+             "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+        ]}
+        mock_drive_service.files().list().execute.side_effect = [root_response, sub_response]
+        result = await deep_search_drive(PHONE, "ata", instance="jennifer", max_depth=3)
+        assert result["count"] >= 1
+        assert result["scanned_folders"] >= 2
+        assert "Ata" in result["files"][0]["name"]
+
+    @pytest.mark.asyncio
+    async def test_deep_search_empty_query_returns_error(self, mock_drive_service):
+        """Query vazia retorna erro."""
+        from tools.google_drive import deep_search_drive
+
+        result = await deep_search_drive(PHONE, "", instance="jennifer")
+        assert result.get("error") == "query_required"
+
+    def test_match_folder_name_synonyms(self):
+        """_match_folder_name usa sinonimos para casar nomes de pasta."""
+        from tools.google_drive import _match_folder_name
+
+        assert _match_folder_name("Atas", "ata") is True
+        assert _match_folder_name("Minutas", "ata") is True
+        assert _match_folder_name("Reunioes", "ata") is True
+        assert _match_folder_name("Fotos", "ata") is False
