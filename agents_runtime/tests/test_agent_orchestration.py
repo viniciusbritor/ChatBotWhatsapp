@@ -283,6 +283,25 @@ class TestGraphNodes:
         out = await classify_intent_node(state)
         assert out["intent"]["is_drive"] is True
 
+    @pytest.mark.asyncio
+    async def test_classify_intent_reads_masked_text_key(self):
+        """F1: classify_intent_node deve ler 'masked_text' como o orchestrator envia"""
+        from agent_orchestration.graph import classify_intent_node
+
+        state = {"masked_text": "ata da ultima reuniao que esta no drive omnichannel",
+                 "instance": "Jennifer", "phone": "5511966830020"}
+        out = await classify_intent_node(state)
+        assert out["intent"]["is_drive"] is True
+
+    @pytest.mark.asyncio
+    async def test_classify_intent_falls_back_to_text_key(self):
+        """F1: quando masked_text nao existe, fallback para 'text'"""
+        from agent_orchestration.graph import classify_intent_node
+
+        state = {"text": "meus emails", "instance": "Jennifer", "phone": "5511966830020"}
+        out = await classify_intent_node(state)
+        assert out["intent"]["is_email"] is True
+
     # ------------------ deterministic rules (Fase O) ------------------
 
     @pytest.mark.asyncio

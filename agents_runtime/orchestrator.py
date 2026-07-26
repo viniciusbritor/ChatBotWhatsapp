@@ -190,12 +190,13 @@ CALENDAR_KEYWORDS = [
     "semana que vem", "proxima semana", "agenda de hoje",
 ]
 DRIVE_KEYWORDS = [
-    "drive", "documento", "documentos", "arquivo", "arquivos",
+    "drive", "gdrive", "documento", "documentos", "arquivo", "arquivos",
     "pasta", "upload", "omnichannel", "atividades", "baixar",
     "encontrar arquivo", "meus arquivos", "meus documentos",
     "buscar arquivo", "procurar documento", "lista de arquivos",
     "mostrar arquivos", "ata", "minuta", "relatorio",
-    "apresentação", "apresentacao",
+    "apresentação", "apresentacao", "docx", "pdf", "xlsx", "planilha",
+    "leia o arquivo", "leia a ata", "abra o arquivo",
 ]
 EMAIL_KEYWORDS = [
     "email", "e-mail", "emails", "e-mails",
@@ -324,12 +325,12 @@ def _resolve_agent_for_intent(intent: Dict[str, Any], instance: str) -> Optional
         return "agent-learning"
     if intent["is_intimacy"]:
         return "agent-intimacy"
-    if intent["is_calendar"]:
-        return "manager-calendar"
     if intent["is_drive"]:
         return "manager-drive"
     if intent["is_email"]:
         return "manager-email"
+    if intent["is_calendar"]:
+        return "manager-calendar"
     if intent["is_web_search"]:
         return "manager-web"
 

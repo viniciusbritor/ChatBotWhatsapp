@@ -137,7 +137,7 @@ def _keyword_classify(text: str, last_intent: Optional[Dict[str, bool]] = None) 
 
 
 async def classify_intent_node(state: TurnState) -> TurnState:
-    text = (state.get("text") or "").lower()
+    text = (state.get("masked_text") or state.get("text") or "").lower()
     last_intent = state.get("last_intent")
 
     intent = _deterministic_classify(text)
