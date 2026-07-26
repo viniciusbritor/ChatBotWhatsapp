@@ -62,3 +62,22 @@ class TestLogCorrection:
                 confirmed=True,
             )
         assert "error" in result
+
+
+class TestSummarizePastCorrections:
+    @pytest.mark.asyncio
+    async def test_no_firestore_returns_empty(self):
+        from tools.correction import summarize_past_corrections
+
+        with patch("tools.correction._get_firestore", return_value=None):
+            result = await summarize_past_corrections("5511999999999")
+        assert result["has_corrections"] is False
+        assert result["count"] == 0
+        assert result["corrections"] == []
+
+    @pytest.mark.asyncio
+    async def test_empty_phone_returns_empty(self):
+        from tools.correction import summarize_past_corrections
+
+        result = await summarize_past_corrections("")
+        assert result["has_corrections"] is False

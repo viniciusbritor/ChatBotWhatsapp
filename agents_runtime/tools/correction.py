@@ -193,3 +193,46 @@ def generate_confirmation_message(target: str, extracted: str) -> str:
             f"Entendi sua observacao: '{extracted[:80]}'. "
             "Posso anotar? Responda 'sim' ou 'nao'."
         )
+
+
+async def summarize_past_corrections(phone: str, limit: int = 5) -> Dict[str, Any]:
+    """Return a summary of recent corrections for injection into system_prompt.
+
+    Args:
+        phone: User phone (normalized digits).
+
+    Returns:
+        {"corrections": list, "count": int, "has_corrections": bool}
+    """
+    db = _get_firestore()
+    if not db or not phone:
+        return {"corrections": [], "count": 0, "has_corrections": False}
+
+    try:
+        docs = (
+            db.collection("contatos")
+            .document(phone)
+            .collection("corrections")
+            .order_by("created_at", direction="DESCENDING")
+            .limit(limit)
+            .stream()
+        )
+    except Exception:
+        return {"corrections": [], "count": 0, "has_corrections": False}
+
+    corrections = []
+    for doc in docs:
+        data = doc.to_dict()
+        corrections.append({
+            "id": doc.id,
+            "target": data.get("target", ""),
+            "user_quote": data.get("user_quote", ""),
+            "after": data.get("after", ""),
+            "created_at": data.get("created_at", ""),
+        })
+
+    return {
+        "corrections": corrections,
+        "count": len(corrections),
+        "has_corrections": len(corrections) > 0,
+    }

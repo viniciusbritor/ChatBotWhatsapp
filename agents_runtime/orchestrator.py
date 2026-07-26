@@ -1257,6 +1257,19 @@ async def _execute_agent(
 
     phone = payload.get("phone", "")
 
+    if phone:
+        try:
+            from tools.correction import summarize_past_corrections
+            corr = await summarize_past_corrections(phone, limit=3)
+            if corr.get("has_corrections"):
+                items = corr["corrections"]
+                system_prompt += "\n\n[APRENDIZADOS DO USUARIO]\n"
+                for c in items:
+                    system_prompt += f"- Correcao anterior ({c['target']}): '{c['user_quote'][:100]}' → '{c['after'][:100]}'\n"
+                system_prompt += "Respeite essas preferencias ao responder."
+        except Exception:
+            pass
+
     try:
         deep_result = await _execute_deep_agent(agent, text, payload, extra)
         if deep_result is not None:
