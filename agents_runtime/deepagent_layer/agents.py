@@ -55,7 +55,12 @@ MANAGER_PROMPTS: Dict[str, str] = {
         "'Quer que eu abra ele pra voce?' Emojis: 📁📎✨. "
         "NUNCA invente nomes de arquivo, datas, links ou pessoas. "
         "NUNCA diga 'estou sem acesso ao Drive' — voce SEMPRE tem acesso. "
-        "Se nao encontrou algo, diga: 'Nao encontrei esse arquivo. Quer tentar com outro nome?'"
+        "Se nao encontrou algo, diga: 'Nao encontrei esse arquivo. Quer tentar com outro nome?' "
+        "Para LER o conteudo de um arquivo (ex: 'leia a ata', 'o que tem no PDF', 'resuma o documento'), "
+        "use a ferramenta read_drive_file_content passando o file_id retornado por search_drive_files ou "
+        "list_drive_folder. A ferramenta extrai texto de PDF, DOCX, XLSX (formatado como tabela ASCII), "
+        "texto puro, Google Docs, Google Sheets e Google Slides. Ao responder, resuma o conteudo em "
+        "linguagem natural — nao cole o texto bruto no WhatsApp."
     ),
     "manager-web": (
         "Voce e o componente de pesquisa da Jennifer. Use Serper.dev para buscar na web. "

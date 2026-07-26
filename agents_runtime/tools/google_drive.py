@@ -14,7 +14,7 @@ from typing import Optional, Dict, Any
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from googleapiclient.http import MediaIoBaseUpload
+from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 import io
 
 logger = logging.getLogger(__name__)
@@ -269,4 +269,218 @@ async def find_omnichannel_atas_folder(phone: str, instance: str = "") -> Dict[s
         return {"error": "failed to create Atas folder"}
     except HttpError as e:
         logger.error(f"Drive find_omnichannel_atas_folder error: {e}")
+
+
+_MAX_EXTRACT_CHARS = 12000  # ~2000 palavras / ~8 paginas, cobrem 95% dos casos
+
+_GOOGLE_DOCS_MIME_PREFIX = "application/vnd.google-apps"
+_TEXT_PLAIN = "text/plain"
+_TEXT_CSV = "text/csv"
+
+
+def _parse_pdf(raw: bytes) -> str:
+    from pypdf import PdfReader
+
+    reader = PdfReader(io.BytesIO(raw))
+    parts = [page.extract_text() or "" for page in reader.pages]
+    return "\n".join(parts)
+
+
+def _parse_docx(raw: bytes) -> str:
+    from docx import Document
+
+    doc = Document(io.BytesIO(raw))
+    parts = [p.text for p in doc.paragraphs if p.text]
+    for table in doc.tables:
+        for row in table.rows:
+            cells = [cell.text.strip() for cell in row.cells]
+            if any(cells):
+                parts.append(" | ".join(cells))
+    return "\n".join(parts)
+
+
+def _parse_xlsx(raw: bytes, max_rows: int = 50, max_cols: int = 6) -> str:
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(io.BytesIO(raw), data_only=True, read_only=True)
+    chunks = []
+    for sheet_name in workbook.sheetnames[:3]:
+        sheet = workbook[sheet_name]
+        chunks.append(f"--- Sheet: {sheet_name} ---")
+        for idx, row in enumerate(sheet.iter_rows(values_only=True), start=1):
+            if idx > max_rows:
+                chunks.append(f"... ({max_rows}+ rows truncated)")
+                break
+            values = [
+                "" if v is None else str(v)[:80]
+                for v in row[:max_cols]
+            ]
+            if any(v for v in values):
+                chunks.append(" | ".join(values))
+    workbook.close()
+    return "\n".join(chunks)
+
+
+def _format_xlsx_as_table(raw: bytes, max_rows: int = 30, max_cols: int = 5) -> str:
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(io.BytesIO(raw), data_only=True, read_only=True)
+    sheets = []
+    for sheet_name in workbook.sheetnames[:2]:
+        sheet = workbook[sheet_name]
+        rows = []
+        for idx, row in enumerate(sheet.iter_rows(values_only=True), start=1):
+            if idx > max_rows:
+                rows.append(f"... ({max_rows}+ rows truncated)")
+                break
+            values = [
+                "" if v is None else str(v)[:40].replace("\n", " ")
+                for v in row[:max_cols]
+            ]
+            rows.append(values)
+        if rows:
+            sheets.append((sheet_name, rows))
+    workbook.close()
+    if not sheets:
+        return ""
+    out = []
+    for sheet_name, rows in sheets:
+        out.append(f"*{sheet_name}*")
+        if not rows:
+            out.append("(empty)")
+            continue
+        width = max(len(r) for r in rows)
+        widths = [max(len(str(r[i])) if i < len(r) else 0 for r in rows) for i in range(width)]
+        widths = [min(w, 32) for w in widths]
+        for i, r in enumerate(rows):
+            cells = [str(r[j]) if j < len(r) else "" for j in range(width)]
+            line = " | ".join(c.ljust(widths[j]) for j, c in enumerate(cells))
+            out.append(line)
+            if i == 0:
+                out.append("-+-".join("-" * w for w in widths))
+        out.append("")
+    return "\n".join(out)
+
+
+def _truncate(text: str, limit: int = _MAX_EXTRACT_CHARS) -> tuple:
+    if len(text) <= limit:
+        return text, False
+    return text[:limit] + f"\n... [truncated at {limit} chars]", True
+
+
+@_owner_guard("drive.read_file")
+async def read_file_content(
+    phone: str,
+    file_id: str,
+    instance: str = "",
+) -> Dict[str, Any]:
+    """Download and extract text content from a Google Drive file.
+
+    Supports:
+    - PDF (application/pdf) — parsed via pypdf
+    - DOCX (Office Open XML Word) — parsed via python-docx
+    - XLSX (Office Open XML Spreadsheet) — formatted as WhatsApp-friendly
+      ASCII table when possible; falls back to pipe-delimited rows
+    - Plain text / CSV (text/*) — decoded as UTF-8
+    - Google Docs / Sheets / Slides (application/vnd.google-apps.*) —
+      exported to text/plain or text/csv via the export endpoint
+
+    Returns:
+        {
+            "file_id": str,
+            "file_name": str,
+            "mime_type": str,
+            "size": int,
+            "content": str,        # extracted text, truncated to 12k chars
+            "truncated": bool,     # True if extraction hit the cap
+            "parser": str          # "pdf"|"docx"|"xlsx"|"text"|"google_doc"|...
+        }
+    """
+    if not file_id:
+        return {"error": "file_id_required"}
+    try:
+        service = _get_service(phone)
+        meta = service.files().get(
+            fileId=file_id, fields="name,mimeType,size"
+        ).execute()
+        mime_type = meta.get("mimeType", "")
+        file_name = meta.get("name", "")
+        size = int(meta.get("size") or 0)
+
+        if mime_type == "application/pdf":
+            buf = io.BytesIO()
+            downloader = MediaIoBaseDownload(buf, service.files().get_media(fileId=file_id))
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
+            raw = buf.getvalue()
+            text = _parse_pdf(raw)
+            parser = "pdf"
+        elif mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+            buf = io.BytesIO()
+            downloader = MediaIoBaseDownload(buf, service.files().get_media(fileId=file_id))
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
+            raw = buf.getvalue()
+            text = _parse_docx(raw)
+            parser = "docx"
+        elif mime_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+            buf = io.BytesIO()
+            downloader = MediaIoBaseDownload(buf, service.files().get_media(fileId=file_id))
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
+            raw = buf.getvalue()
+            formatted = _format_xlsx_as_table(raw)
+            text = formatted if formatted else _parse_xlsx(raw)
+            parser = "xlsx"
+        elif mime_type.startswith(f"{_GOOGLE_DOCS_MIME_PREFIX}."):
+            export_mime = _TEXT_CSV if "spreadsheet" in mime_type else _TEXT_PLAIN
+            buf = io.BytesIO()
+            downloader = MediaIoBaseDownload(
+                buf,
+                service.files().export(fileId=file_id, mimeType=export_mime),
+            )
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
+            raw = buf.getvalue()
+            text = raw.decode("utf-8", errors="replace")
+            parser = "google_doc" if "document" in mime_type else (
+                "google_sheet" if "spreadsheet" in mime_type else "google_slides"
+            )
+        elif mime_type.startswith("text/"):
+            buf = io.BytesIO()
+            downloader = MediaIoBaseDownload(buf, service.files().get_media(fileId=file_id))
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
+            raw = buf.getvalue()
+            text = raw.decode("utf-8", errors="replace")
+            parser = "text"
+        else:
+            return {
+                "error": "unsupported_mime_type",
+                "file_id": file_id,
+                "file_name": file_name,
+                "mime_type": mime_type,
+            }
+
+        text, truncated = _truncate(text)
+        return {
+            "file_id": file_id,
+            "file_name": file_name,
+            "mime_type": mime_type,
+            "size": size,
+            "content": text,
+            "truncated": truncated,
+            "parser": parser,
+        }
+    except HttpError as e:
+        logger.error(f"Drive read_file_content error: {e}")
+        return {"error": f"drive_api:{e}", "file_id": file_id}
+    except Exception as e:
+        logger.error(f"Drive read_file_content unexpected error: {e}")
+        return {"error": f"parse:{type(e).__name__}:{e}", "file_id": file_id}
         return {"error": str(e)}

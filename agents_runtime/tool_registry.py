@@ -183,6 +183,23 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
             "required": ["name"],
         },
     },
+    "drive.read_file_content": {
+        "function": google_drive.read_file_content,
+        "implementation": "google_drive",
+        "description": (
+            "Baixa e extrai o conteudo de texto de um arquivo do Google Drive "
+            "(PDF, DOCX, XLSX, texto puro, Google Docs, Google Sheets, Google Slides). "
+            "Passe o file_id retornado por drive.search_files. Phone obrigatorio."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "file_id": {"type": "string", "description": "ID do arquivo no Google Drive"},
+                "phone": {"type": "string", "description": "Telefone do usuario para token OAuth"},
+            },
+            "required": ["file_id"],
+        },
+    },
     "gmail.search_messages": {
         "function": google_gmail.search_messages,
         "implementation": "google_gmail",

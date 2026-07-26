@@ -235,7 +235,40 @@ def _build_drive_tools() -> List[Any]:
             name=name,
         )
 
-    return [search_drive_files, list_drive_folder, create_drive_folder]
+    @tool
+    async def read_drive_file_content(
+        phone: str,
+        file_id: str,
+    ) -> Dict[str, Any]:
+        """Download and extract the text content of a Google Drive file.
+
+        Use this AFTER search_drive_files/list_drive_folder returns a file_id
+        and the user wants to read the file contents (e.g. "leia a ata",
+        "o que tem no PDF", "resuma o documento").
+
+        Supports:
+        - PDF (application/pdf)
+        - Word .docx (Office Open XML)
+        - Excel .xlsx (formatted as WhatsApp-friendly ASCII table)
+        - Plain text / CSV
+        - Google Docs (exported to text/plain)
+        - Google Sheets (exported to text/csv)
+        - Google Slides (exported to text/plain)
+
+        Args:
+            phone: User phone for per-user OAuth.
+            file_id: Google Drive file ID (from search_drive_files result).
+
+        Returns:
+            Dict with file_id, file_name, mime_type, content (extracted text),
+            truncated (bool), parser (which parser was used).
+        """
+        return await google_drive.read_file_content(
+            phone=phone,
+            file_id=file_id,
+        )
+
+    return [search_drive_files, list_drive_folder, create_drive_folder, read_drive_file_content]
 
 
 def _build_web_tools() -> List[Any]:

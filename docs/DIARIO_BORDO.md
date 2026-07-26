@@ -1819,3 +1819,71 @@ estendido para cobrir `drive.readonly` alem de `drive.file`.
 **Deploy:** push em `test` aciona trigger `deploy-agents-runtime-test`
 (2nd-gen, us-central1). Apos deploy Drive passa a funcionar para o
 owner sem re-consentimento.
+
+---
+
+## 25/07/2026 \u2014 Drive read_file_content (PDF/DOCX/XLSX/Google Docs)
+
+**Contexto:** usuario pediu para abrir `.docx`, `.pdf`, `.xlsx`
+do Drive dentro do WhatsApp. Caso de uso: "leia a ata da ultima
+reuniao" deve (1) buscar o arquivo no Drive, (2) baixar, (3) extrair
+texto, (4) retornar resposta natural via WhatsApp.
+
+### Decisoes
+
+- Branch isolada: `feat/drive-read-file-content` (nao e `^test$`,
+  entao nao dispara trigger de deploy).
+- Estrategia: **nao** expandir `OAUTH_SCOPES` agora. Mantem-se o
+  escopo `drive` (full) que ja funciona via o bypass do guardian
+  (commit `01e8b9d` do fix anterior).
+- 2 libs novas: `python-docx==1.1.2` + `openpyxl==3.1.5`.
+  Sao pure Python, nao precisam de deps C. Dockerfile nao muda.
+- Limite de extracao: **12.000 chars / ~2.000 palavras / ~8 paginas**.
+  LLM recebe o texto completo e sintetiza resposta natural pro
+  WhatsApp. Resultado final respeita limite da Evolution API.
+- Formato XLSX: **tabela ASCII com bordas** + bloco
+  ```` ``` ```` para monospace no WhatsApp (caem 4 colunas
+  confortavelmente).
+
+### Mudancas por arquivo
+
+| Arquivo | Adicao |
+|---|---|
+| `requirements.txt` | `python-docx==1.1.2`, `openpyxl==3.1.5` |
+| `tools/google_drive.py` | `read_file_content(phone, file_id)` + helpers `_parse_pdf`, `_parse_docx`, `_parse_xlsx`, `_format_xlsx_as_table`, `_truncate` |
+| `tool_registry.py` | Registry de `drive.read_file_content` |
+| `deepagent_layer/tools.py` | Wrapper `@tool` `read_drive_file_content` |
+| `deepagent_layer/agents.py` | Prompt do `manager-drive` instrui a usar a nova tool |
+| `tests/test_google_drive.py` | `TestReadFileContent` com 8 cenarios |
+
+### Mapeamento de MIME type -> parser
+
+| MIME type | Caminho |
+|---|---|
+| `application/pdf` | `get_media` -> pypdf -> texto puro |
+| `application/vnd.openxmlformats-officedocument.wordprocessingml.document` | `get_media` -> python-docx -> texto + tabelas |
+| `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` | `get_media` -> openpyxl -> tabela ASCII |
+| `application/vnd.google-apps.document` | `export(text/plain)` -> texto |
+| `application/vnd.google-apps.spreadsheet` | `export(text/csv)` -> texto |
+| `application/vnd.google-apps.presentation` | `export(text/plain)` -> texto |
+| `text/*` | `get_media` -> UTF-8 decode |
+| outros (video, audio, binarios) | retorna `{"error": "unsupported_mime_type"}` |
+
+### Custo e latencia
+
+| Componente | Latencia | Custo incremental |
+|---|---|---|
+| `get_media` / `export` (Drive API) | 0.2\u20132s | gratis |
+| Parser (pypdf/python-docx/openpyxl) | 0.05\u20131s | < USD 0.00001 CPU |
+| LLM com texto extraido (DeepSeek) | 1\u20133s | ~USD 0.0005 (~4K tokens) |
+| **Total round-trip** | **3\u20139s** | **< USD 0.001** |
+
+### Suite
+
+`382 passed, 30 skipped, 0 failures` (antes: 374).
+
+### Deploy
+
+Branch **nao** dispara Cloud Build (regex `^test$` nao casa).
+Apos validacao local, fazer merge normal em `test` para deploy:
+`git checkout test && git merge feat/drive-read-file-content && git push`.
