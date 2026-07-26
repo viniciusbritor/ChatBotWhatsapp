@@ -265,7 +265,7 @@ DEFAULT_AGENTS = [
         ),
         "skills": [],
         "delegates_to": [],
-        "tools": [],
+        "tools": ["correction.detect", "correction.log", "correction.apply_patch"],
         "instances": ["jennifer"],
         "enabled": True,
         "system_prompt_version": 1,

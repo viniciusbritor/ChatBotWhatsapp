@@ -11,7 +11,7 @@ import logging
 from typing import Dict, Any, Callable, Awaitable
 
 from tools import google_calendar, google_drive, google_gmail, web_search, nickname
-from tools import locomotion, youtube, group
+from tools import locomotion, youtube, group, correction
 
 logger = logging.getLogger(__name__)
 
@@ -279,6 +279,59 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
                 "num": {"type": "integer", "description": "Numero de resultados (default: 10)"},
             },
             "required": ["query"],
+        },
+    },
+    "correction.detect": {
+        "function": correction.detect_correction,
+        "implementation": "correction",
+        "description": (
+            "Detecta se uma mensagem do usuario contem uma correcao. "
+            "Retorna is_correction, confidence (0-1), target (preferred_name/"
+            "agent_behavior/agent_fact) e extracted (trecho original)."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "Texto da mensagem do usuario"},
+            },
+            "required": ["text"],
+        },
+    },
+    "correction.log": {
+        "function": correction.log_correction,
+        "implementation": "correction",
+        "description": (
+            "Registra uma correcao confirmada no Firestore contatos/{phone}/corrections. "
+            "Chame APOS o usuario confirmar com 'sim'."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string", "description": "Telefone do usuario"},
+                "user_quote": {"type": "string", "description": "Frase original do usuario"},
+                "target": {"type": "string", "description": "Tipo de correcao (preferred_name, agent_behavior, agent_fact)"},
+                "before": {"type": "string", "description": "Valor antes da correcao"},
+                "after": {"type": "string", "description": "Valor corrigido"},
+                "confirmed": {"type": "boolean", "description": "Se o usuario confirmou"},
+            },
+            "required": ["phone", "user_quote", "target", "before", "after", "confirmed"],
+        },
+    },
+    "correction.apply_patch": {
+        "function": correction.apply_patch,
+        "implementation": "correction",
+        "description": (
+            "Aplica uma correcao ao system_prompt de um agente no Firestore. "
+            "Use APENAS apos confirmacao do usuario."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "agent_id": {"type": "string", "description": "ID do agente a atualizar"},
+                "target": {"type": "string", "description": "Campo alvo (system_prompt ou replace:old:new)"},
+                "patch_text": {"type": "string", "description": "Novo texto para o campo"},
+            },
+            "required": ["agent_id", "target", "patch_text"],
         },
     },
     "web.fetch_url": {
