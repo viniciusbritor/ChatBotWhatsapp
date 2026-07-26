@@ -283,8 +283,111 @@ class TestGraphNodes:
         out = await classify_intent_node(state)
         assert out["intent"]["is_drive"] is True
 
+    # ------------------ deterministic rules (Fase O) ------------------
+
     @pytest.mark.asyncio
-    async def test_guard_node_returns_decision_for_owner_with_token(self):
+    async def test_deterministic_drive_overrides_calendar_when_busque_em_pasta(self):
+        """'dentro desse gdrive, busque em pasta arquivos de atas de reuniao' -> Drive"""
+        from agent_orchestration.graph import classify_intent_node
+
+        state = {"text": "dentro desse gdrive, busque em pasta arquivos de atas de reuniao. quero ler a mais recente",
+                 "instance": "Jennifer", "phone": "5511966830020"}
+        out = await classify_intent_node(state)
+        assert out["intent"]["is_drive"] is True
+        assert out["intent"]["is_calendar"] is False
+        assert out["intent"]["is_email"] is False
+
+    @pytest.mark.asyncio
+    async def test_deterministic_drive_abra_o_arquivo(self):
+        """'abra o arquivo de atas' -> Drive, mesmo com 'reuniao' no texto"""
+        from agent_orchestration.graph import classify_intent_node
+
+        state = {"text": "abra o arquivo com as atas da reuniao de 21/07",
+                 "instance": "Jennifer", "phone": "5511966830020"}
+        out = await classify_intent_node(state)
+        assert out["intent"]["is_drive"] is True
+        assert out["intent"]["is_calendar"] is False
+
+    @pytest.mark.asyncio
+    async def test_deterministic_calendar_agenda_hoje_clean(self):
+        """'meus compromissos hoje' -> Calendar apenas"""
+        from agent_orchestration.graph import classify_intent_node
+
+        state = {"text": "meus compromissos hoje", "instance": "Jennifer", "phone": "5511966830020"}
+        out = await classify_intent_node(state)
+        assert out["intent"]["is_calendar"] is True
+        assert out["intent"]["is_drive"] is False
+
+    @pytest.mark.asyncio
+    async def test_deterministic_email_meus_emails(self):
+        """'meus emails' -> Email apenas"""
+        from agent_orchestration.graph import classify_intent_node
+
+        state = {"text": "meus emails", "instance": "Jennifer", "phone": "5511966830020"}
+        out = await classify_intent_node(state)
+        assert out["intent"]["is_email"] is True
+        assert out["intent"]["is_drive"] is False
+        assert out["intent"]["is_calendar"] is False
+
+    # ------------------ context tie-breaking (Fase O) ------------------
+
+    @pytest.mark.asyncio
+    async def test_context_tie_break_drive_continues(self):
+        """Turno anterior Drive + 'atas de reuniao' -> Drive mantido"""
+        from agent_orchestration.graph import classify_intent_node
+
+        state = {
+            "text": "quero ler a ata mais recente",
+            "last_intent": {"is_drive": True, "is_calendar": False, "is_email": False},
+            "instance": "Jennifer", "phone": "5511966830020",
+        }
+        out = await classify_intent_node(state)
+        assert out["intent"]["is_drive"] is True
+
+    @pytest.mark.asyncio
+    async def test_context_tie_break_calendar_continues(self):
+        """Turno anterior Calendar + 'compromissos' -> Calendar mantido"""
+        from agent_orchestration.graph import classify_intent_node
+
+        state = {
+            "text": "crie um evento para amanha",
+            "last_intent": {"is_drive": False, "is_calendar": True, "is_email": False},
+            "instance": "Jennifer", "phone": "5511966830020",
+        }
+        out = await classify_intent_node(state)
+        assert out["intent"]["is_calendar"] is True
+
+    @pytest.mark.asyncio
+    async def test_context_tie_break_email_continues(self):
+        """Turno anterior Email + 'mensagem' -> Email mantido"""
+        from agent_orchestration.graph import classify_intent_node
+
+        state = {
+            "text": "leia a mensagem",
+            "last_intent": {"is_drive": False, "is_calendar": False, "is_email": True},
+            "instance": "Jennifer", "phone": "5511966830020",
+        }
+        out = await classify_intent_node(state)
+        assert out["intent"]["is_email"] is True
+
+    @pytest.mark.asyncio
+    async def test_last_intent_persisted_in_state(self):
+        """classify_intent_node persiste last_intent para o proximo turno"""
+        from agent_orchestration.graph import classify_intent_node
+
+        state = {"text": "lista os arquivos no drive", "instance": "Jennifer", "phone": "5511966830020"}
+        out = await classify_intent_node(state)
+        assert out.get("last_intent", {}).get("is_drive") is True
+
+    @pytest.mark.asyncio
+    async def test_pick_capability_drive_priority_over_calendar(self):
+        """Quando is_drive e is_calendar sao True, drive vence"""
+        from agent_orchestration.graph import _pick_capability
+
+        cap = _pick_capability({"is_drive": True, "is_calendar": True, "is_email": False})
+        assert cap == "drive.search_files"
+
+    # ------------------ guard_node ------------------
         from agent_orchestration.graph import guard_node
         from core.owner import OwnerResolution
 

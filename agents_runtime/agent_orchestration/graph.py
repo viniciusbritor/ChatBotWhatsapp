@@ -50,17 +50,109 @@ async def jennifier_node(state: TurnState) -> TurnState:
     return state
 
 
+# ---------------------------------------------------------------------------
+# Intent classification — deterministic rules + keyword fallback with context
+# ---------------------------------------------------------------------------
+
+DRIVE_PRIORITY_PATTERNS = (
+    "dentro desse drive", "nesse drive", "dentro desse gdrive", "nesse gdrive",
+    "busque em pasta", "busque na pasta", "procure na pasta", "procure em pasta",
+    "dentro dessa pasta", "nessa pasta", "dentro do drive", "no drive",
+    "abra o arquivo", "leia o arquivo", "leia a ata", "leia o documento",
+    "salve no drive", "salvar no drive", "upload", "faca upload",
+    "lista os arquivos", "liste os arquivos", "mostre os arquivos",
+    "buscar arquivos", "procure arquivos", "arquivos do drive",
+    "arquivos da pasta", "conteudo da pasta",
+)
+
+CALENDAR_PRIORITY_PATTERNS = (
+    "agenda hoje", "agenda de hoje", "compromissos hoje", "compromissos de hoje",
+    "criar evento", "crie um evento", "marcar reuniao", "agendar",
+    "agenda amanha", "compromissos amanha", "agenda da semana",
+    "meus compromissos", "minha agenda", "eventos hoje",
+)
+
+EMAIL_PRIORITY_PATTERNS = (
+    "meus emails", "meus e-mails", "caixa de entrada", "ultimos emails",
+    "ultimos e-mails", "ler email", "ler e-mail", "enviar email",
+    "mandar email", "escrever email", "responder email",
+)
+
+
+def _deterministic_classify(text: str) -> Optional[Dict[str, bool]]:
+    """Return intent if a high-priority pattern matches, else None."""
+    t = text.lower()
+    for pat in DRIVE_PRIORITY_PATTERNS:
+        if pat in t:
+            return {"is_calendar": False, "is_drive": True, "is_email": False}
+    for pat in CALENDAR_PRIORITY_PATTERNS:
+        if pat in t:
+            return {"is_calendar": True, "is_drive": False, "is_email": False}
+    for pat in EMAIL_PRIORITY_PATTERNS:
+        if pat in t:
+            return {"is_calendar": False, "is_drive": False, "is_email": True}
+    return None
+
+
+def _keyword_classify(text: str, last_intent: Optional[Dict[str, bool]] = None) -> Dict[str, bool]:
+    """Keyword-based intent classification with context tie-breaking."""
+    t = text.lower()
+    is_drive = any(kw in t for kw in ("drive", "gdrive", "arquivo", "pasta", "documento", "docx", "pdf", "xlsx", "planilha", "ata"))
+    is_calendar = any(kw in t for kw in ("agenda", "compromisso", "reuniao", "calendar", "evento"))
+    is_email = any(kw in t for kw in ("email", "e-mail", "inbox", "gmail", "mensagem"))
+
+    active_count = sum([is_drive, is_calendar, is_email])
+    if active_count <= 1:
+        return {"is_calendar": is_calendar, "is_drive": is_drive, "is_email": is_email}
+
+    if last_intent:
+        prev_is_drive = last_intent.get("is_drive", False)
+        prev_is_calendar = last_intent.get("is_calendar", False)
+        prev_is_email = last_intent.get("is_email", False)
+        if prev_is_drive and is_drive:
+            is_calendar = False
+            is_email = False
+        elif prev_is_calendar and is_calendar:
+            is_drive = False
+            is_email = False
+        elif prev_is_email and is_email:
+            is_drive = False
+            is_calendar = False
+
+    if is_drive and is_calendar:
+        has_drive_context = any(
+            kw in t for kw in ("dentro desse", "nesse", "nessa", "desse drive",
+                               "desse gdrive", "na pasta", "busque em", "procure na")
+        )
+        if has_drive_context:
+            is_calendar = False
+        else:
+            has_calendar_context = any(
+                kw in t for kw in ("agendar", "marcar", "criar evento", "hoje as", "amanha as")
+            )
+            if has_calendar_context:
+                is_drive = False
+
+    return {"is_calendar": is_calendar, "is_drive": is_drive, "is_email": is_email}
+
+
 async def classify_intent_node(state: TurnState) -> TurnState:
     text = (state.get("text") or "").lower()
-    intent = {
-        "is_calendar": any(kw in text for kw in ("agenda", "compromisso", "reuniao", "calendar")),
-        "is_drive": any(kw in text for kw in ("drive", "arquivo", "pasta", "documento")),
-        "is_email": any(kw in text for kw in ("email", "e-mail", "inbox", "gmail")),
-    }
+    last_intent = state.get("last_intent")
+
+    intent = _deterministic_classify(text)
+    if intent is None:
+        intent = _keyword_classify(text, last_intent)
+
     state["intent"] = intent
+    state["last_intent"] = intent
     state.setdefault("trace", []).append({"node": "classify_intent", "intent": intent})
     return state
 
+
+# ---------------------------------------------------------------------------
+# Guardian node
+# ---------------------------------------------------------------------------
 
 async def guard_node(state: TurnState) -> TurnState:
     from agent_orchestration.access_guardian import decide_guardian
@@ -93,12 +185,12 @@ async def guard_node(state: TurnState) -> TurnState:
 
 
 def _pick_capability(intent: Dict[str, bool]) -> Optional[str]:
-    if intent.get("is_calendar"):
-        return "calendar.list_events"
     if intent.get("is_drive"):
         return "drive.search_files"
     if intent.get("is_email"):
         return "gmail.search_messages"
+    if intent.get("is_calendar"):
+        return "calendar.list_events"
     return None
 
 
@@ -107,6 +199,10 @@ def _resolve_next_agent(verdict: str) -> Optional[str]:
         return "manager"
     return None
 
+
+# ---------------------------------------------------------------------------
+# Manager node
+# ---------------------------------------------------------------------------
 
 async def manager_node(state: TurnState) -> TurnState:
     from orchestrator import _prefetch_calendar, _prefetch_email, _prefetch_drive_multi
@@ -129,6 +225,10 @@ async def manager_node(state: TurnState) -> TurnState:
     state.setdefault("trace", []).append({"node": "manager", "prefetch_empty": prefetch is None})
     return state
 
+
+# ---------------------------------------------------------------------------
+# Reply node
+# ---------------------------------------------------------------------------
 
 async def reply_node(state: TurnState) -> TurnState:
     guardian = state.get("guardian_decision") or {}
@@ -157,6 +257,10 @@ async def reply_node(state: TurnState) -> TurnState:
     state.setdefault("trace", []).append({"node": "reply", "verdict": verdict})
     return state
 
+
+# ---------------------------------------------------------------------------
+# Graph construction
+# ---------------------------------------------------------------------------
 
 def _route_after_guard(state: TurnState) -> str:
     decision = state.get("guardian_decision") or {}
