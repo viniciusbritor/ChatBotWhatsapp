@@ -1,5 +1,6 @@
 """Tests for the LangGraph orchestration pipeline."""
 import os
+import time
 from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -405,6 +406,49 @@ class TestGraphNodes:
 
         cap = _pick_capability({"is_drive": True, "is_calendar": True, "is_email": False})
         assert cap == "drive.search_files"
+
+    # ------------------ LLM arbiter (Fase O — F2) ------------------
+
+    def test_llm_classify_returns_none_without_api_key(self):
+        """Sem DEEPSEEK_API_KEY, _llm_classify retorna None (degradacao graciosa)"""
+        from agent_orchestration.graph import _llm_classify
+
+        result = _llm_classify("ata da reuniao que esta no drive", None)
+        assert result is None
+
+    def test_llm_classify_cache_hit(self, monkeypatch):
+        """Cache de 60s evita chamadas repetidas ao LLM"""
+        from agent_orchestration.graph import _llm_classify, _CLASSIFY_CACHE, _CLASSIFY_CACHE_TTL_SEC
+
+        _CLASSIFY_CACHE.clear()
+        _CLASSIFY_CACHE["ata da reuniao no drive"[:200]] = (
+            {"is_drive": True, "is_calendar": False, "is_email": False}, time.time()
+        )
+        result = _llm_classify("ata da reuniao no drive", None)
+        assert result == {"is_drive": True, "is_calendar": False, "is_email": False}
+
+    @pytest.mark.asyncio
+    async def test_classify_intent_llm_fallback_graceful_degradation(self):
+        """Quando LLM nao esta disponivel, keyword result e usado"""
+        from agent_orchestration.graph import classify_intent_node
+
+        text = "ata da reuniao que esta no drive omnichannel"
+        state = {"text": text, "instance": "Jennifer", "phone": "5511966830020"}
+        out = await classify_intent_node(state)
+        assert out["intent"]["is_drive"] is True
+
+    @pytest.mark.asyncio
+    async def test_classify_intent_llm_fallback_overrides_keyword_when_available(self):
+        """Quando _llm_classify retorna resultado, ele substitui o keyword"""
+        from agent_orchestration.graph import classify_intent_node
+        from unittest.mock import patch
+
+        state = {"text": "ata da reuniao", "instance": "Jennifer", "phone": "5511966830020"}
+        with patch("agent_orchestration.graph._llm_classify",
+                   return_value={"is_drive": True, "is_calendar": False, "is_email": False}):
+            out = await classify_intent_node(state)
+        assert out["intent"]["is_drive"] is True
+        assert out["intent"]["is_calendar"] is False
 
     # ------------------ guard_node ------------------
         from agent_orchestration.graph import guard_node

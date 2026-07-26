@@ -28,9 +28,83 @@ orchestrator shell.
 from __future__ import annotations
 
 import logging
+import os
+import time
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# LLM fallback for ambiguous intent classification (Fase O — F2)
+# ---------------------------------------------------------------------------
+
+_CLASSIFY_CACHE: Dict[str, tuple] = {}
+_CLASSIFY_CACHE_TTL_SEC = 60
+_CLASSIFY_CACHE_MAX = 128
+
+_LLM_CLASSIFY_PROMPT = (
+    "Classifique esta mensagem de WhatsApp em exatamente UMA categoria: "
+    "calendar, drive, email, ou none. "
+    "Responda APENAS com a palavra (minuscula, sem ponto). "
+    "Contexto: o ultimo turno foi sobre {last_intent_str}. "
+    "Exemplos: 'agenda de hoje' -> calendar, "
+    "'lista os arquivos no drive' -> drive, "
+    "'meus emails importantes' -> email, "
+    "'ata da ultima reuniao que esta no drive' -> drive, "
+    "'qual o significado da vida' -> none. "
+    "Mensagem: \"{text}\""
+)
+
+
+def _llm_classify(text: str, last_intent: Optional[Dict[str, bool]] = None) -> Optional[Dict[str, bool]]:
+    """Use DeepSeek V4 Pro to classify when keyword matching is ambiguous (2+ flags)."""
+    cache_key = text[:200]
+    now = time.time()
+    if cache_key in _CLASSIFY_CACHE:
+        cached_result, cached_at = _CLASSIFY_CACHE[cache_key]
+        if now - cached_at < _CLASSIFY_CACHE_TTL_SEC:
+            return cached_result
+
+    try:
+        from langchain_openai import ChatOpenAI
+    except ImportError:
+        logger.warning("langchain_openai not available for _llm_classify")
+        return None
+
+    api_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
+    base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1").strip()
+    if not api_key:
+        return None
+
+    last_intent_str = "none"
+    if last_intent:
+        active = [k for k, v in last_intent.items() if v and k.startswith("is_")]
+        if active:
+            last_intent_str = active[0].replace("is_", "")
+
+    model = ChatOpenAI(
+        model="deepseek-v4-pro",
+        api_key=api_key,
+        base_url=base_url,
+        temperature=0,
+        max_tokens=6,
+        timeout=5,
+    )
+    try:
+        response = model.invoke(
+            _LLM_CLASSIFY_PROMPT.format(text=text[:500], last_intent_str=last_intent_str)
+        )
+    except Exception as exc:
+        logger.warning("_llm_classify LLM call failed: %s", exc)
+        return None
+
+    word = (response.content if hasattr(response, "content") else str(response)).strip().lower()
+    result = {"is_calendar": word == "calendar", "is_drive": word == "drive", "is_email": word == "email"}
+
+    if len(_CLASSIFY_CACHE) >= _CLASSIFY_CACHE_MAX:
+        _CLASSIFY_CACHE.clear()
+    _CLASSIFY_CACHE[cache_key] = (result, now)
+    return result
 
 
 def _build_state_graph():
@@ -143,6 +217,13 @@ async def classify_intent_node(state: TurnState) -> TurnState:
     intent = _deterministic_classify(text)
     if intent is None:
         intent = _keyword_classify(text, last_intent)
+        active_count = sum([intent.get("is_drive", False),
+                            intent.get("is_calendar", False),
+                            intent.get("is_email", False)])
+        if active_count >= 2:
+            llm_result = _llm_classify(text, last_intent)
+            if llm_result is not None:
+                intent = llm_result
 
     state["intent"] = intent
     state["last_intent"] = intent
