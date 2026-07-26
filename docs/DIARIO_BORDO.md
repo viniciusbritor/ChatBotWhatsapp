@@ -1887,3 +1887,86 @@ texto, (4) retornar resposta natural via WhatsApp.
 Branch **nao** dispara Cloud Build (regex `^test$` nao casa).
 Apos validacao local, fazer merge normal em `test` para deploy:
 `git checkout test && git merge feat/drive-read-file-content && git push`.
+
+---
+
+## 25/07/2026 — Fase O: Classificacao inteligente + varredura agentica + aprendizado
+
+### Contexto
+
+Apos deploy do `read_file_content`, usuario reportou que frases como
+"jenifer, me mostra a ata da ultima reuniao que esta no drive 'omnichannel'"
+eram classificadas como calendario em vez de drive.
+
+Investigacao revelou que o `classify_intent_node` do grafo e o
+`_detect_intent` do orchestrator sao **dois sistemas de classificacao
+competindo**. O orchestrator vence — roda primeiro (linha 798), e o
+resultado do grafo e ignorado. Alem disso:
+- `classify_intent_node` le `state["text"]` mas o state recebe `"masked_text"`
+- Keywords do orchestrator estao desatualizadas (nao incluem "gdrive", "docx", etc.)
+- `agent-learning` tem `tools: []` — nao consegue persistir correcoes
+- Nao existe busca recursiva entre pastas/subpastas do Drive
+
+### Plano de execucao (5 fases)
+
+| Fase | Objetivo | Arquivos |
+|---|---|---|
+| F1 | Corrigir classificacao (unificar intents, corrigir chave, sync keywords) | `graph.py`, `orchestrator.py` |
+| F2 | LLM V4 Pro como arbitro de intencao quando keywords empatam | `graph.py` |
+| F3 | `deep_search_drive` recursiva com shared drives | `google_drive.py`, `tool_registry.py`, `deepagent_layer/` |
+| F4 | Wire do agent-learning com tools de correcao | `tool_registry.py`, `orchestrator.py`, `pending_actions.py` |
+| F5 | Analytics + auto-correcao + feedback loop | `orchestrator.py`, `rag.py`, `correction.py` |
+
+Regra: cada fase termina com `pytest -q tests/` a 100%. So avanca
+com zero failures e zero warnings.
+
+### RCA da classificacao dupla
+
+```
+orchestrator.py:_detect_intent (linha 252-262)
+  → usa CALENDAR_KEYWORDS, DRIVE_KEYWORDS, EMAIL_KEYWORDS
+  → linha 798: chama _detect_intent PRIMEIRO
+  → linha 823: _resolve_agent_for_intent(intent) usa resultado do orchestrator
+  → linha 910: _run_guard_graph(payload, masked_text, intent) recebe intent pre-computado
+
+graph.py:classify_intent_node (linha 139)
+  → le state["text"] mas o state de _run_guard_graph tem "masked_text"
+  → texto fica vazio → classificacao retorna all-False
+  → resultado do grafo e sobrescrito e ignorado
+
+Conclusao: o graph nunca classifica em producao. So o orchestrator decide.
+```
+
+### Status atual
+
+`pytest -q tests/`: 402 passed, 30 skipped, 0 failures (baseline antes da Fase O: 390).
+
+### Resultado das 5 fases
+
+| Fase | Commit | Suite | Delta | O que fez |
+|---|---|---|---|---|
+| F0 | — | 390 | — | Baseline (antes da Fase O) |
+| F1 | `e74f64b` | 392 | +2 | classify_intent_node le `masked_text`, drive priority, keywords sync |
+| F2 | `82a8716` | 396 | +4 | LLM V4 Pro arbitro de intencao com cache 60s |
+| F3 | `d1950ac` | 400 | +4 | deep_search_drive recursiva BFS + shared drives |
+| F4 | `b1f93e7` | 400 | +0 | Wire agent-learning: 3 tools registradas (detect/log/apply) |
+| F5 | `bde531d` | 402 | +2 | summarize_past_corrections + injecao no system_prompt |
+| **Total** | | **402** | **+12** | **Classificacao inteligente + busca agentica + aprendizado** |
+
+### Fluxo completo pos-deploy
+
+```
+"jenifer, me mostra a ata da ultima reuniao que esta no drive omnichannel"
+  → classify_intent_node: deterministic ("no drive") → is_drive=True ✅
+  → guard_node: access_guardian → allow
+  → manager-drive (DeepSeek + tools):
+      → deep_search_drive_files("ata", parent="root", depth=3)
+        → BFS: root → Omnichannel → Atas → "Ata 2026-07-21.docx" ✅
+      → read_drive_file_content("Ata 2026-07-21.docx")
+        → parse DOCX → extrai texto ✅
+      → reply: "Encontrei a ata de 21/07! 📁 Resumo: ..." ✅
+```
+
+### Proximos passos
+
+Merge em `test` para deploy via Cloud Build.
