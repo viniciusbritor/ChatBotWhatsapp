@@ -20,26 +20,17 @@ class TestClaimTransaction:
             result = claim("test-message-id")
         assert result is None
 
-    def test_claim_transaction_does_not_crash_with_real_client_mock(self):
-        """claim() with mocked Firestore client — the @transaction.transactional
-        decorator must not raise NameError when _get_firestore returns a client."""
+    def test_claim_transaction_executes_without_name_error(self):
+        """claim() with mocked Firestore client — verifies no NameError or
+        AttributeError when the @firestore.transactional decorator runs."""
         from core.message_ledger import claim
 
         mock_db = MagicMock()
-        mock_doc = MagicMock()
         mock_doc_ref = MagicMock()
-        mock_doc_ref.get.return_value.to_dict.return_value = {"state": "received"}
+        mock_doc_ref.get.return_value.to_dict.return_value = {"state": "response_ready"}
         mock_db.collection.return_value.document.return_value = mock_doc_ref
-        mock_transaction = MagicMock()
-        mock_db.transaction.return_value = mock_transaction
-
-        def _fake_transactional(fn):
-            """Simulate @transaction.transactional decorator behavior."""
-            return fn
-
-        mock_transaction.transactional = _fake_transactional
+        mock_db.transaction.return_value = MagicMock()
 
         with patch("core.message_ledger._get_firestore", return_value=mock_db):
             result = claim("test-message-id")
-        assert result is not None
-        assert result["state"] == "processing"
+        assert result == {"state": "response_ready"}

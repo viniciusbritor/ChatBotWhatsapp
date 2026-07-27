@@ -24,6 +24,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 from core.timezone import now_brt
 
+from google.cloud import firestore
+
 logger = logging.getLogger(__name__)
 
 _LEDGER_COLLECTION = os.getenv("PUBSUB_LEDGER_COLLECTION", "message-processing")
@@ -196,7 +198,7 @@ def claim(message_id: str) -> Optional[Dict[str, Any]]:
     lease_expires = time.time() + _LEASE_SECONDS
     transaction = db.transaction()
 
-    @transaction.transactional
+    @firestore.transactional
     def _claim_in_transaction(txn):
         try:
             snapshot = doc_ref.get(transaction=txn, timeout=5).to_dict() or {}
