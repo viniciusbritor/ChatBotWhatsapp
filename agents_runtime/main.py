@@ -373,7 +373,7 @@ async def _safe_mark_read(envelope: Dict[str, Any]) -> None:
             return
         await asyncio.wait_for(
             mark_messages_read(envelope.get("instance", ""), remote_jid, message_ids, from_me=False),
-            timeout=5,
+            timeout=15,
         )
         logger.info(
             "evolution_mark_read_ok message_id=%s remote_jid=%s",

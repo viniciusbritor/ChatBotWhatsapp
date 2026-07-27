@@ -182,43 +182,53 @@ def register_or_load(message_id: str, envelope: Dict[str, Any]) -> Optional[Dict
 
 
 def claim(message_id: str) -> Optional[Dict[str, Any]]:
-    """Acquire a lease so only one instance processes the message."""
+    """Acquire a lease so only one instance processes the message.
+
+    Uses a Firestore transaction to atomically read-then-write,
+    preventing the race condition where two Cloud Run instances
+    both claim the same message simultaneously.
+    """
     db = _get_firestore()
     if db is None:
         return None
     doc_ref = db.collection(_LEDGER_COLLECTION).document(_doc_id(message_id))
     owner = _owner_token()
     lease_expires = time.time() + _LEASE_SECONDS
-    try:
-        snapshot = doc_ref.get(timeout=5).to_dict() or {}
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("ledger claim read failed: %s", exc)
-        return None
-    state = snapshot.get("state")
-    if state in {"response_ready", "delivered", "failed_terminal"}:
+    transaction = db.transaction()
+
+    @transaction.transactional
+    def _claim_in_transaction(txn):
+        try:
+            snapshot = doc_ref.get(transaction=txn, timeout=5).to_dict() or {}
+        except Exception:
+            return None
+        state = snapshot.get("state")
+        if state in {"response_ready", "delivered", "failed_terminal"}:
+            return snapshot
+        if (
+            state == "processing"
+            and snapshot.get("lease_expires_at", 0) > time.time()
+            and snapshot.get("lease_owner")
+            and snapshot.get("lease_owner") != owner
+        ):
+            return None
+        updates = {
+            "state": "processing",
+            "attempts": (snapshot.get("attempts") or 0) + 1,
+            "lease_owner": owner,
+            "lease_expires_at": lease_expires,
+            "updated_at": _now_iso(),
+            "last_error": "",
+        }
+        txn.update(doc_ref, updates)
+        snapshot.update(updates)
         return snapshot
-    if (
-        state == "processing"
-        and snapshot.get("lease_expires_at", 0) > time.time()
-        and snapshot.get("lease_owner")
-        and snapshot.get("lease_owner") != owner
-    ):
-        return None
-    updates = {
-        "state": "processing",
-        "attempts": (snapshot.get("attempts") or 0) + 1,
-        "lease_owner": owner,
-        "lease_expires_at": lease_expires,
-        "updated_at": _now_iso(),
-        "last_error": "",
-    }
+
     try:
-        doc_ref.update(updates)
-    except Exception as exc:  # noqa: BLE001
-        logger.error("ledger claim update failed: %s", exc)
+        return _claim_in_transaction(transaction)
+    except Exception as exc:
+        logger.warning("ledger claim transaction failed: %s", exc)
         return None
-    snapshot.update(updates)
-    return snapshot
 
 
 def renew_lease(message_id: str) -> None:

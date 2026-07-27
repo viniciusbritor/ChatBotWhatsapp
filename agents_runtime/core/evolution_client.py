@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import re
@@ -122,14 +123,11 @@ async def mark_messages_read(
     message_ids: List[str],
     *,
     from_me: bool = False,
+    max_retries: int = 3,
 ) -> Dict[str, Any]:
     """Mark inbound messages as read on Evolution.
 
-    Evolution v1 accepts the ``markMessageAsRead`` endpoint (singular)
-    with the v2 payload shape (``readMessages``). The plural
-    ``markMessagesAsRead`` endpoint is not implemented in this version.
-    Failures are logged and surfaced to the caller; the webhook does not
-    block on them.
+    Retries up to max_retries with exponential backoff (1s, 2s, 4s).
     """
     if not instance or not remote_jid or not message_ids:
         raise EvolutionDeliveryError("invalid_mark_read_request")
@@ -142,18 +140,26 @@ async def mark_messages_read(
             if message_id
         ]
     }
-    async with httpx.AsyncClient(timeout=_request_timeout(10)) as client:
-        response = await client.post(
-            f"{base_url}/chat/markMessageAsRead/{instance}",
-            json=payload,
-            headers={"apikey": api_key, "Content-Type": "application/json"},
-        )
-    if response.status_code >= 400:
-        raise EvolutionDeliveryError(f"evolution_mark_http_{response.status_code}")
-    try:
-        return response.json()
-    except ValueError:
-        return {"status": "accepted"}
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            async with httpx.AsyncClient(timeout=_request_timeout(10)) as client:
+                response = await client.post(
+                    f"{base_url}/chat/markMessageAsRead/{instance}",
+                    json=payload,
+                    headers={"apikey": api_key, "Content-Type": "application/json"},
+                )
+            if response.status_code < 400:
+                try:
+                    return response.json()
+                except ValueError:
+                    return {"status": "accepted"}
+            last_error = f"http_{response.status_code}"
+        except Exception as exc:
+            last_error = str(exc)
+        if attempt < max_retries - 1:
+            await asyncio.sleep(1 * (2 ** attempt))
+    raise EvolutionDeliveryError(f"evolution_mark_read_failed after {max_retries} retries: {last_error}")
 
 
 async def fetch_instance_phones(instance: str) -> List[str]:
