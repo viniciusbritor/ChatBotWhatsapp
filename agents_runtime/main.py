@@ -245,130 +245,25 @@ async def chat(request: Request):
                 })
 
     if has_document:
-        try:
-            from orchestrator import (
-                _detect_intent,
-                _extract_text_from_attachment,
-                _persist_attachment,
-            )
-            from core.evolution_client import send_text
-
-            if not body.get("intent"):
-                body["intent"] = _detect_intent(masked_text or body.get("text", ""))
-            intent = body.get("intent", {}) or {}
-            save_to_rag = bool(intent.get("is_attachment_save"))
-            ask = bool(intent.get("is_attachment")) and not (
-                intent.get("is_attachment_save") or intent.get("is_attachment_file")
-            )
-
-            async def _send_ack(text: str) -> None:
-                try:
-                    await send_text(
-                        instance=body.get("instance", "Jennifer"),
-                        phone=body.get("phone", ""),
-                        text=text,
-                        delay_ms=0,
-                        presence="composing",
-                        remote_jid=extra.get("remote_jid", ""),
-                    )
-                except Exception:
-                    pass
-
-            if ask:
-                await _send_ack(
-                    "Esse arquivo e para memorizar na base de conhecimento (RAG) ou so para salvar? Responda 'memorizar' ou 'salvar'."
-                )
-                reply = "Aguardando confirmacao sobre o arquivo."
-                return JSONResponse(content={
-                    "reply": reply,
-                    "delay_ms": calculate_delay_ms(reply),
-                    "presence": "paused",
-                    "metadata": {
-                        "agent_id": "document-handler",
-                        "response_identity": "Jennifer",
-                        "waiting_confirmation": "attachment_mode",
-                    },
-                })
-
-            await _send_ack("ok. pode deixar")
-            await _send_ack("estou memorizando o conteudo")
-
-            extracted = await _extract_text_from_attachment(body)
-            if not extracted or not extracted.get("text"):
-                reply = "Nao consegui extrair texto desse arquivo. Pode tentar de outro formato?"
-                return JSONResponse(content={
-                    "reply": reply,
-                    "delay_ms": calculate_delay_ms(reply),
-                    "presence": "paused",
-                    "metadata": {
-                        "agent_id": "document-handler",
-                        "response_identity": "Jennifer",
-                        "error": "text_extraction_failed",
-                    },
-                })
-
-            persist = await _persist_attachment(body, extracted, save_to_rag)
-            if persist.get("error"):
-                reply = (
-                    f"Tive problema ao salvar: {persist.get('error')}. "
-                    "Pode tentar de novo?"
-                )
-                return JSONResponse(content={
-                    "reply": reply,
-                    "delay_ms": calculate_delay_ms(reply),
-                    "presence": "paused",
-                    "metadata": {
-                        "agent_id": "document-handler",
-                        "response_identity": "Jennifer",
-                        "error": persist.get("error"),
-                    },
-                })
-
-            if persist.get("status") == "rag_group":
-                chunks = persist.get("index_result", {}).get("indexed", 0)
-                reply = (
-                    f"Feito! 📚 Memorei {chunks} trechos do arquivo "
-                    f"'{extracted['source_name']}' no conhecimento do grupo."
-                )
-            elif persist.get("status", "").startswith("drive_"):
-                folder = "Meu Drive" if persist["status"] == "drive_individual" else "pasta do grupo"
-                reply = (
-                    f"Feito! 💾 Salvei o arquivo '{extracted['source_name']}' no {folder}."
-                )
-            else:
-                reply = "Feito! Arquivo processado."
-
-            reply += " Quer me perguntar algo sobre o arquivo para verificar?"
-
-            return JSONResponse(content={
-                "reply": reply,
-                "delay_ms": calculate_delay_ms(reply),
-                "presence": "composing",
-                "metadata": {
-                    "agent_id": "document-handler",
-                    "response_identity": "Jennifer",
-                    "attachment": persist.get("status"),
-                    "source_name": extracted["source_name"],
-                },
-            })
-        except Exception as e:
-            logger.error(
-                "Document handler failed: error_type=%s message_id=%s",
-                type(e).__name__,
-                body.get("message_id", ""),
-            )
-            reply = "Tive um problema ao processar esse arquivo. Pode tentar de novo?"
-            return JSONResponse(content={
-                "reply": reply,
-                "delay_ms": calculate_delay_ms(reply),
-                "presence": "paused",
-                "metadata": {
-                    "agent_id": "document-handler",
-                    "response_identity": "Jennifer",
-                    "error": "document_handler_failed",
-                    "error_type": type(e).__name__,
-                },
-            })
+        # F4d: handler de attachment foi MOVIDO para orchestrator._handle_attachment
+        # (chamado por orchestrate()). /chat apenas valida que o attachment
+        # nao deveria vir por aqui (use o webhook /pubsub/push).
+        return JSONResponse(content={
+            "reply": (
+                "Documentos devem ser enviados via WhatsApp (webhook), "
+                "nao via /chat. Use o fluxo normal."
+            ),
+            "delay_ms": calculate_delay_ms(
+                "Documentos devem ser enviados via WhatsApp (webhook), "
+                "nao via /chat. Use o fluxo normal."
+            ),
+            "presence": "paused",
+            "metadata": {
+                "agent_id": "document-handler-info",
+                "response_identity": "Jennifer",
+                "info": "attachment_via_webhook_only",
+            },
+        }, status_code=400)
 
     chat_started = time.monotonic()
     result = await orchestrate(body)

@@ -252,6 +252,134 @@ def _get_routing_rules() -> List[Dict[str, Any]]:
     return rules
 
 
+async def _handle_attachment(
+    payload: Dict[str, Any],
+    intent: Dict[str, Any],
+    sender_name: str,
+) -> Optional[Dict[str, Any]]:
+    """F4d: handler centralizado de attachments (PDF, DOCX, XLSX, etc.).
+
+    Chamado pelo orchestrate() quando extra.has_document=True E intent
+    is_attachment=True. Decide entre:
+    - ambíguo (sem is_attachment_save nem is_attachment_file): pergunta
+    - salvar (is_attachment_file=True): upload_file no Drive
+    - memorizar (is_attachment_save=True): index_group_document (grupo)
+      ou index_private_document (individual) — F4'
+
+    Returns o result dict pronto para _finalize_orchestration, ou None
+    se o handler nao deve ser executado.
+    """
+    from core.delay_calculator import calculate_delay_ms, calculate_presence
+    from core.evolution_client import send_text
+
+    extra = payload.get("extra", {})
+    phone = payload.get("phone", "")
+    instance = payload.get("instance", "")
+
+    is_attachment = bool(intent.get("is_attachment"))
+    if not is_attachment:
+        return None
+
+    is_save = bool(intent.get("is_attachment_save"))
+    is_file = bool(intent.get("is_attachment_file"))
+    is_ambiguous = not (is_save or is_file)
+
+    async def _send_ack(text: str) -> None:
+        try:
+            await send_text(
+                instance=instance,
+                phone=phone,
+                text=text,
+                delay_ms=0,
+                presence="composing",
+                remote_jid=extra.get("remote_jid", ""),
+            )
+        except Exception:
+            pass
+
+    if is_ambiguous:
+        await _send_ack(
+            "Esse arquivo e para memorizar na base de conhecimento (RAG) ou so para salvar? "
+            "Responda 'memorizar' ou 'salvar'."
+        )
+        reply = "Aguardando confirmacao sobre o arquivo."
+        return {
+            "reply": reply,
+            "delay_ms": calculate_delay_ms(reply),
+            "presence": "paused",
+            "metadata": {
+                "agent_id": "document-handler",
+                "response_identity": "Jennifer",
+                "waiting_confirmation": "attachment_mode",
+            },
+        }
+
+    await _send_ack("ok. pode deixar")
+    await _send_ack("estou memorizando o conteudo")
+
+    extracted = await _extract_text_from_attachment(payload)
+    if not extracted or not extracted.get("text"):
+        reply = "Nao consegui extrair texto desse arquivo. Pode tentar de outro formato?"
+        return {
+            "reply": reply,
+            "delay_ms": calculate_delay_ms(reply),
+            "presence": "paused",
+            "metadata": {
+                "agent_id": "document-handler",
+                "response_identity": "Jennifer",
+                "error": "text_extraction_failed",
+            },
+        }
+
+    save_to_rag = is_save
+    persist = await _persist_attachment(payload, extracted, save_to_rag)
+    if persist.get("error"):
+        reply = (
+            f"Tive problema ao salvar: {persist.get('error')}. "
+            "Pode tentar de novo?"
+        )
+        return {
+            "reply": reply,
+            "delay_ms": calculate_delay_ms(reply),
+            "presence": "paused",
+            "metadata": {
+                "agent_id": "document-handler",
+                "response_identity": "Jennifer",
+                "error": persist.get("error"),
+                "detail": persist.get("detail", ""),
+            },
+        }
+
+    status = persist.get("status", "")
+    source_name = extracted.get("source_name", "document")
+    if status == "rag_group":
+        indexed = persist.get("index_result", {}).get("indexed", 0)
+        reply = (
+            f"Feito! 📚 Memorei {indexed} trechos do arquivo '{source_name}' "
+            f"no conhecimento do grupo. Quer me perguntar algo sobre o arquivo para verificar?"
+        )
+    elif status.startswith("drive_"):
+        folder = "Meu Drive" if status == "drive_individual" else "pasta do grupo"
+        reply = (
+            f"Feito! 💾 Salvei o arquivo '{source_name}' no {folder}. "
+            "Quer me perguntar algo sobre o arquivo para verificar?"
+        )
+    else:
+        reply = "Feito! Arquivo processado."
+
+    return {
+        "reply": reply,
+        "delay_ms": calculate_delay_ms(reply),
+        "presence": "composing",
+        "metadata": {
+            "agent_id": "document-handler",
+            "response_identity": "Jennifer",
+            "attachment": status,
+            "source_name": source_name,
+        },
+    }
+
+
 def _detect_intent(text: str) -> Dict[str, Any]:
     normalized = _normalize_text(text)
     explicit_url = re.search(r"https?://\S+", str(text or ""), flags=re.IGNORECASE) is not None
@@ -984,6 +1112,15 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     intent = _detect_intent(masked_text)
     path = [{"step": 1, "phase": "intent_detect", "details": {key: value for key, value in intent.items() if value}}]
+
+    if extra.get("has_document") and intent.get("is_attachment"):
+        attachment_result = await _handle_attachment(payload, intent, sender_name)
+        if attachment_result is not None:
+            path.append({"step": 2, "phase": "attachment_handler",
+                         "status": attachment_result.get("metadata", {}).get("attachment", "unknown")})
+            return await _finalize_orchestration(
+                payload, masked_text, sender_name, attachment_result, path, cache_key
+            )
 
     if intent.get("is_runtime_status"):
         from core.agent_status import build_agent_inventory, format_inventory_reply

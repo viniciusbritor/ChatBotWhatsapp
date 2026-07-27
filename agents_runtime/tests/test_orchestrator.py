@@ -634,3 +634,271 @@ class TestDownloadAttachmentBytes:
                    new_callable=AsyncMock, return_value=fake_response):
             result = await _download_attachment_bytes(envelope)
         assert result == fake_bytes
+
+
+class TestHandleAttachment:
+    """F4d: handler de attachment no orchestrate para PDF, DOCX, XLSX."""
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_intent_not_attachment(self):
+        from orchestrator import _handle_attachment
+        payload = {
+            "instance": "jennifer",
+            "phone": "5511966830020",
+            "extra": {"has_document": True},
+        }
+        intent = {
+            "is_drive": True,
+            "is_calendar": False, "is_email": False, "is_web_search": False,
+            "is_intimacy": False, "is_correction": False, "is_gross": False,
+            "is_assault_related": False, "is_runtime_status": False,
+            "is_attachment": False,
+        }
+        result = await _handle_attachment(payload, intent, "Vini")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_ambiguous_attachment_asks_user(self):
+        from orchestrator import _handle_attachment
+        from core import evolution_client
+        payload = {
+            "instance": "jennifer",
+            "phone": "5511966830020",
+            "extra": {
+                "has_document": True,
+                "remote_jid": "5511966830020@s.whatsapp.net",
+            },
+        }
+        intent = {"is_attachment": True, "is_attachment_save": False, "is_attachment_file": False}
+        with patch.object(evolution_client, "send_text", new_callable=AsyncMock) as mock_send:
+            result = await _handle_attachment(payload, intent, "Vini")
+        assert result is not None
+        assert result["reply"].startswith("Aguardando")
+        assert result["metadata"]["agent_id"] == "document-handler"
+        assert result["metadata"]["waiting_confirmation"] == "attachment_mode"
+        assert result["presence"] == "paused"
+        # 2 acks enviados: pergunta ambígua
+        assert mock_send.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_text_extraction_failure_returns_erro_message(self):
+        from orchestrator import _handle_attachment
+        from core import evolution_client
+        payload = {
+            "instance": "jennifer",
+            "phone": "5511966830020",
+            "extra": {
+                "has_document": True,
+                "doc_mimetype": "application/pdf",
+                "doc_file_name": "escaneado.pdf",
+                "remote_jid": "5511966830020@s.whatsapp.net",
+            },
+        }
+        intent = {"is_attachment": True, "is_attachment_save": True}
+        with patch.object(evolution_client, "send_text", new_callable=AsyncMock):
+            with patch("orchestrator._extract_text_from_attachment",
+                       new_callable=AsyncMock, return_value=None):
+                result = await _handle_attachment(payload, intent, "Vini")
+        assert result is not None
+        assert "Nao consegui extrair texto" in result["reply"]
+        assert result["metadata"]["error"] == "text_extraction_failed"
+
+    @pytest.mark.asyncio
+    async def test_save_to_drive_individual(self):
+        from orchestrator import _handle_attachment
+        from core import evolution_client
+        payload = {
+            "instance": "jennifer",
+            "phone": "5511966830020",
+            "extra": {
+                "has_document": True,
+                "doc_mimetype": "application/pdf",
+                "doc_file_name": "contrato.pdf",
+                "remote_jid": "5511966830020@s.whatsapp.net",
+                "is_group": False,
+            },
+        }
+        intent = {"is_attachment": True, "is_attachment_file": True}
+        extracted = {"text": "conteudo do pdf", "source_name": "contrato.pdf",
+                     "mimetype": "application/pdf", "raw_size": 100}
+        with patch.object(evolution_client, "send_text", new_callable=AsyncMock):
+            with patch("orchestrator._extract_text_from_attachment",
+                       new_callable=AsyncMock, return_value=extracted):
+                with patch("orchestrator._persist_attachment",
+                           new_callable=AsyncMock,
+                           return_value={"status": "drive_individual",
+                                         "upload_result": {"ok": True}}):
+                    result = await _handle_attachment(payload, intent, "Vini")
+        assert result is not None
+        assert "Feito!" in result["reply"]
+        assert "Meu Drive" in result["reply"]
+        assert "contrato.pdf" in result["reply"]
+        assert result["metadata"]["attachment"] == "drive_individual"
+
+    @pytest.mark.asyncio
+    async def test_save_to_rag_group(self):
+        from orchestrator import _handle_attachment
+        from core import evolution_client
+        payload = {
+            "instance": "jennifer",
+            "phone": "5511966830020",
+            "extra": {
+                "has_document": True,
+                "doc_mimetype": "application/pdf",
+                "doc_file_name": "ata.pdf",
+                "remote_jid": "120363@g.us",
+                "is_group": True,
+            },
+        }
+        intent = {"is_attachment": True, "is_attachment_save": True}
+        extracted = {"text": "ata da reuniao", "source_name": "ata.pdf",
+                     "mimetype": "application/pdf", "raw_size": 200}
+        with patch.object(evolution_client, "send_text", new_callable=AsyncMock):
+            with patch("orchestrator._extract_text_from_attachment",
+                       new_callable=AsyncMock, return_value=extracted):
+                with patch("orchestrator._persist_attachment",
+                           new_callable=AsyncMock,
+                           return_value={"status": "rag_group",
+                                         "index_result": {"indexed": 5}}):
+                    result = await _handle_attachment(payload, intent, "Vini")
+        assert result is not None
+        assert "Feito!" in result["reply"]
+        assert "5 trechos" in result["reply"]
+        assert "ata.pdf" in result["reply"]
+        assert result["metadata"]["attachment"] == "rag_group"
+
+    @pytest.mark.asyncio
+    async def test_persist_attachment_error_returns_error_message(self):
+        from orchestrator import _handle_attachment
+        from core import evolution_client
+        payload = {
+            "instance": "jennifer",
+            "phone": "5511966830020",
+            "extra": {
+                "has_document": True,
+                "doc_mimetype": "application/pdf",
+                "doc_file_name": "x.pdf",
+                "remote_jid": "5511966830020@s.whatsapp.net",
+            },
+        }
+        intent = {"is_attachment": True, "is_attachment_save": True}
+        extracted = {"text": "x", "source_name": "x.pdf", "mimetype": "application/pdf", "raw_size": 1}
+        with patch.object(evolution_client, "send_text", new_callable=AsyncMock):
+            with patch("orchestrator._extract_text_from_attachment",
+                       new_callable=AsyncMock, return_value=extracted):
+                with patch("orchestrator._persist_attachment",
+                           new_callable=AsyncMock,
+                           return_value={"error": "rag_index_failed", "detail": "Firestore offline"}):
+                    result = await _handle_attachment(payload, intent, "Vini")
+        assert result is not None
+        assert "Tive problema ao salvar" in result["reply"]
+        assert result["metadata"]["error"] == "rag_index_failed"
+
+    @pytest.mark.asyncio
+    async def test_extraction_exception_returns_error_message(self):
+        from orchestrator import _handle_attachment
+        from core import evolution_client
+        payload = {
+            "instance": "jennifer",
+            "phone": "5511966830020",
+            "extra": {
+                "has_document": True,
+                "doc_mimetype": "application/pdf",
+                "doc_file_name": "x.pdf",
+                "remote_jid": "5511966830020@s.whatsapp.net",
+            },
+        }
+        intent = {"is_attachment": True, "is_attachment_file": True}
+        with patch.object(evolution_client, "send_text", new_callable=AsyncMock):
+            with patch("orchestrator._extract_text_from_attachment",
+                       new_callable=AsyncMock, return_value={"text": ""}):
+                result = await _handle_attachment(payload, intent, "Vini")
+        assert result is not None
+        assert "Nao consegui extrair texto" in result["reply"]
+
+    @pytest.mark.asyncio
+    async def test_send_text_failure_does_not_block_handler(self):
+        """Se send_text falhar (evolution offline), handler continua."""
+        from orchestrator import _handle_attachment
+        payload = {
+            "instance": "jennifer",
+            "phone": "5511966830020",
+            "extra": {
+                "has_document": True,
+                "doc_mimetype": "application/pdf",
+                "doc_file_name": "x.pdf",
+                "remote_jid": "5511966830020@s.whatsapp.net",
+            },
+        }
+        intent = {"is_attachment": True, "is_attachment_file": True}
+        extracted = {"text": "x", "source_name": "x.pdf", "mimetype": "application/pdf", "raw_size": 1}
+        with patch("core.evolution_client.send_text", new_callable=AsyncMock,
+                   side_effect=Exception("evolution offline")):
+            with patch("orchestrator._extract_text_from_attachment",
+                       new_callable=AsyncMock, return_value=extracted):
+                with patch("orchestrator._persist_attachment",
+                           new_callable=AsyncMock,
+                           return_value={"status": "drive_individual"}):
+                    result = await _handle_attachment(payload, intent, "Vini")
+        assert result is not None
+        assert "Feito!" in result["reply"]
+
+
+class TestOrchestrateHandlesAttachment:
+    """F4d: orchestrate() invoca _handle_attachment quando has_document + is_attachment."""
+
+    @pytest.mark.asyncio
+    async def test_orchestrate_skips_attachment_when_no_document(self):
+        from orchestrator import orchestrate
+        from core import evolution_client
+        full_intent = {
+            "is_drive": True, "is_calendar": False, "is_email": False,
+            "is_web_search": False, "is_intimacy": False, "is_correction": False,
+            "is_gross": False, "is_assault_related": False, "is_runtime_status": False,
+        }
+        with patch.object(evolution_client, "send_text", new_callable=AsyncMock):
+            with patch("orchestrator._detect_intent", return_value=full_intent):
+                with patch("orchestrator.get_user", return_value={"phone": "5511966830020"}):
+                    with patch("orchestrator._resolve_agent_for_intent", return_value="manager-drive"):
+                        with patch("orchestrator.get_agent", return_value={"id": "manager-drive", "tools": []}):
+                            with patch("orchestrator._execute_deep_agent", new_callable=AsyncMock,
+                                       return_value={"reply": "ok drive", "delay_ms": 0,
+                                                     "presence": "composing",
+                                                     "metadata": {"agent_id": "manager-drive"}}) as mock_exec:
+                                with patch("orchestrator._schedule_indexing", side_effect=close_coroutine):
+                                    result = await orchestrate({
+                                        "instance": "Jennifer",
+                                        "phone": "5511966830020",
+                                        "text": "oi",
+                                        "sender_name": "Vini",
+                                        "extra": {},
+                                    })
+        assert mock_exec.called
+
+    @pytest.mark.asyncio
+    async def test_orchestrate_calls_handle_attachment_when_has_document(self):
+        from orchestrator import orchestrate
+        from core import evolution_client
+        with patch.object(evolution_client, "send_text", new_callable=AsyncMock):
+            with patch("orchestrator._detect_intent",
+                       return_value={"is_attachment": True, "is_attachment_save": True}):
+                with patch("orchestrator._handle_attachment",
+                           new_callable=AsyncMock,
+                           return_value={"reply": "Feito!",
+                                         "delay_ms": 0,
+                                         "presence": "composing",
+                                         "metadata": {"attachment": "rag_group"}}) as mock_handler:
+                    result = await orchestrate({
+                        "instance": "Jennifer",
+                        "phone": "5511966830020",
+                        "text": "memorize",
+                        "sender_name": "Vini",
+                        "extra": {
+                            "has_document": True,
+                            "doc_mimetype": "application/pdf",
+                            "doc_file_name": "teste.pdf",
+                        },
+                    })
+        assert mock_handler.called
+        assert result["reply"] == "Feito!"
+        assert result["metadata"]["attachment"] == "rag_group"
