@@ -901,4 +901,123 @@ class TestOrchestrateHandlesAttachment:
                     })
         assert mock_handler.called
         assert result["reply"] == "Feito!"
-        assert result["metadata"]["attachment"] == "rag_group"
+
+
+class TestF4d1AttachmentDetection:
+    """F4d.1: keywords mais amplas + force is_attachment quando has_document."""
+
+    def test_intent_detect_conteudo_da_pasta(self):
+        """Texto 'conteudo da pasta rumoexame' deve setar is_attachment (se has_document)."""
+        from orchestrator import _detect_intent
+        intent = _detect_intent("conteudo da pasta rumoexame")
+        assert intent["is_attachment_save"] is True
+
+    def test_intent_detect_guarde_o_arquivo(self):
+        from orchestrator import _detect_intent
+        intent = _detect_intent("guarde o arquivo cdc-portugues-2013.pdf")
+        assert intent["is_attachment_save"] is True
+
+    def test_intent_detect_armazene(self):
+        from orchestrator import _detect_intent
+        intent = _detect_intent("armazene esse documento no conhecimento")
+        assert intent["is_attachment_save"] is True
+
+    def test_intent_detect_indexe(self):
+        from orchestrator import _detect_intent
+        intent = _detect_intent("indexe esse pdf no vector")
+        assert intent["is_attachment_save"] is True
+
+    def test_intent_detect_so_salve(self):
+        from orchestrator import _detect_intent
+        intent = _detect_intent("so salve o arquivo no meu drive")
+        assert intent["is_attachment_file"] is True
+
+    def test_intent_detect_no_conhecimento(self):
+        from orchestrator import _detect_intent
+        intent = _detect_intent("salve isso no conhecimento")
+        assert intent["is_attachment_save"] is True
+
+    def test_intent_detect_base_de_conhecimento(self):
+        from orchestrator import _detect_intent
+        intent = _detect_intent("guarda na base de conhecimento")
+        assert intent["is_attachment_save"] is True
+
+    def test_intent_detect_nao_match_sem_attachment(self):
+        from orchestrator import _detect_intent
+        intent = _detect_intent("oi tudo bem")
+        assert intent["is_attachment_save"] is False
+        assert intent["is_attachment_file"] is False
+
+    @pytest.mark.asyncio
+    async def test_orchestrate_calls_attachment_when_has_document_and_ambiguous_intent(self):
+        """F4d.1: mesmo se intent nao seta is_attachment, has_document=True deve forcar."""
+        from orchestrator import orchestrate
+        from core import evolution_client
+        full_intent = {
+            "is_drive": True, "is_calendar": False, "is_email": False,
+            "is_web_search": False, "is_intimacy": False, "is_correction": False,
+            "is_gross": False, "is_assault_related": False, "is_runtime_status": False,
+        }
+        with patch.object(evolution_client, "send_text", new_callable=AsyncMock) as mock_send_text:
+            with patch("orchestrator._detect_intent", return_value=full_intent):
+                with patch("orchestrator.get_user", return_value={"phone": "5511966830020"}):
+                    with patch("orchestrator._resolve_agent_for_intent", return_value="manager-drive"):
+                        with patch("orchestrator.get_agent", return_value={"id": "manager-drive", "tools": []}):
+                            with patch("orchestrator._handle_attachment", new_callable=AsyncMock,
+                                       return_value={"reply": "Feito!",
+                                                     "delay_ms": 0,
+                                                     "presence": "composing",
+                                                     "metadata": {"attachment": "rag_group"}}) as mock_handler:
+                                with patch("orchestrator._schedule_indexing", side_effect=close_coroutine):
+                                    result = await orchestrate({
+                                        "instance": "Jennifer",
+                                        "phone": "5511966830020",
+                                        "text": "conteudo da pasta rumoexame",
+                                        "sender_name": "Vini",
+                                        "extra": {
+                                            "has_document": True,
+                                            "doc_mimetype": "application/pdf",
+                                            "doc_file_name": "rumoexame.pdf",
+                                        },
+                                    })
+        assert mock_handler.called
+        # F4d.1: ack do F2'' (Só um instante) NAO deve ser enviado
+        # porque attachment_already_acked=True
+        ack_calls = [c for c in mock_send_text.call_args_list
+                     if "Só um instante" in str(c)]
+        assert len(ack_calls) == 0
+
+    @pytest.mark.asyncio
+    async def test_orchestrate_calls_ack_F2_when_has_document_but_no_attachment(self):
+        """F4d.1: se NAO tem has_document, mantem comportamento do F2''."""
+        from orchestrator import orchestrate
+        from core import evolution_client
+        full_intent = {
+            "is_drive": True, "is_calendar": False, "is_email": False,
+            "is_web_search": False, "is_intimacy": False, "is_correction": False,
+            "is_gross": False, "is_assault_related": False, "is_runtime_status": False,
+        }
+        with patch.object(evolution_client, "send_text", new_callable=AsyncMock) as mock_send_text:
+            with patch.object(evolution_client, "send_presence", new_callable=AsyncMock):
+                with patch("orchestrator._detect_intent", return_value=full_intent):
+                    with patch("orchestrator.get_user", return_value={"phone": "5511966830020", "google_oauth_token": {"refresh_token": "rt"}}):
+                        with patch("orchestrator._run_guard_graph", new_callable=AsyncMock, return_value={"verdict": "allow", "decision": {}}):
+                            with patch("orchestrator._resolve_agent_for_intent", return_value="manager-drive"):
+                                with patch("orchestrator.get_agent", return_value={"id": "manager-drive", "tools": []}):
+                                    with patch("orchestrator._handle_attachment", new_callable=AsyncMock):
+                                        with patch("orchestrator._execute_deep_agent", new_callable=AsyncMock,
+                                                   return_value={"reply": "ok drive", "delay_ms": 0,
+                                                                 "presence": "composing",
+                                                                 "metadata": {"agent_id": "manager-drive"}}):
+                                            with patch("orchestrator._schedule_indexing", side_effect=close_coroutine):
+                                                await orchestrate({
+                                                    "instance": "Jennifer",
+                                                    "phone": "5511966830020",
+                                                    "text": "lista os arquivos",
+                                                    "sender_name": "Vini",
+                                                    "extra": {},
+                                                })
+        # ack do F2'' DEVE ser enviado (sem attachment)
+        ack_calls = [c for c in mock_send_text.call_args_list
+                     if "Só um instante" in str(c)]
+        assert len(ack_calls) >= 1

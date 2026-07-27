@@ -396,15 +396,32 @@ def _detect_intent(text: str) -> Dict[str, Any]:
     }
     attachment_save_kw = ("memorize", "memorizar", "memorizando", "guarde", "guardar",
                          "indexe", "indexar", "salve na base", "base de conhecimento",
-                         "knowledge base", "no conhecimento", "salva no conhecimento")
+                         "knowledge base", "no conhecimento", "salva no conhecimento",
+                         "armazene", "armazenar", "cache isso", "no vector", "no firestore",
+                         "leia isso", "leia e armazene", "leia e guarde",
+                         "salve isso", "salvar isso", "guarda isso", "guardar isso",
+                         "indexe isso", "indexar isso", "memorize isso", "memorizar isso",
+                         "conteudo do pdf", "conteudo do docx", "conteudo do xlsx",
+                         "conteudo da pasta", "conteudo do arquivo", "conteudo deste",
+                         "conteudo do doc", "pdf", "docx", "xlsx", "txt",
+                         "anexei", "anexo", "salvar no drive", "guarda no drive")
     attachment_file_kw = ("so salve", "só salve", "salva o arquivo", "salvar arquivo",
                           "guarda o arquivo", "manda pra mim", "envia pra mim",
-                          "apenas salve", "nao memorize", "não memorize")
+                          "apenas salve", "nao memorize", "não memorize",
+                          "so guarda", "só guarda", "apenas guarda",
+                          "conteudo do arquivo", "conteudo da pasta",
+                          "anexei", "anexo", "arquivo anexo", "pdf anexo")
     intent["is_attachment_save"] = any(_matches_keyword(normalized, keyword)
-                                      for keyword in attachment_save_kw)
+                                       for keyword in attachment_save_kw)
     intent["is_attachment_file"] = any(_matches_keyword(normalized, keyword)
-                                      for keyword in attachment_file_kw)
+                                       for keyword in attachment_file_kw)
     intent["is_attachment"] = intent["is_attachment_save"] or intent["is_attachment_file"]
+    # F4d.1: se has_document=True e nenhum flag setado, forçar is_attachment=True
+    # para que o handler de attachment seja chamado e o user possa
+    # responder com 'memorizar' ou 'salvar'.
+    _has_doc = False
+    # Checar através de payload, não de kwargs — heurística leve
+    intent["is_attachment"] = intent["is_attachment"] or _has_doc
     for rule in _get_routing_rules():
         agent_id = rule.get("agent_id", "")
         keywords = rule.get("keywords", [])
@@ -1113,9 +1130,13 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
     intent = _detect_intent(masked_text)
     path = [{"step": 1, "phase": "intent_detect", "details": {key: value for key, value in intent.items() if value}}]
 
+    attachment_already_acked = False
+    if extra.get("has_document") and not intent.get("is_attachment"):
+        intent["is_attachment"] = True
     if extra.get("has_document") and intent.get("is_attachment"):
         attachment_result = await _handle_attachment(payload, intent, sender_name)
         if attachment_result is not None:
+            attachment_already_acked = True
             path.append({"step": 2, "phase": "attachment_handler",
                          "status": attachment_result.get("metadata", {}).get("attachment", "unknown")})
             return await _finalize_orchestration(
@@ -1266,7 +1287,7 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
                     },
                 }
 
-            if guard_verdict == "allow" and _is_personal_intent(intent):
+            if guard_verdict == "allow" and _is_personal_intent(intent) and not attachment_already_acked:
                 try:
                     ack_map = {
                         "calendar": "Só um instante. Vou ver sua agenda... 📅",
