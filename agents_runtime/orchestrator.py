@@ -377,13 +377,15 @@ def _prefetch_tone_guide(intent: Dict[str, Any]) -> str:
     if intent.get("is_email"):
         return (
             "Formate estes dados como uma conversa com um amigo. "
-            "Exemplo: 'Achei 3 emails importantes! A Clarissa te mandou uma mensagem ontem "
-            "sobre o projeto. Quer que eu leia pra você? 📧'\n"
+            "Para listas, use tabela ASCII em bloco ``` com colunas: "
+            "Remetente | Assunto | Data. "
+            "Exemplo: 'Achei 3 emails! 📧'\n"
         )
     return (
         "Formate estes dados como uma conversa com um amigo. "
-        "Exemplo: 'Encontrei esses arquivos pra você! Tem uma ata de 21/07 e um "
-        "relatório de custos. Quer que eu abra algum? 📁'\n"
+        "Para listas de arquivos, use tabela ASCII em bloco ``` com colunas: "
+        "Nome | Tipo | Modificado. "
+        "Exemplo: 'Encontrei estes arquivos! 📁'\n"
     )
 
 

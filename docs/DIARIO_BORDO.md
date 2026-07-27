@@ -1970,3 +1970,55 @@ Conclusao: o graph nunca classifica em producao. So o orchestrator decide.
 ### Proximos passos
 
 Merge em `test` para deploy via Cloud Build.
+
+---
+
+## 27/07/2026 — Rollback + F1'' + F2'' (correção do claim + UX)
+
+### Contexto
+
+O deploy da F1 original (commit `efe38cf`) quebrou todas as mensagens:
+`NameError: name 'firestore' is not defined` em `message_ledger.py:199`.
+O `@firestore.transactional` usava `firestore` sem importar o modulo.
+
+Foram necessarias **3 tentativas** de correção:
+- F1: `@firestore.transactional` sem import → `NameError`
+- F1': `@transaction.transactional` (usando instancia) → `AttributeError`
+- F1'': `from google.cloud import firestore` + `@firestore.transactional` → ✅
+
+Verificação local confirmou:
+```
+hasattr(firestore.Transaction(), 'transactional') → False
+hasattr(firestore, 'transactional') → True
+```
+
+### Rollback (R0)
+
+Rollback para `53e9d0e` (ultimo estado funcional). Jennifer voltou a responder.
+
+### Fases reaplicadas com sucesso
+
+| Fase | Commit | O que | Suite | Status |
+|---|---|---|---|---|
+| F1'' | `9111729` | claim() com @firestore.transactional + retry + test_message_ledger.py | 404 ✅ | ✅ Deployado + testado WhatsApp |
+| F2' + F2'' | `90b608d` + (proximo) | ack + humanizado + tabelas ASCII nos prompts | 404 ✅ | Em andamento |
+
+### Melhorias da F2''
+
+- `manager-email`: instruído a formatar emails como tabela (Remetente | Assunto | Data)
+- `manager-drive`: instruído a formatar arquivos/drives como tabela (Nome | Tipo | Modificado)
+- `_prefetch_tone_guide`: exemplos de tabela para emails e drive
+
+### Licão aprendida: decorators + testes
+
+Testes unitários não detectam bugs de importação porque `_get_firestore()` é mockado
+e retorna None → `claim()` nunca chega no decorator. Solução: `test_message_ledger.py`
+com teste de smoke que verifica o decorator não lança exceção.
+
+### Pendências
+
+| Fase | O que |
+|---|---|
+| F3' | Group drive isolation + privacy guard |
+| F4' | Group RAG |
+| F5' | narrowing + list_my_drives + pró-atividade |
