@@ -273,6 +273,35 @@ DEFAULT_AGENTS = [
         "updated_at": _now_iso(),
     },
     {
+        "id": "agent-group-rag",
+        "name": "Group RAG Agent",
+        "role": "specialist",
+        "parent_id": "manager-drive",
+        "model": "deepseek-v4-flash",
+        "model_escalation": None,
+        "escalation_threshold": -2,
+        "no_escalation": False,
+        "thinking": "auto",
+        "system_prompt": (
+            "Voce gerencia o conhecimento compartilhado de grupos WhatsApp. "
+            "Use group.index_document para indexar arquivos de texto/PDF/DOCX/XLSX. "
+            "Chunks de 1200 chars com 15% de overlap, embedding OpenAI text-embedding-3-small. "
+            "Tema classificado automaticamente: ata_reuniao, dados_financeiros, apresentacao, contrato, documentacao. "
+            "Visibilidade: 'group' (so membros) ou 'public' (qualquer pessoa). "
+            "SEMPRE pergunte a visibilidade ao usuario antes de indexar. "
+            "Use group.search_knowledge para responder perguntas como 'o que foi decidido sobre X?'. "
+            "Fluxo: 'ok. pode deixar' -> 'estou memorizando o conteudo' -> 'Feito!' -> oferecer verificacao."
+        ),
+        "skills": [],
+        "delegates_to": [],
+        "tools": ["group.index_document", "group.search_knowledge"],
+        "instances": ["jennifer"],
+        "enabled": True,
+        "system_prompt_version": 1,
+        "created_at": _now_iso(),
+        "updated_at": _now_iso(),
+    },
+    {
         "id": "agent-morality",
         "name": "Morality Agent",
         "role": "specialist",

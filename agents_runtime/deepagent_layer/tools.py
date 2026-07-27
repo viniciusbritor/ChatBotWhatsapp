@@ -34,6 +34,8 @@ def _build_langchain_tools_for(manager_id: str) -> List[Any]:
         return _build_email_tools()
     if manager_id == "manager-drive":
         return _build_drive_tools()
+    if manager_id == "manager-group-rag":
+        return _build_group_rag_tools()
     if manager_id == "manager-web":
         return _build_web_tools()
     logger.warning("unknown manager_id=%s", manager_id)
@@ -312,6 +314,66 @@ def _build_drive_tools() -> List[Any]:
         )
 
     return [search_drive_files, list_drive_folder, create_drive_folder, read_drive_file_content, deep_search_drive_files]
+
+
+def _build_group_rag_tools() -> List[Any]:
+    from tools import group
+
+    @tool
+    async def index_group_document(
+        phone: str,
+        group_jid: str,
+        text: str,
+        visibility: str,
+        source_name: str = "",
+        force_overwrite: bool = False,
+    ) -> Dict[str, Any]:
+        """Index a document into group-level or public RAG.
+
+        Use AFTER reading a file (drive.read_file_content) and asking the user
+        whether it should be group-only or public.
+
+        Chunks at 1200 chars x 15% overlap. Embeds via OpenAI text-embedding-3-small.
+        Auto-classifies theme: ata_reuniao, dados_financeiros, apresentacao,
+        contrato, documentacao. If returns {"needs_overwrite": true}, ask
+        user confirmation and call again with force_overwrite=True.
+
+        Args:
+            phone: User phone.
+            group_jid: WhatsApp group JID.
+            text: Document text content.
+            visibility: "group" or "public".
+            source_name: Original file name.
+            force_overwrite: Set True if user confirmed overwriting existing doc.
+        """
+        return await group.index_group_document(
+            phone=phone, group_jid=group_jid, text=text,
+            visibility=visibility, source_name=source_name,
+            force_overwrite=force_overwrite,
+        )
+
+    @tool
+    async def search_group_knowledge(
+        group_jid: str,
+        query: str,
+        limit: int = 5,
+    ) -> Dict[str, Any]:
+        """Search group and public RAG knowledge base.
+
+        Use when someone asks "what was decided about X?" or
+        "do we have any document about Y?". Returns top-N semantically
+        similar chunks filtered by group membership (or visibility=public).
+
+        Args:
+            group_jid: WhatsApp group JID.
+            query: Search text.
+            limit: Max results (default 5).
+        """
+        return await group.search_group_knowledge(
+            group_jid=group_jid, query=query, limit=limit,
+        )
+
+    return [index_group_document, search_group_knowledge]
 
 
 def _build_web_tools() -> List[Any]:

@@ -334,6 +334,47 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
             "required": ["agent_id", "target", "patch_text"],
         },
     },
+    "group.index_document": {
+        "function": group.index_group_document,
+        "implementation": "group",
+        "description": (
+            "Indexa um documento (PDF, DOCX, planilha) no conhecimento do grupo. "
+            "Faz chunking 1200 chars x 15% overlap, embedding OpenAI text-embedding-3-small, "
+            "classifica tema (ata_reuniao, dados_financeiros, apresentacao, contrato, documentacao). "
+            "Use apos ler o arquivo com drive.read_file_content. "
+            "Pede consentimento de visibilidade: 'apenas grupo' ou 'publico'."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string", "description": "Telefone do usuario"},
+                "group_jid": {"type": "string", "description": "JID do grupo WhatsApp"},
+                "text": {"type": "string", "description": "Conteudo do documento"},
+                "visibility": {"type": "string", "description": "'group' ou 'public'"},
+                "source_name": {"type": "string", "description": "Nome do arquivo original"},
+                "force_overwrite": {"type": "boolean", "description": "Sobrescrever se ja existe (default false)"},
+            },
+            "required": ["phone", "group_jid", "text", "visibility"],
+        },
+    },
+    "group.search_knowledge": {
+        "function": group.search_group_knowledge,
+        "implementation": "group",
+        "description": (
+            "Busca no conhecimento RAG do grupo e publico. "
+            "Retorna os top-N trechos mais semanticamente similares a query. "
+            "Use quando o usuario pergunta 'o que foi decidido sobre X?' ou 'tem algum documento sobre Y?'."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "group_jid": {"type": "string", "description": "JID do grupo WhatsApp"},
+                "query": {"type": "string", "description": "Texto de busca"},
+                "limit": {"type": "integer", "description": "Maximo de resultados (default 5)"},
+            },
+            "required": ["group_jid", "query"],
+        },
+    },
     "web.fetch_url": {
         "function": web_search.fetch_url,
         "implementation": "web_search",

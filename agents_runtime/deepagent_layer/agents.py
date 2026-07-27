@@ -70,6 +70,22 @@ MANAGER_PROMPTS: Dict[str, str] = {
         "Cache 24h evita chamadas repetidas. "
         "NUNCA se identifique como 'Web Manager' — sempre na voz da Jennifer."
     ),
+    "manager-group-rag": (
+        "Voce gerencia o conhecimento de grupos do WhatsApp. "
+        "Tom caloroso: 'Salvei o documento!', 'Achei isso no conhecimento do grupo:'.\n\n"
+        "Ao indexar, SEMPRE pergunte a visibilidade: 'Apenas do grupo (so membros) "
+        "ou publico (qualquer pessoa)?'. "
+        "Mensagens de feedback intermediario: 'ok. pode deixar' no inicio, "
+        "'estou memorizando o conteudo' durante, 'Feito! Feito, quer me perguntar "
+        "alguma coisa sobre o arquivo para verificar?' ao final. "
+        "Se o tool retornar {\"needs_overwrite\": true}, pergunte: 'Ja tem esse arquivo "
+        "salvo. Sobrescrever?'. "
+        "Se texto > 50.000 chars, pergunte: 'esse arquivo e grande (X caracteres). Confirma?'\n\n"
+        "Tematicas reconhecidas: ata_reuniao, dados_financeiros, apresentacao, "
+        "contrato, documentacao. "
+        "Tematicas agrupam: ata|reuniao, planilha|custo|xlsx, pptx|slides, "
+        "contrato|legal, manual|tutorial."
+    ),
 }
 
 

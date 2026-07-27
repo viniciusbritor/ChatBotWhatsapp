@@ -1,8 +1,12 @@
 """Group tools - membership and welcome message management."""
-import os
+import hashlib
 import logging
+import os
+import re
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
+
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -308,3 +312,271 @@ async def get_group_info(group_jid: str) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"get_group_info error: {e}")
         return {"error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Group RAG (F4): index/search knowledge per group with OpenAI embeddings
+# ---------------------------------------------------------------------------
+
+_GROUP_KNOWLEDGE_COLLECTION = "group-knowledge-v2"
+_EMBEDDING_MODEL = "text-embedding-3-small"
+_EMBEDDING_DIM = 1536
+_CHUNK_MAX_CHARS = 1200
+_CHUNK_OVERLAP_PCT = 15
+_MAX_FILE_CHARS = 50000
+_MAX_CHUNKS_PER_FILE = 100
+_THEME_HEURISTICS = [
+    (r"ata|reuniao|minutes", "ata_reuniao"),
+    (r"contrato|legal|procuracao", "contrato"),
+    (r"planilha|custo|expense|xlsx|csv", "dados_financeiros"),
+    (r"apresentacao|pptx|slides", "apresentacao"),
+    (r"manual|tutorial|docs|guia", "documentacao"),
+]
+
+
+def _group_hash(group_jid: str) -> str:
+    return hashlib.sha256(group_jid.encode("utf-8")).hexdigest()[:32]
+
+
+def _chunk_text_smart(text: str, max_chars: int = _CHUNK_MAX_CHARS,
+                       overlap_pct: int = _CHUNK_OVERLAP_PCT) -> List[str]:
+    chunks: List[str] = []
+    overlap = int(max_chars * overlap_pct / 100)
+    start = 0
+    while start < len(text):
+        end = min(start + max_chars, len(text))
+        if end < len(text):
+            for sep in ["\n\n", "\n", ". ", "? ", "! "]:
+                last_sep = text.rfind(sep, start, end)
+                if last_sep > start + max_chars // 2:
+                    end = last_sep + len(sep)
+                    break
+        chunk = text[start:end].strip()
+        if chunk:
+            chunks.append(chunk)
+        start = end - overlap if end < len(text) else end
+    return chunks
+
+
+def _embed_text(text: str, api_key: str = "",
+                 max_retries: int = 3) -> Optional[List[float]]:
+    if not text or not text.strip():
+        return None
+    key = api_key or os.getenv("OPENAI_API_KEY", "").strip()
+    if not key:
+        logger.warning("group_rag: OPENAI_API_KEY not set for embedding")
+        return None
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(
+                "https://api.openai.com/v1/embeddings",
+                json={"model": _EMBEDDING_MODEL, "input": text},
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json",
+                },
+                timeout=15,
+            )
+            response.raise_for_status()
+            data = response.json()
+            return list(data["data"][0]["embedding"])
+        except Exception as exc:
+            last_error = exc
+            if attempt < max_retries - 1:
+                import time as _t
+                _t.sleep(1 * (2 ** attempt))
+    logger.warning("group_rag embed failed after retries: %s", last_error)
+    return None
+
+
+def _classify_theme(source_name: str, text: str) -> str:
+    fn = (source_name or "").lower()
+    for pat, theme in _THEME_HEURISTICS:
+        if re.search(pat, fn):
+            return theme
+    try:
+        from langchain_openai import ChatOpenAI
+        api_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
+        base_url = os.getenv("DEEPSEEK_BASE_URL",
+                              "https://api.deepseek.com/v1").strip()
+        if not api_key:
+            return "outros"
+        llm = ChatOpenAI(
+            model="deepseek-v4-flash",
+            api_key=api_key,
+            base_url=base_url,
+            temperature=0,
+            max_tokens=15,
+            timeout=5,
+        )
+        sample = (text or "")[:500]
+        resp = llm.invoke(
+            f"Responda apenas com 1-3 palavras em snake_case (ex: ata_reuniao, "
+            f"contrato, dados_financeiros, documentacao). Nome: {source_name}. "
+            f"Trecho: {sample}"
+        )
+        raw = (resp.content if hasattr(resp, "content") else str(resp)).strip().lower()
+        cleaned = re.sub(r"[^a-z0-9_]", "", raw.replace(" ", "_"))[:30]
+        return cleaned or "outros"
+    except Exception:
+        return "outros"
+
+
+async def _detect_duplicate(db, gh: str, source_name: str) -> Optional[str]:
+    try:
+        docs = (
+            db.collection(_GROUP_KNOWLEDGE_COLLECTION)
+            .where("group_hash", "==", gh)
+            .where("source_name", "==", source_name)
+            .limit(1)
+            .stream()
+        )
+        for d in docs:
+            return d.id
+    except Exception:
+        return None
+    return None
+
+
+async def index_group_document(
+    phone: str,
+    group_jid: str,
+    text: str,
+    visibility: str,
+    source_name: str = "",
+    force_overwrite: bool = False,
+) -> Dict[str, Any]:
+    if not text or not group_jid:
+        return {"error": "text_and_group_jid_required"}
+    if visibility not in ("group", "public"):
+        return {"error": "visibility_must_be_group_or_public"}
+    if len(text) > _MAX_FILE_CHARS:
+        return {"error": "file_too_large",
+                "size": len(text), "limit": _MAX_FILE_CHARS}
+
+    db = _get_firestore()
+    if db is None:
+        return {"error": "firestore_unavailable"}
+
+    gh = _group_hash(group_jid)
+
+    existing_id = await _detect_duplicate(db, gh, source_name)
+    if existing_id and not force_overwrite:
+        return {"needs_overwrite": True,
+                "existing_doc_id": existing_id,
+                "source_name": source_name}
+
+    if existing_id and force_overwrite:
+        try:
+            old_docs = (
+                db.collection(_GROUP_KNOWLEDGE_COLLECTION)
+                .where("group_hash", "==", gh)
+                .where("source_name", "==", source_name)
+                .stream()
+            )
+            for d in old_docs:
+                d.reference.delete()
+        except Exception as e:
+            logger.warning("overwrite delete failed: %s", e)
+
+    chunks = _chunk_text_smart(text)
+    if not chunks:
+        return {"error": "no_content_to_index"}
+    if len(chunks) > _MAX_CHUNKS_PER_FILE:
+        return {"warning": "too_many_chunks",
+                "chunk_count": len(chunks),
+                "limit": _MAX_CHUNKS_PER_FILE,
+                "partial_indexed": _MAX_CHUNKS_PER_FILE,
+                "chunks_to_index": _MAX_CHUNKS_PER_FILE}
+
+    theme = _classify_theme(source_name, text)
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    indexed = 0
+    step = _CHUNK_MAX_CHARS - int(_CHUNK_MAX_CHARS * _CHUNK_OVERLAP_PCT / 100)
+
+    from google.cloud.firestore import Vector
+    for i, chunk in enumerate(chunks):
+        embedding = _embed_text(chunk, api_key)
+        if embedding is None:
+            continue
+        doc_id = hashlib.sha256(
+            f"group:{gh}:{source_name}:{i}:{chunk[:40]}".encode("utf-8")
+        ).hexdigest()[:32]
+        doc = {
+            "text": chunk,
+            "source_name": source_name,
+            "theme": theme,
+            "visibility": visibility,
+            "group_hash": gh if visibility == "group" else "",
+            "group_jid": group_jid if visibility == "group" else "",
+            "indexed_by": phone,
+            "chunk_index": i,
+            "chunk_total": len(chunks),
+            "chunk_overlap": int(_CHUNK_MAX_CHARS * _CHUNK_OVERLAP_PCT / 100),
+            "char_start": i * step,
+            "char_end": i * step + len(chunk),
+            "created_at": _now_iso(),
+            "vector_embedding": Vector(embedding),
+        }
+        try:
+            db.collection(_GROUP_KNOWLEDGE_COLLECTION).document(doc_id).set(doc)
+            indexed += 1
+        except Exception as e:
+            logger.warning("index_group_document chunk %d error: %s", i, e)
+
+    return {
+        "indexed": indexed,
+        "total_chunks": len(chunks),
+        "theme": theme,
+        "visibility": visibility,
+        "collection": _GROUP_KNOWLEDGE_COLLECTION,
+        "overwrote": bool(existing_id and force_overwrite),
+    }
+
+
+async def search_group_knowledge(
+    group_jid: str,
+    query: str,
+    limit: int = 5,
+) -> Dict[str, Any]:
+    if not query or not group_jid:
+        return {"results": [], "count": 0}
+    db = _get_firestore()
+    if db is None:
+        return {"results": [], "count": 0}
+    query_embedding = _embed_text(query)
+    if query_embedding is None:
+        return {"results": [], "count": 0, "error": "embedding_failed"}
+    gh = _group_hash(group_jid)
+    from google.cloud.firestore import Vector
+    vector_value = Vector(query_embedding)
+    try:
+        results = db.collection(_GROUP_KNOWLEDGE_COLLECTION).find_nearest(
+            vector_field="vector_embedding",
+            query_vector=vector_value,
+            distance_measure="COSINE",
+            limit=limit * 3,
+            return_document_distance=True,
+        ).get()
+    except Exception:
+        return {"results": [], "count": 0}
+    filtered = []
+    for doc in results:
+        data = doc.to_dict()
+        vis = data.get("visibility", "")
+        doc_gh = data.get("group_hash", "")
+        if vis == "public" or (vis == "group" and doc_gh == gh):
+            dist = getattr(doc, "_distance", 1.0)
+            filtered.append({
+                "text": data.get("text", ""),
+                "source_name": data.get("source_name", ""),
+                "theme": data.get("theme", ""),
+                "score": round(max(0, 1.0 - dist), 3),
+            })
+        if len(filtered) >= limit:
+            break
+    return {
+        "results": sorted(filtered, key=lambda r: r["score"], reverse=True),
+        "count": len(filtered),
+    }
