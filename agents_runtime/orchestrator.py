@@ -1299,10 +1299,14 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
                     )
                     ack_text = ack_map.get(ack_intent, "Só um instante... ⏳")
                     from core.evolution_client import send_presence, send_text
+                    # delay_ms > 0 faz o WhatsApp mostrar "digitando..." (typing
+                    # indicator) antes de exibir a mensagem. Sem isso, a
+                    # resposta aparece instantaneamente e nao parece humana.
+                    ack_delay_ms = max(1500, calculate_delay_ms(ack_text))
                     asyncio.create_task(send_presence(instance, phone, "composing", remote_jid=extra.get("remote_jid", "")))
                     asyncio.create_task(send_text(
                         instance=instance, phone=phone, text=ack_text,
-                        delay_ms=0, presence="composing",
+                        delay_ms=ack_delay_ms, presence="composing",
                         remote_jid=extra.get("remote_jid", ""),
                     ))
                 except Exception:

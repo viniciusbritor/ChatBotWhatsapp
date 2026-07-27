@@ -440,3 +440,79 @@ def test_extract_video_without_text_still_returns_none():
         },
     }
     assert extract_envelope(payload) is None
+
+
+def test_extract_document_file_length_as_proto_long_dict():
+    """F4d.2: fileLength como dict (proto Long do Baileys) e normalizado para int."""
+    payload = {
+        "event": "MESSAGES_UPSERT",
+        "instance": "jennifer",
+        "data": {
+            "key": {
+                "remoteJid": "5511966830020@s.whatsapp.net",
+                "fromMe": False,
+                "id": "DOC_LONG_011",
+            },
+            "message": {
+                "documentMessage": {
+                    "mimetype": "application/pdf",
+                    "fileName": "cdc.pdf",
+                    "fileLength": {"low": 12345, "high": 0, "unsigned": False},
+                }
+            },
+        },
+    }
+    envelope = extract_envelope(payload)
+    assert envelope is not None
+    assert envelope["extra"]["has_document"] is True
+    assert envelope["extra"]["doc_file_length"] == 12345
+    assert envelope["extra"]["doc_file_name"] == "cdc.pdf"
+
+
+def test_extract_document_file_length_as_int():
+    """F4d.2: fileLength como int simples continua funcionando."""
+    payload = {
+        "event": "MESSAGES_UPSERT",
+        "instance": "jennifer",
+        "data": {
+            "key": {
+                "remoteJid": "5511966830020@s.whatsapp.net",
+                "fromMe": False,
+                "id": "DOC_INT_012",
+            },
+            "message": {
+                "documentMessage": {
+                    "mimetype": "application/pdf",
+                    "fileName": "a.pdf",
+                    "fileLength": 12345,
+                }
+            },
+        },
+    }
+    envelope = extract_envelope(payload)
+    assert envelope is not None
+    assert envelope["extra"]["doc_file_length"] == 12345
+
+
+def test_extract_document_file_length_missing():
+    """F4d.2: fileLength ausente não quebra o extract_envelope."""
+    payload = {
+        "event": "MESSAGES_UPSERT",
+        "instance": "jennifer",
+        "data": {
+            "key": {
+                "remoteJid": "5511966830020@s.whatsapp.net",
+                "fromMe": False,
+                "id": "DOC_NO_LEN_013",
+            },
+            "message": {
+                "documentMessage": {
+                    "mimetype": "application/pdf",
+                    "fileName": "a.pdf",
+                }
+            },
+        },
+    }
+    envelope = extract_envelope(payload)
+    assert envelope is not None
+    assert envelope["extra"]["doc_file_length"] == 0

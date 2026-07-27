@@ -107,7 +107,19 @@ def extract_envelope(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         extra["has_document"] = True
         extra["doc_mimetype"] = str(doc_msg.get("mimetype") or "application/octet-stream")
         extra["doc_file_name"] = str(doc_msg.get("fileName") or "document")
-        extra["doc_file_length"] = int(doc_msg.get("fileLength") or 0)
+        # Evolution v2.3.7 pode enviar fileLength como dict (proto Long
+        # do WhatsApp Baileys: {low: N, high: M, unsigned: bool}) ou como
+        # int/str. Normalizar para int.
+        raw_length = doc_msg.get("fileLength")
+        if isinstance(raw_length, dict):
+            # proto Long: low + high * 2**32
+            raw_length = raw_length.get("low", 0) + raw_length.get("high", 0) * (2 ** 32)
+        elif raw_length is None:
+            raw_length = 0
+        try:
+            extra["doc_file_length"] = int(raw_length)
+        except (TypeError, ValueError):
+            extra["doc_file_length"] = 0
         extra["doc_caption"] = str(doc_msg.get("caption") or "")
         extra["doc_url"] = str(doc_msg.get("url") or "")
         extra["doc_direct_path"] = str(doc_msg.get("directPath") or "")

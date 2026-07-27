@@ -1021,3 +1021,10 @@ class TestF4d1AttachmentDetection:
         ack_calls = [c for c in mock_send_text.call_args_list
                      if "Só um instante" in str(c)]
         assert len(ack_calls) >= 1
+        # F4d.2: delay_ms > 0 para typing indicator aparecer no WhatsApp
+        if ack_calls:
+            call_kwargs = ack_calls[0].kwargs
+            assert call_kwargs.get("delay_ms", 0) > 0, (
+                f"ack deve ter delay_ms > 0 para WhatsApp mostrar 'digitando...', "
+                f"recebido delay_ms={call_kwargs.get('delay_ms', 0)}"
+            )
