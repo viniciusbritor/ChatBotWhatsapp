@@ -15,10 +15,12 @@ import os
 import re
 import json
 import copy
+import base64
 import logging
 import time
 import asyncio
 import unicodedata
+import io
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, List
 
@@ -264,6 +266,17 @@ def _detect_intent(text: str) -> Dict[str, Any]:
         "is_web_search": explicit_url or any(_matches_keyword(normalized, keyword) for keyword in WEB_KEYWORDS),
         "is_intimacy": any(_matches_keyword(normalized, keyword) for keyword in INTIMACY_KEYWORDS),
     }
+    attachment_save_kw = ("memorize", "memorizar", "memorizando", "guarde", "guardar",
+                         "indexe", "indexar", "salve na base", "base de conhecimento",
+                         "knowledge base", "no conhecimento", "salva no conhecimento")
+    attachment_file_kw = ("so salve", "só salve", "salva o arquivo", "salvar arquivo",
+                          "guarda o arquivo", "manda pra mim", "envia pra mim",
+                          "apenas salve", "nao memorize", "não memorize")
+    intent["is_attachment_save"] = any(_matches_keyword(normalized, keyword)
+                                      for keyword in attachment_save_kw)
+    intent["is_attachment_file"] = any(_matches_keyword(normalized, keyword)
+                                      for keyword in attachment_file_kw)
+    intent["is_attachment"] = intent["is_attachment_save"] or intent["is_attachment_file"]
     for rule in _get_routing_rules():
         agent_id = rule.get("agent_id", "")
         keywords = rule.get("keywords", [])
@@ -365,6 +378,157 @@ def _extract_group_jid(payload: Dict[str, Any]) -> str:
     if "@g.us" in str(remote_jid):
         return remote_jid.split("@")[0] + "@g.us"
     return ""
+
+
+async def _download_attachment_bytes(envelope: Dict[str, Any]) -> Optional[bytes]:
+    """Baixa attachment do envelope: base64 inline primeiro, depois POST sob demanda."""
+    extra = envelope.get("extra", {})
+    doc_b64 = extra.get("doc_base64", "")
+    if doc_b64:
+        try:
+            return base64.b64decode(doc_b64)
+        except Exception as exc:
+            logger.warning("attachment: base64 inline decode failed: %s", exc)
+    message_id = envelope.get("message_id", "")
+    instance = envelope.get("instance", "")
+    remote_jid = extra.get("remote_jid", "")
+    if message_id and instance:
+        try:
+            from core.evolution_client import get_base64_from_media_message
+            result = await get_base64_from_media_message(
+                instance=instance,
+                message_id=message_id,
+                remote_jid=remote_jid,
+            )
+            doc_b64 = result.get("base64", "")
+            if doc_b64:
+                return base64.b64decode(doc_b64)
+        except Exception as exc:
+            logger.warning("attachment: get_base64_from_media_message failed: %s", exc)
+    return None
+
+
+async def _extract_text_from_attachment(
+    envelope: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Baixa attachment e extrai texto por mimetype.
+
+    Returns:
+        {"text": str, "source_name": str, "mimetype": str, "raw_size": int}
+        ou None se falhar.
+    """
+    extra = envelope.get("extra", {})
+    if not extra.get("has_document"):
+        return None
+    mimetype = (extra.get("doc_mimetype") or "").lower()
+    source_name = extra.get("doc_file_name") or "document"
+    raw = await _download_attachment_bytes(envelope)
+    if raw is None:
+        return None
+    text = ""
+    try:
+        if "pdf" in mimetype:
+            from pypdf import PdfReader
+            reader = PdfReader(io.BytesIO(raw))
+            text = "\n".join((page.extract_text() or "") for page in reader.pages)
+        elif "wordprocessingml" in mimetype or "msword" in mimetype:
+            from docx import Document
+            doc = Document(io.BytesIO(raw))
+            text = "\n".join(p.text for p in doc.paragraphs if p.text)
+        elif "spreadsheetml" in mimetype or "excel" in mimetype:
+            from openpyxl import load_workbook
+            wb = load_workbook(io.BytesIO(raw), data_only=True, read_only=True)
+            chunks = []
+            for sheet in wb.worksheets:
+                chunks.append(f"--- {sheet.title} ---")
+                for row in sheet.iter_rows(values_only=True):
+                    line = ",".join("" if v is None else str(v) for v in row)
+                    chunks.append(line)
+            text = "\n".join(chunks)
+        else:
+            try:
+                text = raw.decode("utf-8", errors="replace")
+            except Exception:
+                text = ""
+    except Exception as exc:
+        logger.warning("attachment: text extract failed mimetype=%s err=%s", mimetype, exc)
+        return None
+    return {
+        "text": text,
+        "source_name": source_name,
+        "mimetype": mimetype,
+        "raw_size": len(raw),
+    }
+
+
+async def _persist_attachment(
+    envelope: Dict[str, Any],
+    extracted: Dict[str, Any],
+    save_to_rag: bool,
+) -> Dict[str, Any]:
+    """Persiste attachment: RAG (group ou owner) se save_to_rag, senão Drive.
+
+    Detecta is_group no envelope. Se is_group:
+        - save_to_rag=True → index_group_document
+        - save_to_rag=False → upload no drive_folder do grupo
+    Se individual:
+        - save_to_rag=True → upload_file no Meu Drive (não temos agent-knowledge-v2 individual
+          configurado para attachments; salvar como arquivo e indexar para o RAG em F5+)
+        - save_to_rag=False → upload_file no Meu Drive
+    """
+    phone = envelope.get("phone", "")
+    is_group = envelope.get("extra", {}).get("is_group", False)
+    text = extracted.get("text", "")
+    source_name = extracted.get("source_name", "document")
+    mimetype = extracted.get("mimetype", "")
+    if not text:
+        return {"error": "no_text_extracted", "mimetype": mimetype}
+    if is_group:
+        if save_to_rag:
+            try:
+                from tools.group import index_group_document
+                group_jid = _extract_group_jid(envelope)
+                result = await index_group_document(
+                    phone=phone,
+                    group_jid=group_jid,
+                    text=text,
+                    visibility="group",
+                    source_name=source_name,
+                )
+                return {"status": "rag_group", "index_result": result,
+                        "source_name": source_name}
+            except Exception as exc:
+                logger.warning("attachment: index_group_document failed: %s", exc)
+                return {"error": "rag_index_failed", "detail": str(exc)}
+        else:
+            try:
+                from tools.google_drive import get_group_drive_folder
+                group_jid = _extract_group_jid(envelope)
+                folder_id = await get_group_drive_folder(group_jid)
+                if not folder_id:
+                    return {"error": "no_group_folder", "group_jid": group_jid}
+                from tools.google_drive import upload_file
+                result = await upload_file(
+                    phone=phone, folder_id=folder_id,
+                    filename=source_name, content=text, mime_type=mimetype,
+                )
+                return {"status": "drive_group", "upload_result": result,
+                        "source_name": source_name}
+            except Exception as exc:
+                logger.warning("attachment: upload_file group failed: %s", exc)
+                return {"error": "drive_upload_failed", "detail": str(exc)}
+    else:
+        try:
+            from tools.google_drive import upload_file
+            result = await upload_file(
+                phone=phone, folder_id="root",
+                filename=source_name, content=text, mime_type=mimetype,
+            )
+            return {"status": "drive_individual", "upload_result": result,
+                    "source_name": source_name}
+        except Exception as exc:
+            logger.warning("attachment: upload_file individual failed: %s", exc)
+            return {"error": "drive_upload_failed", "detail": str(exc)}
 
 
 def _prefetch_tone_guide(intent: Dict[str, Any]) -> str:

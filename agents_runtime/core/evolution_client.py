@@ -214,6 +214,46 @@ async def fetch_instance_phones(instance: str) -> List[str]:
     return [digits] if digits else []
 
 
+async def get_base64_from_media_message(
+    instance: str,
+    message_id: str,
+    remote_jid: str = "",
+) -> Dict[str, Any]:
+    """Fetch media (audio, image, document) as base64 via Evolution API v2.3.7.
+
+    Endpoint: POST /chat/getBase64FromMediaMessage/{instance}
+    Body: {message: {key: {id, remoteJid}}}
+    Returns: {base64, mimetype, fileName, mediaType, ...}
+    """
+    if not instance or not message_id:
+        raise EvolutionDeliveryError("invalid_get_base64_request")
+    base_url, api_key = _config()
+    instance = _resolve_instance_name() if instance.lower() == (os.getenv("INSTANCE") or "jennifer").lower() else instance
+    payload = {
+        "message": {
+            "key": {
+                "id": message_id,
+                "remoteJid": remote_jid,
+            }
+        },
+        "convertToMp4": False,
+    }
+    async with httpx.AsyncClient(timeout=_request_timeout(60)) as client:
+        response = await client.post(
+            f"{base_url}/chat/getBase64FromMediaMessage/{instance}",
+            json=payload,
+            headers={"apikey": api_key, "Content-Type": "application/json"},
+        )
+    if response.status_code >= 400:
+        raise EvolutionDeliveryError(
+            f"evolution_get_base64_http_{response.status_code}"
+        )
+    try:
+        return response.json()
+    except ValueError:
+        return {"status": "accepted"}
+
+
 async def instance_supports_v2(instance: str) -> bool:
     """Probe Evolution to detect whether the v2 endpoints are available."""
     if not instance:

@@ -463,3 +463,174 @@ class TestPrefetchInstancePropagation:
                                         called_args = mock_prefetch.call_args
                                         assert called_args.args[0] == "5511966830020"
                                         assert called_args.args[1] == "Jennifer"
+
+
+class TestAttachmentIntents:
+    """F4c: deteccao de intents para attachments (PDF, DOCX, XLSX, etc.)."""
+
+    def test_memorize_intent(self):
+        from orchestrator import _detect_intent
+        intent = _detect_intent("memorize esse contrato na sua base de conhecimento")
+        assert intent["is_attachment"] is True
+        assert intent["is_attachment_save"] is True
+        assert intent["is_attachment_file"] is False
+
+    def test_save_knowledge_intent(self):
+        from orchestrator import _detect_intent
+        intent = _detect_intent("guarde esse PDF no conhecimento")
+        assert intent["is_attachment_save"] is True
+
+    def test_only_save_file_intent(self):
+        from orchestrator import _detect_intent
+        intent = _detect_intent("so salve esse arquivo pra mim")
+        assert intent["is_attachment_file"] is True
+        assert intent["is_attachment_save"] is False
+
+    def test_ambiguous_attachment_intent(self):
+        from orchestrator import _detect_intent
+        intent = _detect_intent("olha esse contrato ai")
+        assert intent["is_attachment"] is False
+        assert intent["is_attachment_save"] is False
+        assert intent["is_attachment_file"] is False
+
+    def test_memorize_in_group_intent(self):
+        from orchestrator import _detect_intent
+        intent = _detect_intent("memorize isso no grupo")
+        assert intent["is_attachment_save"] is True
+
+
+class TestExtractTextFromAttachment:
+    """F4c: extrair texto de PDF, DOCX, XLSX, texto puro."""
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_document(self):
+        from orchestrator import _extract_text_from_attachment
+        envelope = {"extra": {}}
+        result = await _extract_text_from_attachment(envelope)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_extracts_text_from_inline_base64(self):
+        from orchestrator import _extract_text_from_attachment
+        text_content = "este e um arquivo texto de exemplo"
+        import base64
+        envelope = {
+            "instance": "jennifer",
+            "message_id": "MSG_001",
+            "extra": {
+                "has_document": True,
+                "doc_mimetype": "text/plain",
+                "doc_file_name": "anotacao.txt",
+                "doc_base64": base64.b64encode(text_content.encode("utf-8")).decode("ascii"),
+            },
+        }
+        result = await _extract_text_from_attachment(envelope)
+        assert result is not None
+        assert result["text"] == text_content
+        assert result["source_name"] == "anotacao.txt"
+        assert "text/plain" in result["mimetype"]
+        assert result["raw_size"] > 0
+
+    @pytest.mark.asyncio
+    async def test_extracts_text_from_docx_base64(self):
+        from orchestrator import _extract_text_from_attachment
+        from docx import Document
+        import base64, io as _io
+        doc = Document()
+        doc.add_paragraph("primeiro paragrafo")
+        doc.add_paragraph("segundo paragrafo")
+        buf = _io.BytesIO()
+        doc.save(buf)
+        raw = buf.getvalue()
+        envelope = {
+            "instance": "jennifer",
+            "message_id": "MSG_002",
+            "extra": {
+                "has_document": True,
+                "doc_mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "doc_file_name": "teste.docx",
+                "doc_base64": base64.b64encode(raw).decode("ascii"),
+            },
+        }
+        result = await _extract_text_from_attachment(envelope)
+        assert result is not None
+        assert "primeiro paragrafo" in result["text"]
+        assert "segundo paragrafo" in result["text"]
+
+    @pytest.mark.asyncio
+    async def test_extracts_text_from_pdf_base64(self):
+        from orchestrator import _extract_text_from_attachment
+        from pypdf import PdfWriter
+        import base64, io as _io
+        writer = PdfWriter()
+        writer.add_blank_page(72, 72)
+        buf = _io.BytesIO()
+        writer.write(buf)
+        raw = buf.getvalue()
+        envelope = {
+            "instance": "jennifer",
+            "message_id": "MSG_003",
+            "extra": {
+                "has_document": True,
+                "doc_mimetype": "application/pdf",
+                "doc_file_name": "teste.pdf",
+                "doc_base64": base64.b64encode(raw).decode("ascii"),
+            },
+        }
+        result = await _extract_text_from_attachment(envelope)
+        assert result is not None
+        assert "source_name" in result
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_bad_base64_inline_no_fallback_url(self):
+        from orchestrator import _extract_text_from_attachment
+        envelope = {
+            "instance": "jennifer",
+            "message_id": "MSG_004",
+            "extra": {
+                "has_document": True,
+                "doc_mimetype": "text/plain",
+                "doc_file_name": "ok.txt",
+                "doc_base64": "###NÃO É BASE64 VÁLIDO@@@",
+            },
+        }
+        result = await _extract_text_from_attachment(envelope)
+        assert result is None
+
+
+class TestDownloadAttachmentBytes:
+    """F4c: baixar bytes do attachment - inline primeiro, fallback POST."""
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_base64_and_no_message_id(self):
+        from orchestrator import _download_attachment_bytes
+        envelope = {
+            "instance": "jennifer",
+            "message_id": "",
+            "extra": {
+                "doc_mimetype": "text/plain",
+            },
+        }
+        result = await _download_attachment_bytes(envelope)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_evolution_api_when_no_base64(self):
+        from orchestrator import _download_attachment_bytes
+        import base64
+        from unittest.mock import patch, AsyncMock
+        envelope = {
+            "instance": "jennifer",
+            "message_id": "MSG_FALLBACK_001",
+            "extra": {
+                "doc_mimetype": "text/plain",
+                "doc_file_name": "fallback.txt",
+                "remote_jid": "5511966830020@s.whatsapp.net",
+            },
+        }
+        fake_bytes = b"conteudo via api"
+        fake_response = {"base64": base64.b64encode(fake_bytes).decode("ascii")}
+        with patch("core.evolution_client.get_base64_from_media_message",
+                   new_callable=AsyncMock, return_value=fake_response):
+            result = await _download_attachment_bytes(envelope)
+        assert result == fake_bytes

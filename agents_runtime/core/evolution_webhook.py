@@ -24,6 +24,7 @@ Filters out:
 """
 from __future__ import annotations
 
+import base64
 import logging
 import os
 from typing import Any, Dict, Optional
@@ -101,7 +102,22 @@ def extract_envelope(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                 f"?messageId={message_id}"
             )
         text = "[audio]"
-    elif "imageMessage" in message or "videoMessage" in message or "documentMessage" in message:
+    elif "documentMessage" in message and isinstance(message["documentMessage"], dict):
+        doc_msg = message["documentMessage"]
+        extra["has_document"] = True
+        extra["doc_mimetype"] = str(doc_msg.get("mimetype") or "application/octet-stream")
+        extra["doc_file_name"] = str(doc_msg.get("fileName") or "document")
+        extra["doc_file_length"] = int(doc_msg.get("fileLength") or 0)
+        extra["doc_caption"] = str(doc_msg.get("caption") or "")
+        extra["doc_url"] = str(doc_msg.get("url") or "")
+        extra["doc_direct_path"] = str(doc_msg.get("directPath") or "")
+        if doc_msg.get("base64"):
+            try:
+                extra["doc_base64"] = str(doc_msg["base64"])
+            except Exception:
+                pass
+        text = (doc_msg.get("caption") or doc_msg.get("fileName") or "").strip()
+    elif "imageMessage" in message or "videoMessage" in message:
         return None
     else:
         return None

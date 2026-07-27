@@ -235,3 +235,208 @@ def test_audio_url_uses_evolution_base_url(monkeypatch):
     envelope = extract_envelope(payload)
     assert envelope is not None
     assert envelope["extra"]["audio_url"].startswith("https://custom.evo.example.com/chat/getMedia/")
+
+
+SAMPLE_DOCUMENT_PAYLOAD_BASE64 = {
+    "event": "MESSAGES_UPSERT",
+    "instance": "jennifer",
+    "data": {
+        "key": {
+            "remoteJid": "5511966830020@s.whatsapp.net",
+            "fromMe": False,
+            "id": "DOC_MSG_005",
+        },
+        "pushName": "Vinicius",
+        "message": {
+            "documentMessage": {
+                "mimetype": "application/pdf",
+                "fileName": "contrato.pdf",
+                "fileLength": 123456,
+                "caption": "Guarde na sua base de conhecimento",
+                "base64": "JVBERi0xLjQKJeLjz9MK",
+            }
+        },
+        "messageType": "documentMessage",
+    },
+}
+
+
+SAMPLE_DOCUMENT_PAYLOAD_WITHOUT_BASE64 = {
+    "event": "MESSAGES_UPSERT",
+    "instance": "jennifer",
+    "data": {
+        "key": {
+            "remoteJid": "5511966830020@s.whatsapp.net",
+            "fromMe": False,
+            "id": "DOC_MSG_006",
+        },
+        "pushName": "Vinicius",
+        "message": {
+            "documentMessage": {
+                "mimetype": "application/pdf",
+                "fileName": "relatorio.pdf",
+                "fileLength": 99999,
+                "caption": "memorize esse relatorio",
+            }
+        },
+        "messageType": "documentMessage",
+    },
+}
+
+
+SAMPLE_GROUP_DOCUMENT_PAYLOAD = {
+    "event": "MESSAGES_UPSERT",
+    "instance": "jennifer",
+    "data": {
+        "key": {
+            "remoteJid": "120363@g.us",
+            "fromMe": False,
+            "id": "GROUP_DOC_007",
+            "participant": "5511966830020@s.whatsapp.net",
+        },
+        "pushName": "Vini",
+        "message": {
+            "documentMessage": {
+                "mimetype": "application/pdf",
+                "fileName": "ata_reuniao.pdf",
+                "fileLength": 5000,
+                "caption": "",
+                "base64": "JVBERi0xLjQK",
+            }
+        },
+        "messageType": "documentMessage",
+    },
+}
+
+
+def test_extract_document_with_base64():
+    envelope = extract_envelope(SAMPLE_DOCUMENT_PAYLOAD_BASE64)
+    assert envelope is not None
+    assert envelope["text"] == "Guarde na sua base de conhecimento"
+    assert envelope["extra"]["has_document"] is True
+    assert envelope["extra"]["doc_mimetype"] == "application/pdf"
+    assert envelope["extra"]["doc_file_name"] == "contrato.pdf"
+    assert envelope["extra"]["doc_file_length"] == 123456
+    assert envelope["extra"]["doc_base64"] == "JVBERi0xLjQKJeLjz9MK"
+    assert envelope["extra"]["is_group"] is False
+    assert envelope["phone"] == "5511966830020"
+
+
+def test_extract_document_without_base64_fallback():
+    envelope = extract_envelope(SAMPLE_DOCUMENT_PAYLOAD_WITHOUT_BASE64)
+    assert envelope is not None
+    assert envelope["text"] == "memorize esse relatorio"
+    assert envelope["extra"]["has_document"] is True
+    assert envelope["extra"]["doc_mimetype"] == "application/pdf"
+    assert envelope["extra"]["doc_file_name"] == "relatorio.pdf"
+    assert "doc_base64" not in envelope["extra"]
+    assert envelope["extra"]["is_group"] is False
+
+
+def test_extract_document_group_with_caption_fallback():
+    envelope = extract_envelope(SAMPLE_GROUP_DOCUMENT_PAYLOAD)
+    assert envelope is not None
+    assert envelope["text"] == "ata_reuniao.pdf"
+    assert envelope["extra"]["has_document"] is True
+    assert envelope["extra"]["doc_file_name"] == "ata_reuniao.pdf"
+    assert envelope["extra"]["is_group"] is True
+    assert envelope["phone"] == "120363"
+    assert envelope["remote_jid"] == "120363@g.us"
+
+
+def test_extract_document_text_falls_back_to_filename_when_no_caption():
+    payload = {
+        "event": "MESSAGES_UPSERT",
+        "instance": "jennifer",
+        "data": {
+            "key": {
+                "remoteJid": "5511966830020@s.whatsapp.net",
+                "fromMe": False,
+                "id": "DOC_NO_CAPTION_008",
+            },
+            "message": {
+                "documentMessage": {
+                    "mimetype": "application/pdf",
+                    "fileName": "doc.pdf",
+                    "fileLength": 100,
+                }
+            },
+        },
+    }
+    envelope = extract_envelope(payload)
+    assert envelope is not None
+    assert envelope["text"] == "doc.pdf"
+
+
+def test_extract_document_default_mimetype_when_missing():
+    payload = {
+        "event": "MESSAGES_UPSERT",
+        "instance": "jennifer",
+        "data": {
+            "key": {
+                "remoteJid": "5511966830020@s.whatsapp.net",
+                "fromMe": False,
+                "id": "DOC_NO_MIME_009",
+            },
+            "message": {
+                "documentMessage": {
+                    "fileName": "doc.pdf",
+                    "fileLength": 100,
+                }
+            },
+        },
+    }
+    envelope = extract_envelope(payload)
+    assert envelope is not None
+    assert envelope["extra"]["doc_mimetype"] == "application/octet-stream"
+    assert envelope["extra"]["doc_file_name"] == "doc.pdf"
+
+
+def test_extract_document_default_filename_when_missing():
+    payload = {
+        "event": "MESSAGES_UPSERT",
+        "instance": "jennifer",
+        "data": {
+            "key": {
+                "remoteJid": "5511966830020@s.whatsapp.net",
+                "fromMe": False,
+                "id": "DOC_NO_NAME_010",
+            },
+            "message": {
+                "documentMessage": {
+                    "mimetype": "application/pdf",
+                    "fileLength": 100,
+                }
+            },
+        },
+    }
+    envelope = extract_envelope(payload)
+    assert envelope is not None
+    assert envelope["extra"]["doc_file_name"] == "document"
+    assert envelope["text"] == ""
+
+
+def test_extract_image_without_text_still_returns_none():
+    """F4c: imageMessage continua descartado (apenas documentMessage é suportado)."""
+    payload = {
+        "event": "MESSAGES_UPSERT",
+        "instance": "jennifer",
+        "data": {
+            "key": {"remoteJid": "5511966830020@s.whatsapp.net", "fromMe": False, "id": "IMG_002"},
+            "message": {"imageMessage": {"mimetype": "image/jpeg", "fileLength": 9999}},
+        },
+    }
+    assert extract_envelope(payload) is None
+
+
+def test_extract_video_without_text_still_returns_none():
+    """F4c: videoMessage continua descartado."""
+    payload = {
+        "event": "MESSAGES_UPSERT",
+        "instance": "jennifer",
+        "data": {
+            "key": {"remoteJid": "5511966830020@s.whatsapp.net", "fromMe": False, "id": "VID_001"},
+            "message": {"videoMessage": {"mimetype": "video/mp4", "fileLength": 9999}},
+        },
+    }
+    assert extract_envelope(payload) is None
