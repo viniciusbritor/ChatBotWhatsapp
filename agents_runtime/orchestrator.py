@@ -872,12 +872,17 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
                 },
                 ttl_sec=300,
             )
+            personal_label = (
+                "sua agenda pessoal" if intent.get("is_calendar")
+                else "seus emails" if intent.get("is_email")
+                else "seus arquivos do Drive"
+            )
             return {
                 "reply": (
-                    f"Oi {sender_name}! Voce pediu para acessar informacoes pessoais no grupo. "
-                    "Para sua seguranca, preciso que me confirme no privado primeiro. "
-                    "Me manda uma mensagem no privado dizendo 'sim' e eu libero o acesso para voce neste grupo. "
-                    "Tambem pode confirmar no Portal: https://coherence-portal-test-c5nbfc5meq-uc.a.run.app 🔒"
+                    f"Oi {sender_name}! 🔒 Voce pediu para acessar {personal_label} aqui no grupo. "
+                    "Por seguranca, so o proprietario da conta pode ver esses dados. "
+                    "Se voce for o dono da Jennifer, me mande 'sim' no privado que eu libero. "
+                    "Ou acesse o Portal: coherence-portal-test-c5nbfc5meq-uc.a.run.app"
                 ),
                 "delay_ms": 0,
                 "presence": "composing",
@@ -1013,6 +1018,31 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
                     "NAO chame ferramentas — os dados ja estao prontos."
                 )
                 agent_copy["tools"] = []
+
+            if _is_group_message(payload) and intent.get("is_drive"):
+                group_jid = _extract_group_jid(payload)
+                if group_jid:
+                    try:
+                        from tools.group import get_group_drive_folder, get_group_info
+                        drive_folder = await get_group_drive_folder(group_jid)
+                        group_info = await get_group_info(group_jid)
+                        group_name = group_info.get("name", "grupo")
+                        if drive_folder:
+                            agent_copy["system_prompt"] += (
+                                f"\n\n[CONTEXTO DE GRUPO]\n"
+                                f"Voce esta respondendo no grupo '{group_name}'. "
+                                f"Use APENAS a pasta do grupo (ID: {drive_folder}) para buscas. "
+                                f"Nao acesse outras pastas do Drive do owner."
+                            )
+                        else:
+                            agent_copy["system_prompt"] += (
+                                f"\n\n[CONTEXTO DE GRUPO]\n"
+                                f"Voce esta respondendo no grupo '{group_name}'. "
+                                f"Este grupo ainda nao tem uma pasta no Drive associada. "
+                                f"Informe o usuario e pergunte se quer criar uma."
+                            )
+                    except Exception:
+                        pass
 
             path.append({"step": 2, "phase": "specialist", "agent": specialist_id,
                          "prefetch": bool(prefetch_data),
