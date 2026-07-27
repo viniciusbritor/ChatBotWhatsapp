@@ -117,6 +117,34 @@ async def send_text(
         return {"status": "accepted"}
 
 
+async def send_presence(
+    instance: str,
+    phone: str,
+    presence: str = "composing",
+    *,
+    remote_jid: str = "",
+) -> Dict[str, Any]:
+    """Send a presence update (composing/paused) via Evolution API."""
+    base_url, api_key = _config()
+    instance = _resolve_instance_name() if instance.lower() == (os.getenv("INSTANCE") or "jennifer").lower() else instance
+    try:
+        async with httpx.AsyncClient(timeout=_request_timeout(5)) as client:
+            response = await client.post(
+                f"{base_url}/chat/sendPresence/{instance}",
+                json={
+                    "number": _target(phone, remote_jid),
+                    "presence": presence,
+                },
+                headers={"apikey": api_key, "Content-Type": "application/json"},
+            )
+        if response.status_code < 400:
+            return {"status": "ok", "presence": presence}
+        return {"status": "error", "http": response.status_code}
+    except Exception as exc:
+        logger.warning("send_presence_failed: %s", exc)
+        return {"status": "error", "detail": str(exc)}
+
+
 async def mark_messages_read(
     instance: str,
     remote_jid: str,

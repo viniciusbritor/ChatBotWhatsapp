@@ -367,6 +367,26 @@ def _extract_group_jid(payload: Dict[str, Any]) -> str:
     return ""
 
 
+def _prefetch_tone_guide(intent: Dict[str, Any]) -> str:
+    if intent.get("is_calendar"):
+        return (
+            "Formate estes dados como uma conversa com um amigo. "
+            "Exemplo: 'Sua agenda hoje está assim: de manhã você tem uma reunião às 10h, "
+            "depois está livre até as 15h. Quer que eu te lembre de algo? 📅'\n"
+        )
+    if intent.get("is_email"):
+        return (
+            "Formate estes dados como uma conversa com um amigo. "
+            "Exemplo: 'Achei 3 emails importantes! A Clarissa te mandou uma mensagem ontem "
+            "sobre o projeto. Quer que eu leia pra você? 📧'\n"
+        )
+    return (
+        "Formate estes dados como uma conversa com um amigo. "
+        "Exemplo: 'Encontrei esses arquivos pra você! Tem uma ata de 21/07 e um "
+        "relatório de custos. Quer que eu abra algum? 📁'\n"
+    )
+
+
 def _prefetch_nickname(first_name: str) -> Optional[str]:
     """G7: Pre-resolve apelido do JSON estatico, sem LLM tool loop."""
     try:
@@ -938,6 +958,27 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
                     },
                 }
 
+            if guard_verdict == "allow" and _is_personal_intent(intent):
+                try:
+                    ack_map = {
+                        "calendar": "Só um instante. Vou ver sua agenda... 📅",
+                        "drive": "Só um instante. Vou procurar aqui... 📁",
+                        "email": "Só um instante. Vou buscar seus emails... 📧",
+                    }
+                    ack_intent = "calendar" if intent.get("is_calendar") else (
+                        "drive" if intent.get("is_drive") else "email"
+                    )
+                    ack_text = ack_map.get(ack_intent, "Só um instante... ⏳")
+                    from core.evolution_client import send_presence, send_text
+                    asyncio.create_task(send_presence(instance, phone, "composing", remote_jid=extra.get("remote_jid", "")))
+                    asyncio.create_task(send_text(
+                        instance=instance, phone=phone, text=ack_text,
+                        delay_ms=0, presence="composing",
+                        remote_jid=extra.get("remote_jid", ""),
+                    ))
+                except Exception:
+                    pass
+
             if guard_result.get("prefetch"):
                 prefetch_data = guard_result["prefetch"]
 
@@ -963,9 +1004,10 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
                 prefetch_data = mask_pii(prefetch_data)
                 data_label = "CALENDARIO" if intent["is_calendar"] else \
                              "EMAILS" if intent["is_email"] else "DRIVE"
+                tone_guide = _prefetch_tone_guide(intent)
                 agent_copy["system_prompt"] += (
                     f"\n\n[DADOS PRE-CARREGADOS DO {data_label}]\n{prefetch_data}\n\n"
-                    "Formate estes dados em portugues brasileiro de forma amigavel e direta. "
+                    f"{tone_guide}"
                     "NAO chame ferramentas — os dados ja estao prontos."
                 )
                 agent_copy["tools"] = []
@@ -1163,7 +1205,9 @@ async def _execute_deep_agent(
         f"Mensagem: {text}\n\n"
         f"DATA ATUAL: {hoje.strftime('%Y-%m-%d')} (horario de Brasilia, BRT, UTC-3). "
         f"Hora atual: {hoje.strftime('%H:%M')}. "
-        f"Responda em portugues brasileiro, tom caloroso, 1-2 frases, max 4 linhas."
+        f"Seja proativa: se a pergunta for ambigua, pergunte antes de agir. "
+        f"Ofereca opcoes em vez de presumir. Lembre do contexto da conversa. "
+        f"Responda em portugues brasileiro, tom caloroso, natural."
     )
 
     config: Dict[str, Any] = {
