@@ -1,0 +1,31 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "agent-knowledge-v2",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "owner_hash", "order": "ASCENDING"},
+        {"fieldPath": "source_title", "order": "ASCENDING"},
+        {"fieldPath": "chunk_index", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "agent-knowledge-v2",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "owner_hash", "order": "ASCENDING"},
+        {"fieldPath": "class", "order": "ASCENDING"},
+        {"fieldPath": "group", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "agent-knowledge-v2",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "owner_hash", "order": "ASCENDING"},
+        {"fieldPath": "source_title", "order": "ASCENDING"}
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
