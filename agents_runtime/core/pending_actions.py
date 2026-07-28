@@ -2,12 +2,14 @@ import asyncio
 import hashlib
 import os
 import threading
-from datetime import datetime, timedelta, timezone
+import logging
+from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 from core.timezone import now_brt
 
 PENDING_ACTION_TTL_SEC = int(os.getenv("PENDING_ACTION_TTL_SEC", "300"))
 PENDING_ACTION_COLLECTION = os.getenv("PENDING_ACTION_COLLECTION", "pending-actions")
+logger = logging.getLogger(__name__)
 _local_actions: Dict[str, Dict[str, Any]] = {}
 _local_lock = threading.RLock()
 
@@ -55,10 +57,13 @@ async def set_pending_action(
         _local_actions[owner_hash] = dict(action)
     database = _get_firestore()
     if database is not None:
-        await asyncio.to_thread(
-            database.collection(PENDING_ACTION_COLLECTION).document(owner_hash).set,
-            action,
-        )
+        try:
+            await asyncio.to_thread(
+                database.collection(PENDING_ACTION_COLLECTION).document(owner_hash).set,
+                action,
+            )
+        except Exception as exc:
+            logger.warning("Pending action remote write failed: %s", type(exc).__name__)
     return action
 
 
@@ -67,11 +72,14 @@ async def get_pending_action(phone: str) -> Optional[Dict[str, Any]]:
     database = _get_firestore()
     action = None
     if database is not None:
-        document = await asyncio.to_thread(
-            database.collection(PENDING_ACTION_COLLECTION).document(owner_hash).get
-        )
-        if document.exists:
-            action = document.to_dict()
+        try:
+            document = await asyncio.to_thread(
+                database.collection(PENDING_ACTION_COLLECTION).document(owner_hash).get
+            )
+            if document.exists:
+                action = document.to_dict()
+        except Exception as exc:
+            logger.warning("Pending action remote read failed: %s", type(exc).__name__)
     if action is None:
         with _local_lock:
             cached = _local_actions.get(owner_hash)
@@ -90,9 +98,12 @@ async def clear_pending_action(phone: str) -> None:
         _local_actions.pop(owner_hash, None)
     database = _get_firestore()
     if database is not None:
-        await asyncio.to_thread(
-            database.collection(PENDING_ACTION_COLLECTION).document(owner_hash).delete
-        )
+        try:
+            await asyncio.to_thread(
+                database.collection(PENDING_ACTION_COLLECTION).document(owner_hash).delete
+            )
+        except Exception as exc:
+            logger.warning("Pending action remote delete failed: %s", type(exc).__name__)
 
 
 async def consume_pending_action(phone: str, expected_type: Optional[str] = None) -> Optional[Dict[str, Any]]:

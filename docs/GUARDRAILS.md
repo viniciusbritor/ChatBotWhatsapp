@@ -107,18 +107,21 @@
 
 ## 7. Firestore Vector vs Firestore plain
 
-23/07/2026: o Firestore Vector é **restrito a documentos** (livros,
-editais, base coletiva e pública). Toda interação do chat é persistida
+23/07/2026: o Firestore Vector é restrito a documentos, incluindo anexos
+explicitamente memorizados pelo usuário. Toda interação do chat é persistida
 em Firestore plain (`message-history/{history_id}`) com indexação por
 `owner_hash = sha256(phone_digits)[:32]`.
 
-- `index_conversation_message()` — hot path: grava em
-  `message-history` plain **e nunca** em vector. Falhas de Firestore
-  são logadas e o retorno segue 200 (a interação não trava).
-- `scripts/ingest_owner_knowledge.py` e
-  `scripts/ingest_collective_memory.py` — únicos locais onde embedding
-  + Firestore Vector são aplicados.
+- `index_conversation_message()` — hot path: grava em `message-history` plain
+  e nunca em vector. Falhas de Firestore são logadas e o retorno segue 200 (a
+  interação não trava).
+- `scripts/ingest_owner_knowledge.py` e `scripts/ingest_collective_memory.py`,
+  além do handler explícito de anexos, aplicam embedding + Firestore Vector.
+- Anexo individual memorizado usa `agent-knowledge-v2` e filtro por `owner_hash`.
+- Anexo de grupo memorizado usa `collective-knowledge-v2` com `group_hash`; não
+  usa o `owner_hash` como escopo de leitura.
 - `search_conversation_memory()` lê **plain** Firestore filtrando
+
   `where("owner_hash", ==, _owner_hash(phone))` e ordena por
   `created_at` desc. Resultado devolve `[]` quando `phone` é vazio.
 - A coleção vetorial legada `conversation-memory-v2` não é mais

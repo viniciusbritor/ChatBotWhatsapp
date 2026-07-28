@@ -2,7 +2,8 @@
 
 > Última revisão: **2026-07-23** — diagrama visual completo do caminho
 > ponta-a-ponta (WhatsApp → resposta) com Firestore plain para
-> histórico de chat, Firestore Vector restrito a documentos e grafo
+> histórico de chat, Firestore Vector para documentos e anexos memorizados
+> com escopo individual ou de grupo, e grafo
 > **LangGraph** para a orquestração Jennifer → Access Guardian → Manager.
 > Ver `docs/DIARIO_BORDO.md` para o histórico completo do dia.
 
@@ -159,10 +160,10 @@ coherence-ominichannel-fs
 ├── audit/                        # 5 anos de retencao
 ├── message-processing/{id}/      # ledger Pub/Sub (TTL 7 dias)
 ├── message-history/{id}/         # historico de chat (FIRESTORE PLAIN)
-└── *-knowledge-v2/              # Firestore Vector SOMENTE para docs
-    ├── agent-knowledge-v2/
-    ├── collective-knowledge-v2/
-    └── public-knowledge-v2/
+└── *-knowledge-v2/              # Firestore Vector para docs e anexos memorizados
+    ├── agent-knowledge-v2/      # documentos individuais e anexos privados
+    ├── collective-knowledge-v2/ # memória compartilhada de grupos
+    └── public-knowledge-v2/     # base pública
 ```
 
 ## 1. Objetivo

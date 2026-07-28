@@ -2022,3 +2022,35 @@ com teste de smoke que verifica o decorator não lança exceção.
 | F3' | Group drive isolation + privacy guard |
 | F4' | Group RAG |
 | F5' | narrowing + list_my_drives + pró-atividade |
+
+---
+
+## 27/07/2026 — Fase F4d.3: confirmação de anexos e RAG individual
+
+### Falha reproduzida
+
+O PDF recebido pelo WhatsApp era processado apenas na mensagem original. O
+modo ambíguo perguntava se o usuário queria memorizar ou salvar, mas não criava
+`pending_action`. A resposta seguinte não continha `has_document`, então caía
+no prefetch do Drive e retornava `arquivo não encontrado` para um arquivo que
+nunca havia sido enviado ao Drive.
+
+### Correção em fases
+
+1. A branch `fix/rag-attachment-confirmation-1` foi criada a partir do estado
+   atual de `test`; branches antigas `fix/ux-phase-*` permanecem como histórico
+   e não foram mescladas porque `test` já contém seus commits.
+2. O modo ambíguo grava `attachment_mode` com `message_id`, Evolution instance,
+   JID, MIME e nome do arquivo. O base64 não é persistido no Firestore.
+3. A confirmação `memorizar` ou `salvar` consome a ação e reprocessa o anexo
+   pelo mesmo `message_id` na Evolution.
+4. Memorizar em conversa individual usa `agent-knowledge-v2`; memorizar em
+   grupo mantém `collective-knowledge-v2`. Salvar continua usando o Drive.
+5. A confirmação inválida mantém a ação pendente e orienta as duas opções.
+
+### Gate local da tentativa 1
+
+- `python -m pytest -q tests/test_orchestrator.py tests/test_rag.py tests/test_group_rag.py`: `111 passed`
+- O teste de confirmação verifica que o `message_id` original é reutilizado.
+- O isolamento de pending actions foi adicionado aos testes para evitar estado
+  entre casos.

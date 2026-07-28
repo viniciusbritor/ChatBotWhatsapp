@@ -31,7 +31,7 @@ from core.commands import detect_command, apply_command
 from tool_registry import get_tool, get_tool_schema, is_user_scoped_tool
 from agent_loader import get_agent, get_skill, list_agents, get_user, get_config, has_nickname
 from core.audit import log_action
-from core.timezone import BRT, now_brt
+from core.timezone import now_brt
 
 logger = logging.getLogger(__name__)
 
@@ -252,6 +252,29 @@ def _get_routing_rules() -> List[Dict[str, Any]]:
     return rules
 
 
+def _attachment_pending_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    extra = payload.get("extra", {})
+    persisted_extra = {
+        key: extra.get(key)
+        for key in (
+            "has_document",
+            "doc_mimetype",
+            "doc_file_name",
+            "doc_file_length",
+            "remote_jid",
+            "is_group",
+        )
+        if extra.get(key) is not None
+    }
+    return {
+        "instance": payload.get("instance", "jennifer"),
+        "phone": payload.get("phone", ""),
+        "message_id": payload.get("message_id", ""),
+        "sender_name": payload.get("sender_name", "user"),
+        "extra": persisted_extra,
+    }
+
+
 async def _handle_attachment(
     payload: Dict[str, Any],
     intent: Dict[str, Any],
@@ -269,7 +292,7 @@ async def _handle_attachment(
     Returns o result dict pronto para _finalize_orchestration, ou None
     se o handler nao deve ser executado.
     """
-    from core.delay_calculator import calculate_delay_ms, calculate_presence
+    from core.delay_calculator import calculate_delay_ms
     from core.evolution_client import send_text
 
     extra = payload.get("extra", {})
@@ -298,6 +321,14 @@ async def _handle_attachment(
             pass
 
     if is_ambiguous:
+        from core.pending_actions import set_pending_action
+
+        await set_pending_action(
+            phone,
+            "attachment_mode",
+            {"attachment_payload": _attachment_pending_payload(payload)},
+            ttl_sec=300,
+        )
         await _send_ack(
             "Esse arquivo e para memorizar na base de conhecimento (RAG) ou so para salvar? "
             "Responda 'memorizar' ou 'salvar'."
@@ -352,11 +383,13 @@ async def _handle_attachment(
 
     status = persist.get("status", "")
     source_name = extracted.get("source_name", "document")
-    if status == "rag_group":
-        indexed = persist.get("index_result", {}).get("indexed", 0)
+    if status in {"rag_group", "rag_individual"}:
+        index_result = persist.get("index_result", {})
+        indexed = index_result.get("chunks", index_result.get("indexed", 0))
+        scope = "grupo" if status == "rag_group" else "privado"
         reply = (
-            f"Feito! 📚 Memorei {indexed} trechos do arquivo '{source_name}' "
-            f"no conhecimento do grupo. Quer me perguntar algo sobre o arquivo para verificar?"
+            f"Feito! Memorei {indexed} trechos do arquivo '{source_name}' "
+            f"no conhecimento {scope}. Quer me perguntar algo sobre o arquivo para verificar?"
         )
     elif status.startswith("drive_"):
         folder = "Meu Drive" if status == "drive_individual" else "pasta do grupo"
@@ -663,6 +696,23 @@ async def _persist_attachment(
                 logger.warning("attachment: upload_file group failed: %s", exc)
                 return {"error": "drive_upload_failed", "detail": str(exc)}
     else:
+        if save_to_rag:
+            try:
+                from core.rag import index_private_document
+                result = await index_private_document(
+                    phone=phone,
+                    text_content=text,
+                    source_title=source_name,
+                    category="whatsapp_attachment",
+                    metadata={"mimetype": mimetype},
+                )
+                if result.get("error"):
+                    return {"error": "rag_index_failed", "detail": result.get("error")}
+                return {"status": "rag_individual", "index_result": result,
+                        "source_name": source_name}
+            except Exception as exc:
+                logger.warning("attachment: index_private_document failed: %s", exc)
+                return {"error": "rag_index_failed", "detail": str(exc)}
         try:
             from tools.google_drive import upload_file
             result = await upload_file(
@@ -1050,10 +1100,42 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
     masked_text = mask_pii(text)
     confirmation = _short_confirmation(masked_text)
 
-    if confirmation is not None:
-        from core.pending_actions import consume_pending_action, get_pending_action
+    from core.pending_actions import consume_pending_action, get_pending_action
+    pending_action = await get_pending_action(phone)
+    if pending_action and pending_action.get("action_type") == "attachment_mode":
+        attachment_intent = _detect_intent(masked_text)
+        if not (attachment_intent.get("is_attachment_save") or attachment_intent.get("is_attachment_file")):
+            reply = "Responda apenas 'memorizar' para indexar no conhecimento ou 'salvar' para guardar no Drive."
+            result = {
+                "reply": reply,
+                "delay_ms": calculate_delay_ms(reply),
+                "presence": "paused",
+                "metadata": {
+                    "agent_id": "document-handler",
+                    "response_identity": "Jennifer",
+                    "waiting_confirmation": "attachment_mode",
+                },
+            }
+            path = [{"step": 1, "phase": "pending_action", "action": "attachment_mode"}]
+            return await _finalize_orchestration(
+                payload, masked_text, sender_name, result, path, cache_key
+            )
+        await consume_pending_action(phone, "attachment_mode")
+        pending_payload = pending_action.get("payload", {}).get("attachment_payload", {})
+        pending_payload["phone"] = phone
+        pending_payload["instance"] = pending_payload.get("instance") or instance
+        attachment_result = await _handle_attachment(
+            pending_payload, attachment_intent, sender_name
+        )
+        if attachment_result is not None:
+            path = [{"step": 1, "phase": "pending_action", "action": "attachment_mode"}]
+            path.append({"step": 2, "phase": "attachment_handler",
+                         "status": attachment_result.get("metadata", {}).get("attachment", "unknown")})
+            return await _finalize_orchestration(
+                payload, masked_text, sender_name, attachment_result, path, cache_key
+            )
 
-        pending_action = await get_pending_action(phone)
+    if confirmation is not None:
         if pending_action and pending_action.get("action_type") == "nickname_consent":
             await consume_pending_action(phone, "nickname_consent")
             action_payload = pending_action.get("payload", {})

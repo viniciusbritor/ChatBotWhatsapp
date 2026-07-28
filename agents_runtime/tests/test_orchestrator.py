@@ -679,6 +679,8 @@ class TestHandleAttachment:
         assert result["presence"] == "paused"
         # 2 acks enviados: pergunta ambígua
         assert mock_send.call_count == 1
+        from core.pending_actions import clear_pending_action
+        await clear_pending_action("5511966830020")
 
     @pytest.mark.asyncio
     async def test_text_extraction_failure_returns_erro_message(self):
@@ -1028,3 +1030,46 @@ class TestF4d1AttachmentDetection:
                 f"ack deve ter delay_ms > 0 para WhatsApp mostrar 'digitando...', "
                 f"recebido delay_ms={call_kwargs.get('delay_ms', 0)}"
             )
+
+    @pytest.mark.asyncio
+    async def test_confirmation_reuses_pending_attachment(self):
+        from orchestrator import orchestrate
+        pending = {
+            "action_type": "attachment_mode",
+            "payload": {
+                "attachment_payload": {
+                    "instance": "Jennifer",
+                    "phone": "5511966830020",
+                    "message_id": "DOC-1",
+                    "sender_name": "Vini",
+                    "extra": {
+                        "has_document": True,
+                        "doc_mimetype": "text/plain",
+                        "doc_file_name": "arquivo.txt",
+                        "remote_jid": "5511966830020@s.whatsapp.net",
+                    },
+                }
+            },
+        }
+        attachment_result = {
+            "reply": "Feito!",
+            "delay_ms": 0,
+            "presence": "composing",
+            "metadata": {"attachment": "rag_individual"},
+        }
+        with patch("orchestrator.get_pending_action", create=True, return_value=pending):
+            with patch("core.pending_actions.get_pending_action", AsyncMock(return_value=pending)):
+                with patch("core.pending_actions.consume_pending_action", AsyncMock()):
+                    with patch("orchestrator._handle_attachment", new_callable=AsyncMock,
+                               return_value=attachment_result) as handler:
+                        with patch("orchestrator._schedule_indexing", side_effect=close_coroutine):
+                            result = await orchestrate({
+                                "instance": "Jennifer",
+                                "phone": "5511966830020",
+                                "text": "memorizar",
+                                "sender_name": "Vini",
+                                "extra": {},
+                            })
+        assert result["reply"] == "Feito!"
+        assert handler.call_args.args[0]["message_id"] == "DOC-1"
+        assert handler.call_args.args[1]["is_attachment_save"] is True
