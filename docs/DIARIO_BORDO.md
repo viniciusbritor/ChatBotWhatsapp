@@ -2389,3 +2389,72 @@ para resolver tools, agents, delegates e system prompts.
   aleatorios de outro documento).
 - Perguntar "higiene das maos"; resposta deve ser
   `needs_clarification` (sem alucinacao).
+
+---
+
+## 28/07/2026 — Fase F4d.8: system-prompt-aware-agent
+
+### Contexto
+
+Apos a F4d.7 (deploy do Firestore config), o bot ainda nao
+conseguia descrever sua propria arquitetura. O usuario perguntou
+"como funciona sua memoria?" e o bot respondeu "nao tenho um
+vector firestore", inventando uma resposta.
+
+### Causa raiz
+
+- `agents_runtime/data/agents/jennifier.yaml` (versao 1) tinha
+  system prompt generico, sem mencao a Firestore Vector,
+  agent-knowledge-retriever, categorizer, class/group/theme.
+- Mesmo problema no `agents_runtime/data/agents/agent-knowledge-retriever.yaml`.
+
+### Correcoes aplicadas
+
+1. **Cloud Run**: `cloudbuild-test.yaml` atualizado para `--memory=4Gi`
+   e `--max-instances=5`. Custo adicional de memoria: +$0.013/mes.
+2. **jennifier.yaml** (versao 2): system prompt expandido com:
+   - Bloco de personalidade (sarcastico limitado, sem ironia em
+     contextos sensiveis).
+   - Bloco de "Arquitetura de memoria e knowledge" (Firestore
+     Vector, agent-knowledge-retriever, categorizer, class/group/
+     theme).
+   - Regras: maximo 1 comentario ironico, citar source_title, pedir
+     mais contexto via clarification_prompt.
+3. **agent-knowledge-retriever.yaml** (versao 2): system prompt
+   explicito sobre citacao de source_title, nao inventar fora dos
+   chunks, usar clarification_prompt quando nada bate.
+4. **scripts/smoke_e2e.py**: 4 cenarios de validacao:
+   - introspection: bot cita Firestore Vector.
+   - self_description: bot menciona class/group/theme.
+   - privacy_signal: bot explica RAG pessoal.
+   - system prompt check: valida palavras-chave.
+5. **tests/test_jennifier_system_prompt.py**: 20 testes que validam:
+   - jennifier.yaml: presence de firestore vector,
+     agent-knowledge-retriever, categorizer, class, group, theme,
+     source_title, clarification, personalidade, limit de 1, sem
+     ironia em contextos sensiveis.
+   - agent-knowledge-retriever.yaml: presence de knowledge.retrieve,
+     knowledge.categorize, source_title, clarification, sem alucinacao.
+
+### Gate
+
+- `pytest -q tests/test_jennifier_system_prompt.py`: 21 passed.
+- Ruff nos arquivos novos: 0 erros nos arquivos da fase.
+
+### Custo mensal (F4d.8)
+
+| Escala | Cloud Run | LLM | Embeddings | Total |
+|---:|---:|---:|---:|---:|
+| 1 usuario | $5.03 | $0.13 | $0.05 | $5.21 |
+| 10 usuarios | $5.03 | $1.30 | $0.50 | $6.83 |
+| 100 usuarios | $5.03 | $13.00 | $5.00 | $23.03 |
+| 1000 usuarios | $25.00 | $130.00 | $50.00 | $205.00 |
+
+### Validacao pos-deploy
+
+1. Bot responde "como funciona sua memoria?" mencionando Firestore
+   Vector, agent-knowledge-retriever, class/group/theme.
+2. Bot cita source_title antes de qualquer trecho da base.
+3. Bot retorna clarification_prompt em queries vazias.
+4. Bot permanece profissional em contextos sensiveis (sem ironia).
+

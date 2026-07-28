@@ -172,6 +172,17 @@ em Firestore plain (`message-history/{history_id}`) com indexação por
 - **Composite indexes (Fase F4d.6)**: 3 indices em `firestore.indexes.json`
   (raiz do repo) deployados pelo Cloud Build. Nenhum dos 3 filtra
   cross-collection: apenas `agent-knowledge-v2`.
+- **System prompt do jennifier (Fase F4d.8)**: o prompt documenta
+  a propria arquitetura (Firestore Vector, agent-knowledge-retriever,
+  categorizer, class/group/theme, source_title) e adiciona
+  personalidade. Regras:
+  - Maximo 1 comentario ironico por resposta.
+  - Nunca ironizar o proprio servico ou o usuario.
+  - Em contextos sensiveis (saude, juridico, financas), seja
+    direto e educado, sem ironia.
+  - Cite o source_title antes de qualquer trecho da base.
+  - NUNCA invente informacoes fora dos chunks retornados.
+  - Em duvida, peca mais contexto via clarification_prompt.
 - **Soft limits para RAG individual** (`RAG_PRIVATE_CHUNKS_SOFT_LIMIT`,
   `RAG_PRIVATE_CHARS_SOFT_LIMIT`): espelham o grupo. Documentos acima
   do teto retornam `truncated=True` em vez de abortar.

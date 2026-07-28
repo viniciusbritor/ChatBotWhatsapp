@@ -663,14 +663,19 @@ steps:
   3. docker build + push
   4. gcloud run deploy agents-runtime-test \
        --region=us-central1 \
-       --memory=2Gi \
+       --memory=4Gi \
        --cpu=2 \
        --min-instances=0 \
-       --max-instances=3 \
+       --max-instances=5 \
        --cpu-boost \
        --no-cpu-throttling
 trigger: push em `test`
 ```
+
+**Nota F4d.8**: Cloud Run usa `4Gi` memoria e `5` max-instances. Custo adicional de
+memoria vs 2 GB/3 instances: **+$0.013/mês**. Custo em saturacao de 5
+instances 24/7: **+$301/mês** vs 3 instances (cenario improvavel
+com scale-to-zero).
 
 ## Scripts Auxiliares
 
