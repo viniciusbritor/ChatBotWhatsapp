@@ -23,10 +23,13 @@ Retrieval reuses ``core.rag.search_legal_knowledge`` (private) and
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import re
-from typing import Any, Dict, Optional
+import time
+from dataclasses import asdict, dataclass, field
+from typing import Any, Dict, List, Optional
 
 from core.rag import RAG_RETRIEVE_MIN_SCORE, search_legal_knowledge
 from tools.group import search_group_knowledge
@@ -330,6 +333,10 @@ async def retrieve(
     phone = _extract_phone(envelope)
     group_jid = _extract_group_jid(envelope) if is_group else ""
     hints = _extract_query_hints(query)
+    started = time.monotonic()
+    query_hash = hashlib.md5(
+        (phone + ":" + _normalize(query)).encode("utf-8")
+    ).hexdigest()[:12]
     logger.info(
         "retriever_decision",
         extra={
@@ -342,51 +349,112 @@ async def retrieve(
         },
     )
 
-    if is_group:
-        from core.rag import _get_firestore as _get_db  # type: ignore
+    def _log_metrics(decision: str, results: List[Dict[str, Any]]) -> None:
+        summary = _summarize_results(results)
+        metrics = RetrievalMetrics(
+            query_hash=query_hash,
+            scope="group" if is_group else "private",
+            decision=decision,
+            min_score=threshold,
+            candidates=len(results),
+            returned=len(results),
+            classes=summary["classes"],
+            sources=summary["sources"],
+            top_score=summary["top_score"],
+            avg_score=summary["avg_score"],
+            needs_clarification=decision == "needs_clarification",
+            cache_hit=False,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        _emit_retrieval_metrics(metrics)
 
-        db = _get_db()
-        if db is None or not _is_user_member(db, group_jid, phone):
-            return {
-                "scope": "group",
-                "decision": "denied",
+    try:
+        if is_group:
+            from core.rag import _get_firestore as _get_db  # type: ignore
+
+            db = _get_db()
+            if db is None or not _is_user_member(db, group_jid, phone):
+                result = {
+                    "scope": "group",
+                    "decision": "denied",
+                    "results": [],
+                    "count": 0,
+                    "needs_share_prompt": False,
+                    "needs_clarification": False,
+                    "share_pending_action": None,
+                    "reason": "not_member" if db is not None else "firestore_unavailable",
+                    "filters": hints,
+                }
+                _log_metrics(result["decision"], result["results"])
+                return result
+            group_hits = await _retrieve_group(
+                group_jid=group_jid, query=query, limit=effective_limit, min_score=threshold
+            )
+            if group_hits["count"] > 0:
+                result = {
+                    **group_hits,
+                    "decision": "group",
+                    "needs_share_prompt": False,
+                    "needs_clarification": False,
+                    "share_pending_action": None,
+                    "filters": hints,
+                }
+                _log_metrics(result["decision"], result["results"])
+                return result
+            private_hits = await _retrieve_private(
+                phone=phone, query=query, limit=effective_limit, min_score=threshold,
+                source_title=hints.get("source_title"),
+                class_=hints.get("class"),
+            )
+            if private_hits["count"] > 0:
+                pending = await _maybe_request_share(phone, group_jid, query)
+                result = {
+                    **private_hits,
+                    "decision": "group_private_share_pending",
+                    "needs_share_prompt": True,
+                    "needs_clarification": False,
+                    "share_pending_action": pending,
+                    "filters": hints,
+                }
+                _log_metrics(result["decision"], result["results"])
+                return result
+            result = {
+                "scope": "none",
+                "decision": "needs_clarification",
                 "results": [],
                 "count": 0,
                 "needs_share_prompt": False,
-                "needs_clarification": False,
+                "needs_clarification": True,
+                "clarification_prompt": (
+                    "Não encontrei nada sobre isso no que memorizei. "
+                    "Quer me dar mais detalhes ou outro termo?"
+                ),
                 "share_pending_action": None,
-                "reason": "not_member" if db is not None else "firestore_unavailable",
+                "reason": "no_matches",
                 "filters": hints,
             }
-        group_hits = await _retrieve_group(
-            group_jid=group_jid, query=query, limit=effective_limit, min_score=threshold
-        )
-        if group_hits["count"] > 0:
-            return {
-                **group_hits,
-                "decision": "group",
-                "needs_share_prompt": False,
-                "needs_clarification": False,
-                "share_pending_action": None,
-                "filters": hints,
-            }
+            _log_metrics(result["decision"], result["results"])
+            return result
+
         private_hits = await _retrieve_private(
             phone=phone, query=query, limit=effective_limit, min_score=threshold,
             source_title=hints.get("source_title"),
             class_=hints.get("class"),
         )
         if private_hits["count"] > 0:
-            pending = await _maybe_request_share(phone, group_jid, query)
-            return {
+            decision = "private"
+            result = {
                 **private_hits,
-                "decision": "group_private_share_pending",
-                "needs_share_prompt": True,
+                "decision": decision,
+                "needs_share_prompt": False,
                 "needs_clarification": False,
-                "share_pending_action": pending,
+                "share_pending_action": None,
                 "filters": hints,
             }
-        return {
-            "scope": "none",
+            _log_metrics(result["decision"], result["results"])
+            return result
+        result = {
+            **private_hits,
             "decision": "needs_clarification",
             "results": [],
             "count": 0,
@@ -400,37 +468,11 @@ async def retrieve(
             "reason": "no_matches",
             "filters": hints,
         }
-
-    private_hits = await _retrieve_private(
-        phone=phone, query=query, limit=effective_limit, min_score=threshold,
-        source_title=hints.get("source_title"),
-        class_=hints.get("class"),
-    )
-    if private_hits["count"] > 0:
-        decision = "private"
-        return {
-            **private_hits,
-            "decision": decision,
-            "needs_share_prompt": False,
-            "needs_clarification": False,
-            "share_pending_action": None,
-            "filters": hints,
-        }
-    return {
-        **private_hits,
-        "decision": "needs_clarification",
-        "results": [],
-        "count": 0,
-        "needs_share_prompt": False,
-        "needs_clarification": True,
-        "clarification_prompt": (
-            "Não encontrei nada sobre isso no que memorizei. "
-            "Quer me dar mais detalhes ou outro termo?"
-        ),
-        "share_pending_action": None,
-        "reason": "no_matches",
-        "filters": hints,
-    }
+        _log_metrics(result["decision"], result["results"])
+        return result
+    except Exception:
+        _log_metrics("error", [])
+        raise
 
 
 async def share_pending_action_consume(
@@ -445,9 +487,56 @@ async def share_pending_action_consume(
     return await consume_pending_action(phone, PENDING_ACTION_SHARE_PRIVATE_KNOWLEDGE)
 
 
+@dataclass
+class RetrievalMetrics:
+    """Structured log of a single retrieval attempt.
+
+    Emitted at the end of every retrieve() call. Aggregating these
+    over time lets you answer questions like: "qual a taxa de
+    clarification no grupo X?" or "qual a class mais consultada?".
+    """
+
+    query_hash: str
+    scope: str
+    decision: str
+    min_score: float
+    candidates: int
+    returned: int
+    classes: List[str] = field(default_factory=list)
+    sources: List[str] = field(default_factory=list)
+    top_score: float = 0.0
+    avg_score: float = 0.0
+    needs_clarification: bool = False
+    cache_hit: bool = False
+    duration_ms: int = 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+def _emit_retrieval_metrics(metrics: RetrievalMetrics) -> None:
+    logger.info(
+        "retrieval_quality",
+        extra={"event_name": "retrieval_quality", **metrics.to_dict()},
+    )
+
+
+def _summarize_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    if not results:
+        return {"classes": [], "sources": [], "top_score": 0.0, "avg_score": 0.0}
+    scores = [float(r.get("score", 0.0)) for r in results]
+    return {
+        "classes": [str(r.get("class", "?")) for r in results],
+        "sources": [str(r.get("source", "?")) for r in results],
+        "top_score": max(scores),
+        "avg_score": sum(scores) / len(scores),
+    }
+
+
 __all__ = [
     "is_rag_query",
     "retrieve",
     "share_pending_action_consume",
     "RAG_RETRIEVE_MIN_SCORE",
+    "RetrievalMetrics",
 ]

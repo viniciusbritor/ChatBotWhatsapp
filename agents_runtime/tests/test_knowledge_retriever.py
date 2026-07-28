@@ -169,6 +169,81 @@ class TestSharePendingConsume:
         assert result["action_type"] == "share_private_knowledge_in_group"
 
 
+class TestRetrievalMetrics:
+    def test_dataclass_serializes(self):
+        from agent_orchestration.knowledge_retriever import RetrievalMetrics
+
+        m = RetrievalMetrics(
+            query_hash="abc",
+            scope="private",
+            decision="private",
+            min_score=0.7,
+            candidates=3,
+            returned=3,
+        )
+        data = m.to_dict()
+        assert data["query_hash"] == "abc"
+        assert data["scope"] == "private"
+        assert data["decision"] == "private"
+        assert data["min_score"] == 0.7
+        assert data["candidates"] == 3
+        assert data["classes"] == []
+        assert data["sources"] == []
+
+    def test_summarize_results_empty(self):
+        from agent_orchestration.knowledge_retriever import _summarize_results
+
+        s = _summarize_results([])
+        assert s["classes"] == []
+        assert s["sources"] == []
+        assert s["top_score"] == 0.0
+        assert s["avg_score"] == 0.0
+
+    def test_summarize_results_with_data(self):
+        from agent_orchestration.knowledge_retriever import _summarize_results
+
+        chunks = [
+            {"class": "legal", "source": "cdc.pdf", "score": 0.9},
+            {"class": "legal", "source": "cdc.pdf", "score": 0.7},
+            {"class": "outros", "source": "x.pdf", "score": 0.5},
+        ]
+        s = _summarize_results(chunks)
+        assert s["classes"] == ["legal", "legal", "outros"]
+        assert s["sources"] == ["cdc.pdf", "cdc.pdf", "x.pdf"]
+        assert s["top_score"] == 0.9
+        assert abs(s["avg_score"] - 0.7) < 1e-9
+
+    @pytest.mark.asyncio
+    async def test_retrieve_emits_metrics_log(self, caplog):
+        from agent_orchestration import knowledge_retriever
+
+        envelope = {
+            "phone": "5511999",
+            "extra": {"remote_jid": "5511999@s.whatsapp.net"},
+        }
+        chunks = [
+            {"text": "c1", "score": 0.9, "source": "cdc.pdf", "class": "legal"},
+            {"text": "c2", "score": 0.7, "source": "cdc.pdf", "class": "legal"},
+        ]
+        with patch(
+            "agent_orchestration.knowledge_retriever.search_legal_knowledge",
+            AsyncMock(return_value={"results": chunks, "owner_hash": "abc"}),
+        ):
+            caplog.set_level("INFO")
+            await knowledge_retriever.retrieve(envelope, "cdc test")
+        # Look for our custom log record
+        retrieval_logs = [
+            r for r in caplog.records
+            if getattr(r, "event_name", "") == "retrieval_quality"
+        ]
+        assert retrieval_logs, "expected retrieval_quality log"
+        rec = retrieval_logs[-1]
+        assert rec.decision == "private"
+        assert rec.returned == 2
+        assert rec.top_score == 0.9
+        assert rec.classes == ["legal", "legal"]
+
+
 class TestRetrieveWithHints:
     @pytest.mark.asyncio
     async def test_extracts_source_title_from_query(self):
