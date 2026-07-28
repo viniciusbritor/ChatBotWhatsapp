@@ -102,17 +102,39 @@ def _check_retriever_yaml() -> Dict[str, Any]:
 
 async def _check_retrieval_logic() -> Dict[str, Any]:
     """Valida logica de retrieval com embeddings mockadas."""
-    from unittest.mock import patch
+    import hashlib
+    import sys as _sys
+
+    from unittest.mock import MagicMock, patch
+
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    if project_root not in _sys.path:
+        _sys.path.insert(0, project_root)
+
+    import core.rag  # noqa: F401  (force import to register module)
+    from core.rag import search_legal_knowledge  # noqa: F401
 
     def fake_embed(text):
-        import hashlib
         h = hashlib.md5(text.encode("utf-8")).digest()
         return [((h[i % 16] - 128) / 128.0) for i in range(1536)]
 
     async def _async_fake(text):
         return fake_embed(text)
 
-    with patch("core.rag.embed_query", side_effect=_async_fake):
+    database = MagicMock()
+
+    def _fake_get_firestore_member(*args, **kwargs):
+        class _Member:
+            exists = True
+            to_dict = lambda self: {"is_active": True}
+        return _Member()
+
+    with patch("core.rag._get_firestore", return_value=database), \
+         patch("core.rag.embed_query", side_effect=_async_fake), \
+         patch(
+             "agent_orchestration.knowledge_retriever._is_user_member",
+             side_effect=_fake_get_firestore_member,
+         ):
         from agent_orchestration.knowledge_retriever import retrieve
 
         envelope = {
