@@ -162,14 +162,72 @@ def _extract_phone(envelope: Dict[str, Any]) -> str:
     return str(envelope.get("phone", "") or "")
 
 
+_DOC_HINT = re.compile(
+    r"\b([\w\-\.\(\)]+\.(?:pdf|docx|xlsx|txt|md|csv))\b", re.IGNORECASE
+)
+
+
+def _extract_source_title_hint(query: str) -> Optional[str]:
+    match = _DOC_HINT.search(query or "")
+    if not match:
+        return None
+    return match.group(1).strip(".,;:!?()")
+
+
+CLASS_HINTS = {
+    "legal": ["lei", "cdc", "codigo de defesa", "legislacao", "regulamento"],
+    "edital": ["edital", "licitacao", "pregao", "concurso"],
+    "jurisprudencia": ["jurisprudencia", "acordao", "sumula", "decisao judicial"],
+    "manual": ["manual", "procedimento", "pop", "sop", "runbook"],
+    "empresa": ["empresa", "processo interno", "politica interna"],
+    "corporativo": ["segmento", "indústria", "setor"],
+    "academico": ["livro", "artigo", "paper", "tese", "dissertacao", "probabilidade"],
+    "saude": ["saude", "medicina", "bula", "protocolo clinico"],
+    "financeiro": ["financeiro", "balanço", "relatorio", "orcamento"],
+    "outros": [],
+}
+
+
+def _extract_class_hint(query: str) -> Optional[str]:
+    text = _normalize(query)
+    scores: Dict[str, int] = {}
+    for cls, keywords in CLASS_HINTS.items():
+        for kw in keywords:
+            if kw in text:
+                scores[cls] = scores.get(cls, 0) + 1
+    if not scores:
+        return None
+    return max(scores.items(), key=lambda item: item[1])[0]
+
+
+def _extract_query_hints(query: str) -> Dict[str, str]:
+    hints: Dict[str, str] = {}
+    source_title = _extract_source_title_hint(query)
+    if source_title:
+        hints["source_title"] = source_title
+    cls = _extract_class_hint(query)
+    if cls:
+        hints["class"] = cls
+    return hints
+
+
 async def _retrieve_private(
     phone: str,
     query: str,
     limit: int,
     min_score: float,
+    source_title: Optional[str] = None,
+    class_: Optional[str] = None,
+    group: Optional[str] = None,
 ) -> Dict[str, Any]:
     result = await search_legal_knowledge(
-        phone=phone, query=query, k=limit, min_score=min_score
+        phone=phone,
+        query=query,
+        k=limit,
+        min_score=min_score,
+        source_title=source_title,
+        class_=class_,
+        group=group,
     )
     chunks = result.get("results", []) if isinstance(result, dict) else []
     return {
@@ -178,6 +236,7 @@ async def _retrieve_private(
         "count": len(chunks),
         "min_score": min_score,
         "owner_hash": result.get("owner_hash") if isinstance(result, dict) else None,
+        "filters": result.get("filters") if isinstance(result, dict) else None,
     }
 
 
@@ -240,7 +299,7 @@ async def retrieve(
     envelope: Dict[str, Any],
     query: str,
     *,
-    limit: int = 5,
+    limit: Optional[int] = None,
     min_score: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Decide scope and retrieve. Returns a structured dict.
@@ -249,18 +308,39 @@ async def retrieve(
 
         {
           "scope": "private" | "group" | "none",
-          "decision": "private" | "group" | "group_private_share_pending" | "denied" | "no_results",
+          "decision": "private" | "group" | "group_private_share_pending"
+                     | "denied" | "no_results" | "needs_clarification",
           "results": [...],
           "count": int,
           "needs_share_prompt": bool,
+          "needs_clarification": bool,
+          "clarification_prompt": str | None,
           "share_pending_action": dict | None,
           "reason": str | None,
+          "filters": {...},
         }
     """
-    threshold = float(min_score) if min_score is not None else RAG_RETRIEVE_MIN_SCORE
+    effective_limit = int(limit) if limit is not None else int(
+        os.getenv("RAG_RETRIEVE_K", "10")
+    )
+    threshold = float(min_score) if min_score is not None else float(
+        os.getenv("RAG_RETRIEVE_MIN_SCORE", str(RAG_RETRIEVE_MIN_SCORE))
+    )
     is_group = _is_group(envelope)
     phone = _extract_phone(envelope)
     group_jid = _extract_group_jid(envelope) if is_group else ""
+    hints = _extract_query_hints(query)
+    logger.info(
+        "retriever_decision",
+        extra={
+            "event_name": "retriever_decision",
+            "scope": "group" if is_group else "private",
+            "query_preview": _normalize(query)[:120],
+            "hints": hints,
+            "k": effective_limit,
+            "min_score": threshold,
+        },
+    )
 
     if is_group:
         from core.rag import _get_firestore as _get_db  # type: ignore
@@ -273,21 +353,27 @@ async def retrieve(
                 "results": [],
                 "count": 0,
                 "needs_share_prompt": False,
+                "needs_clarification": False,
                 "share_pending_action": None,
                 "reason": "not_member" if db is not None else "firestore_unavailable",
+                "filters": hints,
             }
         group_hits = await _retrieve_group(
-            group_jid=group_jid, query=query, limit=limit, min_score=threshold
+            group_jid=group_jid, query=query, limit=effective_limit, min_score=threshold
         )
         if group_hits["count"] > 0:
             return {
                 **group_hits,
                 "decision": "group",
                 "needs_share_prompt": False,
+                "needs_clarification": False,
                 "share_pending_action": None,
+                "filters": hints,
             }
         private_hits = await _retrieve_private(
-            phone=phone, query=query, limit=limit, min_score=threshold
+            phone=phone, query=query, limit=effective_limit, min_score=threshold,
+            source_title=hints.get("source_title"),
+            class_=hints.get("class"),
         )
         if private_hits["count"] > 0:
             pending = await _maybe_request_share(phone, group_jid, query)
@@ -295,27 +381,55 @@ async def retrieve(
                 **private_hits,
                 "decision": "group_private_share_pending",
                 "needs_share_prompt": True,
+                "needs_clarification": False,
                 "share_pending_action": pending,
+                "filters": hints,
             }
         return {
             "scope": "none",
-            "decision": "no_results",
+            "decision": "needs_clarification",
             "results": [],
             "count": 0,
             "needs_share_prompt": False,
+            "needs_clarification": True,
+            "clarification_prompt": (
+                "Não encontrei nada sobre isso no que memorizei. "
+                "Quer me dar mais detalhes ou outro termo?"
+            ),
             "share_pending_action": None,
             "reason": "no_matches",
+            "filters": hints,
         }
 
     private_hits = await _retrieve_private(
-        phone=phone, query=query, limit=limit, min_score=threshold
+        phone=phone, query=query, limit=effective_limit, min_score=threshold,
+        source_title=hints.get("source_title"),
+        class_=hints.get("class"),
     )
-    decision = "private" if private_hits["count"] > 0 else "no_results"
+    if private_hits["count"] > 0:
+        decision = "private"
+        return {
+            **private_hits,
+            "decision": decision,
+            "needs_share_prompt": False,
+            "needs_clarification": False,
+            "share_pending_action": None,
+            "filters": hints,
+        }
     return {
         **private_hits,
-        "decision": decision,
+        "decision": "needs_clarification",
+        "results": [],
+        "count": 0,
         "needs_share_prompt": False,
+        "needs_clarification": True,
+        "clarification_prompt": (
+            "Não encontrei nada sobre isso no que memorizei. "
+            "Quer me dar mais detalhes ou outro termo?"
+        ),
         "share_pending_action": None,
+        "reason": "no_matches",
+        "filters": hints,
     }
 
 

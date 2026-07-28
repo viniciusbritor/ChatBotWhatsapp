@@ -66,7 +66,7 @@ class TestRetrievePrivate:
             AsyncMock(return_value={"results": [], "owner_hash": "abc"}),
         ):
             result = await retrieve(envelope, "irrelevante", limit=3, min_score=0.5)
-        assert result["decision"] == "no_results"
+        assert result["decision"] == "needs_clarification"
         assert result["count"] == 0
 
 
@@ -167,3 +167,66 @@ class TestSharePendingConsume:
         ):
             result = await knowledge_retriever.share_pending_action_consume("5511999")
         assert result["action_type"] == "share_private_knowledge_in_group"
+
+
+class TestRetrieveWithHints:
+    @pytest.mark.asyncio
+    async def test_extracts_source_title_from_query(self):
+        from agent_orchestration.knowledge_retriever import _extract_query_hints
+
+        hints = _extract_query_hints("o que tem no cdc-portugues-2013.pdf sobre saude?")
+        assert hints.get("source_title") == "cdc-portugues-2013.pdf"
+
+    @pytest.mark.asyncio
+    async def test_extracts_class_hint(self):
+        from agent_orchestration.knowledge_retriever import _extract_query_hints
+
+        hints = _extract_query_hints("tem algum edital de licitacao?")
+        assert hints.get("class") == "edital"
+
+    @pytest.mark.asyncio
+    async def test_no_hints_when_unrelated(self):
+        from agent_orchestration.knowledge_retriever import _extract_query_hints
+
+        hints = _extract_query_hints("oi, tudo bem?")
+        assert "source_title" not in hints
+        assert "class" not in hints
+
+    @pytest.mark.asyncio
+    async def test_default_limit_is_10(self):
+        from agent_orchestration.knowledge_retriever import retrieve
+
+        envelope = {
+            "phone": "5511999",
+            "extra": {"remote_jid": "5511999@s.whatsapp.net"},
+        }
+        # Mock that respects k=10 by truncating client-side.
+        def fake_search(**kwargs):
+            k = kwargs.get("k", 10)
+            return {"results": [{"text": f"c{i}", "score": 0.9, "source": "x.pdf"} for i in range(k)], "owner_hash": "abc"}
+        with patch(
+            "agent_orchestration.knowledge_retriever.search_legal_knowledge",
+            AsyncMock(side_effect=fake_search),
+        ):
+            result = await retrieve(envelope, "qualquer coisa")
+        # search_legal_knowledge is called with k=10 (default), so the mock
+        # returns 10 results. We verify the k parameter is propagated.
+        assert result["count"] == 10
+        assert len(result["results"]) == 10
+
+    @pytest.mark.asyncio
+    async def test_no_results_returns_clarification(self):
+        from agent_orchestration.knowledge_retriever import retrieve
+
+        envelope = {
+            "phone": "5511999",
+            "extra": {"remote_jid": "5511999@s.whatsapp.net"},
+        }
+        with patch(
+            "agent_orchestration.knowledge_retriever.search_legal_knowledge",
+            AsyncMock(return_value={"results": [], "owner_hash": "abc"}),
+        ):
+            result = await retrieve(envelope, "qualquer coisa")
+        assert result["decision"] == "needs_clarification"
+        assert result["needs_clarification"] is True
+        assert "Não encontrei" in result["clarification_prompt"]

@@ -78,7 +78,7 @@ async def _retrieve_knowledge(**kwargs):
 
     envelope = kwargs.get("envelope") or {}
     query = kwargs.get("query", "")
-    limit = int(kwargs.get("limit", 5))
+    limit = kwargs.get("limit")
     min_score = kwargs.get("min_score")
     return await retrieve(
         envelope=envelope, query=query, limit=limit, min_score=min_score
