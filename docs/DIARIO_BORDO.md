@@ -2458,3 +2458,88 @@ vector firestore", inventando uma resposta.
 3. Bot retorna clarification_prompt em queries vazias.
 4. Bot permanece profissional em contextos sensiveis (sem ironia).
 
+---
+
+## 28/07/2026 — Fix cloudbuild firestore indexes composite
+
+### Contexto
+
+Apos deploy das fases F4d.6 / F4d.7 (retriever com filtros
+`source_title`, `class`, `group`), o `firestore.indexes.json` adicionou 3
+indices compostos em `agent-knowledge-v2`. Porem, o step de deploy dos
+indices no `cloudbuild-test.yaml` ficou quebrado: usava
+`gcloud firestore indexes create --indexes-file=firestore.indexes.json`,
+comando que **nao existe** no gcloud SDK >= 470 (removido em refactor
+para separar `composite` de `fields`).
+
+### Sintoma
+
+5 builds consecutivos FAILURE em 28/07/2026 (todos no trigger
+`deploy-agents-runtime-test`):
+
+| Build ID | Commit | Erro |
+|---|---|---|
+| `d27a4854-23fc-4af8-a9fb-c6f9c8acdd2f` | `41d58db` | `Invalid choice: 'create'` |
+| `4d1ef1ba-f5ba-44d7-bdb0-411bcba4efd0` | `cf42b67` | idem |
+| `6859cec0-43d9-4613-b84f-652b4df2d1cd` | `641d777` | idem |
+| `507d67ac-0eb1-4c0c-b37d-7f70e8caf010` | `18d1ba5` | idem |
+| `ee49aa91-f585-460e-a7bb-841f619f255e` | `c61e234` | idem |
+
+Log relevante do build `ee49aa91`:
+
+```
+Step #1 - "deploy-firestore-indexes": ERROR: (gcloud.firestore.indexes) Invalid choice: 'create'.
+Step #1 - "deploy-firestore-indexes": Maybe you meant:
+Step #1 - "deploy-firestore-indexes":   gcloud firestore indexes composite create
+Step #1 - "deploy-firestore-indexes":   gcloud firestore indexes composite delete
+```
+
+### Causa raiz
+
+1. O comando certo e `gcloud firestore indexes composite create` (subgrupo
+   `composite`), nao `gcloud firestore indexes create` (que nem existe).
+2. `--indexes-file` **nao existe** na subarvore `composite create` — o
+   formato correto exige `--field-config=field-path=...,order=...` por
+   campo, repetido.
+3. O step anterior nao era idempotente: ao recriar indice ja existente,
+   gcloud retornava exit code != 0 e o build quebrava.
+
+### Correcoes aplicadas
+
+Commit `da18e90` (fix #1): substituir o step unico por **3 steps
+explicitos** com `gcloud firestore indexes composite create --async`.
+
+Commit `4883827` (fix #2): envolver cada step em bash com `|| (echo
+'skipping'; exit 0)` para tornar idempotente (re-run nao falha se o
+indice ja existe).
+
+### Validacao
+
+- Build `9e0492ce-bacb-4e82-8a38-c4997b0af2aa` (commit `4883827`):
+  **SUCCESS** em 22:41:30 → 22:47:15 (~6 min).
+- 4 indices READY em `agent-knowledge-v2`:
+  - `owner_hash + source_title + chunk_index` (id `CICAgNiroIEK`)
+  - `owner_hash + source_title` (id `CICAgJjFqZMK`)
+  - `owner_hash + class + group` (id `CICAgLiIkYMK`)
+  - `owner_hash + embedding_model + embedding_dim + schema_version + vector_embedding`
+    (original, sem mudanca)
+- Cloud Run revision `agents-runtime-test-00213-vmc` ativa, respondendo
+  `/health` com `commit_sha=4883827`, `deployed_at=9e0492ce`.
+- Os 3 indices foram **enfileirados manualmente** antes do fix de
+  idempotencia (`gcloud firestore indexes composite create --async` na
+  sessao local), o que explica o log "index already exists, skipping" no
+  primeiro build com o step corrigido.
+
+### Licoes aprendidas (para evitar reincidencia)
+
+- **`firestore.indexes.json` nao e consumido direto pelo gcloud.** O
+  build precisa aplicar cada indice via `gcloud firestore indexes
+  composite create` ou usar Terraform (nao adotado). Manter os dois em
+  sincronia e trabalho manual.
+- **Idempotencia obrigatoria** para steps de provisionamento. Qualquer
+  comando que retorne exit != 0 em estado ja-estavel quebra o build.
+- **Guardrail `scripts/check_build_status.sh`** (commit `c61e234`)
+  adicionado nesta janela, mas ainda nao integrado em pre-deploy hook.
+  Sugestao para fase futura: executar via Cloud Build **step 0** (antes
+  do teste) para abortar cedo se o build anterior falhou.
+
