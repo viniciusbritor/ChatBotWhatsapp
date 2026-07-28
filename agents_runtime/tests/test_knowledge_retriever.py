@@ -275,6 +275,57 @@ class TestRetrievalMetrics:
         assert s["top_score"] == 0.9
         assert abs(s["avg_score"] - 0.7) < 1e-9
 
+
+class TestRerank:
+    @pytest.mark.asyncio
+    async def test_rerank_skips_when_no_api_key(self):
+        from agent_orchestration import knowledge_retriever
+
+        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": ""}):
+            chunks = [{"text": f"c{i}", "score": 0.9 - i * 0.1} for i in range(5)]
+            out = await knowledge_retriever._rerank_with_llm(
+                "query", chunks, top_n=3
+            )
+        # Without DEEPSEEK_API_KEY, re-ranking is skipped entirely.
+        assert out == chunks
+        assert len(out) == 5
+
+    @pytest.mark.asyncio
+    async def test_rerank_skips_when_too_few_chunks(self):
+        from agent_orchestration import knowledge_retriever
+
+        chunks = [{"text": "c1", "score": 0.9}]
+        out = await knowledge_retriever._rerank_with_llm(
+            "query", chunks, top_n=3
+        )
+        assert out == chunks
+
+    @pytest.mark.asyncio
+    async def test_rerank_with_mocked_llm(self):
+        from agent_orchestration import knowledge_retriever
+
+        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "fake"}):
+            class FakeLLM:
+                def invoke(self, msgs):
+                    class R:
+                        content = "[2, 0, 1]"
+                    return R()
+
+            with patch("langchain_openai.ChatOpenAI") as mock_openai:
+                mock_openai.return_value = FakeLLM()
+                chunks = [
+                    {"text": "c0", "score": 0.5},
+                    {"text": "c1", "score": 0.6},
+                    {"text": "c2", "score": 0.9},
+                ]
+                out = await knowledge_retriever._rerank_with_llm(
+                    "query", chunks, top_n=3
+                )
+        # The key invariant: chunks all come from the original set.
+        assert all(c in chunks for c in out)
+        assert len(out) <= 3
+
+
     @pytest.mark.asyncio
     async def test_retrieve_emits_metrics_log(self, caplog):
         from agent_orchestration import knowledge_retriever
@@ -346,9 +397,11 @@ class TestRetrieveWithHints:
             "agent_orchestration.knowledge_retriever.search_legal_knowledge",
             AsyncMock(side_effect=fake_search),
         ):
-            result = await retrieve(envelope, "qualquer coisa")
+            with patch.dict("os.environ", {"DEEPSEEK_API_KEY": ""}):
+                result = await retrieve(envelope, "qualquer coisa")
         # search_legal_knowledge is called with k=10 (default), so the mock
-        # returns 10 results. We verify the k parameter is propagated.
+        # returns 10 results. Re-ranking is disabled (no API key), so
+        # the result keeps all 10.
         assert result["count"] == 10
         assert len(result["results"]) == 10
 

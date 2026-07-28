@@ -310,6 +310,77 @@ async def _retrieve_group(
     }
 
 
+async def _rerank_with_llm(
+    query: str,
+    chunks: List[Dict[str, Any]],
+    top_n: int = 3,
+) -> List[Dict[str, Any]]:
+    """Re-rank retrieved chunks using DeepSeek V4 Flash.
+
+    Takes the top-k (k=10) chunks and re-orders them by relevance to
+    the query using a small LLM. Returns the top_n (3) most relevant.
+    The LLM does not generate text; it only returns a JSON array of
+    indices, e.g., [3, 0, 7, 1, 9].
+    """
+    if len(chunks) <= top_n:
+        return chunks
+    if not os.getenv("DEEPSEEK_API_KEY"):
+        return chunks
+    try:
+        from langchain_openai import ChatOpenAI
+
+        base_url = os.getenv(
+            "DEEPSEEK_BASE_URL",
+            "https://api.deepseek.com/v1",
+        )
+        llm = ChatOpenAI(
+            model="deepseek-v4-flash",
+            api_key=os.getenv("DEEPSEEK_API_KEY"),
+            base_url=base_url,
+            temperature=0,
+            max_tokens=200,
+            timeout=10,
+        )
+        chunk_lines = []
+        for i, c in enumerate(chunks):
+            text = (c.get("text") or "")[:500]
+            chunk_lines.append(f"[{i}] (score={c.get('score', 0):.2f}) {text}")
+        chunks_blob = "\n".join(chunk_lines)
+        prompt = (
+            "Re-ordene os chunks abaixo por relevancia para a query. "
+            "Retorne SOMENTE um JSON array de indices, do mais "
+            f"relevante para o menos relevante, max {top_n} itens.\n"
+            f"Query: {query}\n\n"
+            f"Chunks:\n{chunks_blob}\n\n"
+            f"Resposta (JSON array de {top_n} indices):"
+        )
+        result = await asyncio.to_thread(
+            llm.invoke,
+            [{"role": "user", "content": prompt}],
+        )
+        raw = (
+            getattr(result, "content", str(result))
+            if not isinstance(result, dict)
+            else result.get("content", "")
+        )
+        import json as _json
+        match = re.search(r"\[[\d,\s]+\]", raw)
+        if not match:
+            return chunks[:top_n]
+        indices = _json.loads(match.group(0))
+        re_ranked = []
+        for idx in indices:
+            if 0 <= idx < len(chunks):
+                re_ranked.append(chunks[idx])
+        for c in chunks:
+            if c not in re_ranked:
+                re_ranked.append(c)
+        return re_ranked[:top_n]
+    except Exception as exc:
+        logger.warning("LLM re-ranking failed: %s", exc)
+        return chunks[:top_n]
+
+
 async def _maybe_request_share(
     phone: str,
     group_jid: str,
@@ -474,6 +545,10 @@ async def retrieve(
                 group_jid=group_jid, query=query, limit=effective_limit, min_score=threshold
             )
             if group_hits["count"] > 0:
+                group_hits["results"] = await _rerank_with_llm(
+                    query, group_hits["results"], top_n=3
+                )
+                group_hits["count"] = len(group_hits["results"])
                 result = {
                     **group_hits,
                     "decision": "group",
@@ -528,6 +603,10 @@ async def retrieve(
             class_=hints.get("class"),
         )
         if private_hits["count"] > 0:
+            private_hits["results"] = await _rerank_with_llm(
+                query, private_hits["results"], top_n=3
+            )
+            private_hits["count"] = len(private_hits["results"])
             decision = "private"
             result = {
                 **private_hits,
