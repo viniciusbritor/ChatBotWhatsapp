@@ -40,6 +40,18 @@ EMBEDDING_BASE_URL = os.getenv(
 )
 SCHEMA_VERSION = int(os.getenv("RAG_SCHEMA_VERSION", "2"))
 
+# Soft limits for RAG individual ingestion. The hard cap was removed in
+# F4d.5 for the group pipeline; the same soft limit semantics now apply
+# to private documents so very large files do not blow up embedding
+# cost or Firestore quotas. The defaults mirror the group ones but can
+# be tuned per environment without code changes.
+PRIVATE_CHUNKS_SOFT_LIMIT = int(
+    os.getenv("RAG_PRIVATE_CHUNKS_SOFT_LIMIT", "500")
+)
+PRIVATE_CHARS_SOFT_LIMIT = int(
+    os.getenv("RAG_PRIVATE_CHARS_SOFT_LIMIT", "1000000")
+)
+
 # Plain Firestore collections.
 MESSAGE_HISTORY_COLLECTION = os.getenv(
     "RAG_MESSAGE_HISTORY_COLLECTION", "message-history"
@@ -418,14 +430,31 @@ async def index_private_document(
     category: str = "legislacao",
     metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Index a private document (book/edital) into ``agent-knowledge-v2``."""
+    """Index a private document (book/edital) into ``agent-knowledge-v2``.
+
+    Soft limits mirror the group pipeline (F4d.5). When the input exceeds
+    the configured thresholds, the document is still indexed end-to-end
+    and the returned payload reports ``truncated=True`` plus the reason.
+    """
     db = _get_firestore()
     if db is None:
         return {"error": "firestore_unavailable"}
     clean_content = mask_pii(text_content)
+    chars_soft_limit = PRIVATE_CHARS_SOFT_LIMIT
+    chunks_soft_limit = PRIVATE_CHUNKS_SOFT_LIMIT
     chunks = _chunk_text(clean_content)
     if not chunks:
         return {"error": "empty_content"}
+
+    truncated = False
+    truncated_reason: Optional[str] = None
+    if len(text_content) > chars_soft_limit:
+        truncated = True
+        truncated_reason = "chars_above_soft_limit"
+    if len(chunks) > chunks_soft_limit:
+        truncated = True
+        if truncated_reason is None:
+            truncated_reason = "chunks_above_soft_limit"
 
     plain_batch = db.batch()
     vector_batch = db.batch()
@@ -500,6 +529,9 @@ async def index_private_document(
         "vector_doc_ids": vector_ids,
         "owner_hash": owner_hash,
         "chunks": len(chunks),
+        "chars": len(text_content),
+        "truncated": truncated,
+        "truncated_reason": truncated_reason,
         "source_title": mask_pii(source_title),
         "collection": PRIVATE_COLLECTION + "-plain",
         "vector_collection": PRIVATE_COLLECTION,

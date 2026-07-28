@@ -116,7 +116,54 @@ flowchart LR
     TOPIC -. "5 tentativas" .-> DLQ
 ```
 
-### 0.0.0. Fluxo de anexos (F4d.5)
+### 0.0.0. Knowledge Router (Fase G)
+
+```mermaid
+flowchart LR
+    WA["WhatsApp: anexo PDF/DOCX/XLSX/text"]
+    EVO["Evolution API v2.3.7"]
+    WEB["POST /webhook"]
+    ORCH["orchestrator"]
+    ROUTER["agent-knowledge-router"]
+    DET["keywords + MIME"]
+    LLM["DeepSeek V4 Flash\n(tie-breaker)"]
+    PDF["pdf_handler"]
+    DOCX["docx_handler"]
+    XLSX["xlsx_handler"]
+    TXT["text_handler"]
+    DRV["google_drive_saver"]
+    RAGI["agent-knowledge-v2"]
+    RAGG["group-knowledge-v2"]
+
+    WA --> EVO --> WEB
+    WEB --> ORCH
+    ORCH --> ROUTER
+    ROUTER --> DET
+    DET -->|ambiguous| LLM
+    DET -->|rag| SK["skill por MIME"]
+    DET -->|drive| DRV
+    SK --> PDF
+    SK --> DOCX
+    SK --> XLSX
+    SK --> TXT
+    LLM --> SK
+    LLM --> DRV
+    PDF --> RAGI
+    DOCX --> RAGI
+    XLSX --> RAGI
+    TXT --> RAGI
+    PDF -. grupo .-> RAGG
+    DOCX -. grupo .-> RAGG
+    XLSX -. grupo .-> RAGG
+    TXT -. grupo .-> RAGG
+    DRV --> GDRIVE["Google Drive"]
+
+    classDef ok fill:#d9ead3,stroke:#38761d,color:#000
+    class WA,EVO,WEB,ORCH,ROUTER,DET,SK,PDF,DOCX,XLSX,TXT,RAGI,RAGG,DRV,GDRIVE ok
+    class LLM fill:#fff2cc,stroke:#bf9000,color:#000
+```
+
+### 0.0.1. Fluxo de anexos (F4d.5)
 
 ```mermaid
 flowchart LR

@@ -2099,3 +2099,49 @@ nunca havia sido enviado ao Drive.
 - Branch `fix/rag-attachment-confirmation-1` parte de `origin/test`.
 - `feat/ui-refactor-jennifer-oauth` em `Coherence_Portal` foi descartada
   conforme decisão do operador; sem merge cruzado.
+
+---
+
+## 28/07/2026 — Fase G: Knowledge Router
+
+### Contexto
+
+Anexos no WhatsApp eram persistidos por código ad-hoc no
+`orchestrator._persist_attachment`. A Fase G introduz um agente
+dedicado (`agent-knowledge-router`) e skills por MIME para tornar o
+fluxo auditável, testável e extensível.
+
+### Arquivos novos
+
+- `agents_runtime/agent_orchestration/knowledge_router.py`
+- `agents_runtime/skills/knowledge/__init__.py`
+- `agents_runtime/skills/knowledge/pdf_handler.py`
+- `agents_runtime/skills/knowledge/docx_handler.py`
+- `agents_runtime/skills/knowledge/xlsx_handler.py`
+- `agents_runtime/skills/knowledge/text_handler.py`
+- `agents_runtime/skills/knowledge/google_drive_saver.py`
+- `agents_runtime/tests/test_knowledge_router.py`
+- `agents_runtime/tests/test_skills_knowledge.py`
+
+### Mudancas em arquivos existentes
+
+- `agents_runtime/tool_registry.py`: nova tool `knowledge.route_attachment`.
+- `agents_runtime/orchestrator.py::_persist_attachment`: delega ao router.
+- `agents_runtime/core/rag.py`: adiciona soft limits para RAG individual
+  (`PRIVATE_CHUNKS_SOFT_LIMIT`, `PRIVATE_CHARS_SOFT_LIMIT`) e devolve
+  `truncated` / `chars` no payload de `index_private_document`.
+
+### Comportamento
+
+- Keywords RAG (`memorizar`, `gravar`, `guardar`, `indexar`,
+  `armazenar`, `vector`, `firestore`, `base de conhecimento`) →
+  Firestore Vector (default).
+- Keywords Drive (`drive`, `gdrive`, `manda pra mim`, `envia pra mim`)
+  → Google Drive (explicito).
+- Caso ambiguo: tie-breaker via DeepSeek V4 Flash.
+- Escopo: `private` ou `group` baseado em `@g.us`.
+
+### Gate
+
+- `pytest -q tests/test_knowledge_router.py tests/test_skills_knowledge.py`: 18 passed.
+- Suite completa continua verde.

@@ -644,86 +644,36 @@ async def _persist_attachment(
     extracted: Dict[str, Any],
     save_to_rag: bool,
 ) -> Dict[str, Any]:
-    """Persiste attachment: RAG (group ou owner) se save_to_rag, senão Drive.
+    """Persiste attachment delegando ao knowledge router (Fase G).
 
-    Detecta is_group no envelope. Se is_group:
-        - save_to_rag=True → index_group_document
-        - save_to_rag=False → upload no drive_folder do grupo
-    Se individual:
-        - save_to_rag=True → upload_file no Meu Drive (não temos agent-knowledge-v2 individual
-          configurado para attachments; salvar como arquivo e indexar para o RAG em F5+)
-        - save_to_rag=False → upload_file no Meu Drive
+    O router decide skill (MIME), escopo (individual/grupo) e destino
+    (Firestore Vector por padrão; Google Drive apenas se o user pedir
+    explicitamente). Para manter compatibilidade com a assinatura
+    legada, ``save_to_rag=False`` força o caminho Drive.
     """
-    phone = envelope.get("phone", "")
-    is_group = envelope.get("extra", {}).get("is_group", False)
-    text = extracted.get("text", "")
-    source_name = extracted.get("source_name", "document")
-    mimetype = extracted.get("mimetype", "")
-    if not text:
-        return {"error": "no_text_extracted", "mimetype": mimetype}
-    if is_group:
-        if save_to_rag:
-            try:
-                from tools.group import index_group_document
-                group_jid = _extract_group_jid(envelope)
-                result = await index_group_document(
-                    phone=phone,
-                    group_jid=group_jid,
-                    text=text,
-                    visibility="group",
-                    source_name=source_name,
-                )
-                return {"status": "rag_group", "index_result": result,
-                        "source_name": source_name}
-            except Exception as exc:
-                logger.warning("attachment: index_group_document failed: %s", exc)
-                return {"error": "rag_index_failed", "detail": str(exc)}
-        else:
-            try:
-                from tools.google_drive import get_group_drive_folder
-                group_jid = _extract_group_jid(envelope)
-                folder_id = await get_group_drive_folder(group_jid)
-                if not folder_id:
-                    return {"error": "no_group_folder", "group_jid": group_jid}
-                from tools.google_drive import upload_file
-                result = await upload_file(
-                    phone=phone, folder_id=folder_id,
-                    filename=source_name, content=text, mime_type=mimetype,
-                )
-                return {"status": "drive_group", "upload_result": result,
-                        "source_name": source_name}
-            except Exception as exc:
-                logger.warning("attachment: upload_file group failed: %s", exc)
-                return {"error": "drive_upload_failed", "detail": str(exc)}
-    else:
-        if save_to_rag:
-            try:
-                from core.rag import index_private_document
-                result = await index_private_document(
-                    phone=phone,
-                    text_content=text,
-                    source_title=source_name,
-                    category="whatsapp_attachment",
-                    metadata={"mimetype": mimetype},
-                )
-                if result.get("error"):
-                    return {"error": "rag_index_failed", "detail": result.get("error")}
-                return {"status": "rag_individual", "index_result": result,
-                        "source_name": source_name}
-            except Exception as exc:
-                logger.warning("attachment: index_private_document failed: %s", exc)
-                return {"error": "rag_index_failed", "detail": str(exc)}
-        try:
-            from tools.google_drive import upload_file
-            result = await upload_file(
-                phone=phone, folder_id="root",
-                filename=source_name, content=text, mime_type=mimetype,
-            )
-            return {"status": "drive_individual", "upload_result": result,
-                    "source_name": source_name}
-        except Exception as exc:
-            logger.warning("attachment: upload_file individual failed: %s", exc)
-            return {"error": "drive_upload_failed", "detail": str(exc)}
+    from agent_orchestration.knowledge_router import route_attachment
+
+    decision_input = envelope.copy()
+    decision_input["_drive_extracted"] = extracted
+    user_text = "memorizar" if save_to_rag else "drive"
+    decision = await route_attachment(decision_input, user_text)
+    skill = decision.get("skill")
+    if skill is None:
+        return decision.get("persist_result") or {
+            "error": "no_skill",
+            "detail": decision,
+        }
+    extracted_payload = decision.get("extracted") or extracted
+    persist_result = await skill.persist(
+        envelope,
+        extracted_payload,
+        decision.get("scope", "private"),
+    )
+    if persist_result.get("error"):
+        return persist_result
+    persist_result["scope"] = decision.get("scope", "private")
+    persist_result["skill_name"] = decision.get("skill_name")
+    return persist_result
 
 
 def _prefetch_tone_guide(intent: Dict[str, Any]) -> str:

@@ -17,6 +17,7 @@
 - **F4d.2 (27/07/2026)**: ack do F2 ("Só um instante...") usa `delay_ms = max(1500, calculate_delay_ms(ack_text))` para que o WhatsApp mostre o typing indicator ("digitando...") antes da resposta aparecer. Sem isso, a resposta brota na tela instantaneamente.
 - **F4d (27/07/2026)**: handler de attachment no `orchestrator._handle_attachment` — pipeline PDF/DOCX/XLSX via Evolution v2.3.7. Anexos vão para `agent-knowledge-v2` (individual) ou `group-knowledge-v2` (grupo) quando o user pede para "memorizar"/"indexar"/"armazenar".
 - **F4d.5 (28/07/2026)**: confirmação de leitura paralela ao webhook com log estruturado (`evolution_mark_read_ok` / `_timeout` / `_failed` / `_skipped`). RAG de grupo sem teto rígido: `truncated=True` quando `len(text) > RAG_GROUP_CHARS_SOFT_LIMIT` ou `len(chunks) > RAG_GROUP_CHUNKS_SOFT_LIMIT`. Padrão de chunks permanece `max_chars=1200`, `overlap_pct=15`.
+- **Fase G — Knowledge Router (28/07/2026)**: sub-agente `agent-knowledge-router` em `agent_orchestration/knowledge_router.py` decide a skill por MIME e keywords, com tie-breaker via DeepSeek V4 Flash. Skills em `skills/knowledge/` (`pdf`, `docx`, `xlsx`, `text`, `drive`). Default = Firestore Vector (`agent-knowledge-v2` individual ou `group-knowledge-v2` grupo); Google Drive apenas se o user pedir explicitamente. Embeddings OpenAI `text-embedding-3-small` (1536d). Soft limits `RAG_PRIVATE_CHUNKS_SOFT_LIMIT=500` e `RAG_PRIVATE_CHARS_SOFT_LIMIT=1_000_000`.
 
 ## Escopos Google (GUARDRAILS §8 — em transição)
 

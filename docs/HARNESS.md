@@ -189,6 +189,12 @@ RAG_RETENTION_DAYS: "90"
 RAG_GROUP_CHUNKS_SOFT_LIMIT: "500"
 RAG_GROUP_CHARS_SOFT_LIMIT: "1000000"
 
+# Tetos saudaveis para RAG individual (Fase G). Mesma semantica
+# do grupo: acima do limite, `index_private_document` reporta
+# `truncated=True` e segue indexando ate o fim.
+RAG_PRIVATE_CHUNKS_SOFT_LIMIT: "500"
+RAG_PRIVATE_CHARS_SOFT_LIMIT: "1000000"
+
 # Observabilidade
 LOG_LEVEL: "INFO"
 ENVIRONMENT: "test"

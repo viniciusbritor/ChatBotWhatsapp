@@ -39,6 +39,28 @@ async def _rag_search_legal_knowledge(**kwargs):
     )
 
 
+async def _route_attachment(**kwargs):
+    from agent_orchestration.knowledge_router import route_attachment
+
+    envelope = kwargs.get("envelope") or {}
+    user_text = kwargs.get("user_text", "")
+    decision = await route_attachment(envelope, user_text)
+    skill = decision.get("skill")
+    extracted = decision.get("extracted")
+    if skill is not None:
+        if extracted is None:
+            extracted = await skill.extract(envelope)
+            decision["extracted"] = extracted
+        if extracted:
+            persist_result = await skill.persist(
+                envelope, extracted, decision.get("scope", "private")
+            )
+        else:
+            persist_result = {"error": "extraction_failed"}
+        decision["persist_result"] = persist_result
+    return decision
+
+
 TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
     "calendar.list_events": {
         "function": google_calendar.list_events,
@@ -373,6 +395,24 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
                 "limit": {"type": "integer", "description": "Maximo de resultados (default 5)"},
             },
             "required": ["group_jid", "query"],
+        },
+    },
+    "knowledge.route_attachment": {
+        "function": _route_attachment,
+        "implementation": "knowledge_router",
+        "description": (
+            "Roteia um anexo recebido no WhatsApp para a skill apropriada de "
+            "armazenamento. Decide entre Firestore Vector (default) e Google "
+            "Drive (so se o user pedir explicitamente). Retorna status rag_*, "
+            "drive_* ou error."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "envelope": {"type": "object", "description": "Envelope do webhook"},
+                "user_text": {"type": "string", "description": "Texto da mensagem do user"},
+            },
+            "required": ["envelope", "user_text"],
         },
     },
     "web.fetch_url": {

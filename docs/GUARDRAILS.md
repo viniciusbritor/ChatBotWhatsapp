@@ -141,6 +141,16 @@ em Firestore plain (`message-history/{history_id}`) com indexação por
   `index_group_document_chunks_soft_limit` são registrados em warning.
 - Anexos individuais memorizados continuam com limite nominal LGPD
   (TTL em `RAG_RETENTION_DAYS`).
+- **Knowledge Router (Fase G)**: o anexo é roteado pelo
+  `agent-knowledge-router` para a skill apropriada por MIME.
+  Embeddings OpenAI `text-embedding-3-small` (1536d). Storage
+  default = Firestore Vector (`agent-knowledge-v2` ou
+  `group-knowledge-v2`). Google Drive apenas se o user pedir
+  explicitamente (`manda pra mim`, `salvar no drive`,
+  `guardar no gdrive`, etc.).
+- **Soft limits para RAG individual** (`RAG_PRIVATE_CHUNKS_SOFT_LIMIT`,
+  `RAG_PRIVATE_CHARS_SOFT_LIMIT`): espelham o grupo. Documentos acima
+  do teto retornam `truncated=True` em vez de abortar.
 
 ## 8. Integração com a Evolution API (23/07/2026)
 
