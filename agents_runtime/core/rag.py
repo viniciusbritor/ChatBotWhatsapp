@@ -194,7 +194,10 @@ def _chunk_text(text: str, max_chars: int = 1200, overlap: int = 180) -> List[st
     return [chunk for chunk in chunks if chunk]
 
 
-def _vector_filters(owner_hash: Optional[str] = None) -> List[Tuple[str, str, Any]]:
+def _vector_filters(
+    owner_hash: Optional[str] = None,
+    extra: Optional[List[Tuple[str, str, Any]]] = None,
+) -> List[Tuple[str, str, Any]]:
     filters: List[Tuple[str, str, Any]] = [
         ("embedding_model", "==", EMBEDDING_MODEL),
         ("embedding_dim", "==", EMBEDDING_DIM),
@@ -202,6 +205,8 @@ def _vector_filters(owner_hash: Optional[str] = None) -> List[Tuple[str, str, An
     ]
     if owner_hash:
         filters.insert(0, ("owner_hash", "==", owner_hash))
+    if extra:
+        filters.extend(extra)
     return filters
 
 
@@ -435,6 +440,9 @@ async def index_private_document(
     source_url: Optional[str] = None,
     category: str = "legislacao",
     metadata: Optional[Dict[str, Any]] = None,
+    class_: Optional[str] = None,
+    group: Optional[str] = None,
+    theme: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Index a private document (book/edital) into ``agent-knowledge-v2``.
 
@@ -482,6 +490,9 @@ async def index_private_document(
         for key, value in (metadata or {}).items()
         if key not in protected_fields
     }
+    class_value = (class_ or safe_metadata.get("class") or "").strip() or None
+    group_value = (group or safe_metadata.get("group") or "").strip() or None
+    theme_value = (theme or safe_metadata.get("theme") or "").strip() or None
 
     for index, chunk in enumerate(chunks):
         document_id = hashlib.sha256(
@@ -495,6 +506,9 @@ async def index_private_document(
             "source_title": mask_pii(source_title),
             "source_url": source_url,
             "category": category,
+            "class": class_value,
+            "group": group_value,
+            "theme": theme_value,
             "chunk_index": index,
             "language": "pt-BR",
             "created_at": now,
@@ -537,6 +551,9 @@ async def index_private_document(
         "chunks": len(chunks),
         "chars": len(text_content),
         "truncated": truncated,
+        "class": class_value,
+        "group": group_value,
+        "theme": theme_value,
         "truncated_reason": truncated_reason,
         "source_title": mask_pii(source_title),
         "collection": PRIVATE_COLLECTION + "-plain",
@@ -549,6 +566,9 @@ async def search_legal_knowledge(
     query: str,
     k: int = 5,
     min_score: float = 0.5,
+    source_title: Optional[str] = None,
+    class_: Optional[str] = None,
+    group: Optional[str] = None,
 ) -> Dict[str, Any]:
     db = _get_firestore()
     if db is None:
@@ -556,13 +576,20 @@ async def search_legal_knowledge(
     query_vector = await embed_query(query)
     if query_vector is None:
         return {"results": [], "error": "embedding_failed"}
+    extra_filters: List[Tuple[str, str, Any]] = []
+    if source_title:
+        extra_filters.append(("source_title", "==", source_title))
+    if class_:
+        extra_filters.append(("class", "==", class_))
+    if group:
+        extra_filters.append(("group", "==", group))
     try:
         documents = await _find_nearest(
             db,
             PRIVATE_COLLECTION,
             query_vector,
             k,
-            _vector_filters(_owner_hash(phone)),
+            _vector_filters(_owner_hash(phone), extra_filters or None),
         )
         chunks = []
         for document in documents:
@@ -577,9 +604,17 @@ async def search_legal_knowledge(
                     "source": data.get("source_title", ""),
                     "source_url": data.get("source_url", ""),
                     "category": data.get("category", ""),
+                    "class": data.get("class", ""),
+                    "group": data.get("group", ""),
+                    "theme": data.get("theme", ""),
                 }
             )
-        return {"results": chunks, "query": mask_pii(query), "owner_hash": _owner_hash(phone)}
+        return {
+            "results": chunks,
+            "query": mask_pii(query),
+            "owner_hash": _owner_hash(phone),
+            "filters": {"source_title": source_title, "class": class_, "group": group},
+        }
     except Exception as exc:
         logger.error("Private vector search failed: %s", exc)
         return {"results": [], "error": str(exc)}

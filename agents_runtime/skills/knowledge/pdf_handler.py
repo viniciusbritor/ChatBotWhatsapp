@@ -122,6 +122,9 @@ async def persist(
             source_title=source_name,
             category=extra_metadata.get("class", "legislacao") if extra_metadata.get("class") else "whatsapp_attachment",
             metadata=extra_metadata,
+            class_=extra_metadata.get("class"),
+            group=extra_metadata.get("group"),
+            theme=extra_metadata.get("theme"),
         )
         if result.get("error"):
             return {"error": "rag_index_failed", "detail": result.get("error")}
