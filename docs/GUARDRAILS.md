@@ -157,8 +157,21 @@ em Firestore plain (`message-history/{history_id}`) com indexação por
   - cruzado privado->grupo -> cria
     `pending_action share_private_knowledge_in_group` (TTL 300 s)
     antes de compartilhar.
-  - Score minimo: `RAG_RETRIEVE_MIN_SCORE` (default 0.5).
+  - Score minimo: `RAG_RETRIEVE_MIN_SCORE` (default 0.7 na Fase F4d.6).
 - Auditoria de retrieval nao e obrigatoria nesta fase.
+- **Categorizer (Fase F4d.6)**: o `agent-categorizer` (DeepSeek V4 Flash)
+  classifica cada anexo em `class/group/theme` antes da persistencia.
+  Sistema de 15 classes com ~50 groups. Em caso de falha, fallback
+  para `outros/outros`. Heuristica local disponivel para cenarios sem
+  LLM.
+- **Retrieval isolado (Fase F4d.6)**: o `agent-knowledge-retriever` usa
+  `RAG_RETRIEVE_K=10` e `RAG_RETRIEVE_MIN_SCORE=0.7`. Filtra por
+  `source_title` e `class` quando a query ou o historico sugerem.
+  Quando nada bate, devolve `needs_clarification=True` em vez de
+  alucinar.
+- **Composite indexes (Fase F4d.6)**: 3 indices em `firestore.indexes.json`
+  (raiz do repo) deployados pelo Cloud Build. Nenhum dos 3 filtra
+  cross-collection: apenas `agent-knowledge-v2`.
 - **Soft limits para RAG individual** (`RAG_PRIVATE_CHUNKS_SOFT_LIMIT`,
   `RAG_PRIVATE_CHARS_SOFT_LIMIT`): espelham o grupo. Documentos acima
   do teto retornam `truncated=True` em vez de abortar.

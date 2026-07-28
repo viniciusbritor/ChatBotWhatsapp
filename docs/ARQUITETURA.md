@@ -192,7 +192,41 @@ flowchart TD
     PEND --> SHARE
 ```
 
-### 0.0.2. Fluxo de anexos (F4d.5)
+### 0.0.2. Knowledge Categorizer + Isolation (Fase F4d.6)
+
+```mermaid
+flowchart LR
+    PDF["PDF/DOCX/XLSX"]
+    EXT["skill.extract"]
+    CAT["agent-categorizer\nDeepSeek V4 Flash"]
+    TX["texto"]
+    CL["{class,group,theme}"]
+    IND["index_private_document"]
+    VEC["agent-knowledge-v2"]
+    USR["user: pergunta"]
+    HINT["hints = filename + class"]
+    RET["agent-knowledge-retriever\nk=10, score=0.7"]
+    CLAR["needs_clarification=True"]
+    RESP["resposta citando source_title"]
+
+    PDF --> EXT --> TX
+    TX --> CAT --> CL
+    CL --> IND
+    IND --> VEC
+    USR --> HINT --> RET
+    VEC --> RET
+    RET -->|hits| RESP
+    RET -->|zero| CLAR
+
+    classDef ok fill:#d9ead3,stroke:#38761d,color:#000
+    classDef armazenado fill:#fff2cc,stroke:#bf9000,color:#000
+    classDef novo fill:#cfe2f3,stroke:#1f6feb,color:#000
+    class PDF,EXT,TX,CL,IND,USR,HINT,RET,RESP,CLAR novo
+    class CAT novo
+    class VEC armazenado
+```
+
+### 0.0.3. Fluxo de anexos (F4d.5)
 
 ```mermaid
 flowchart LR

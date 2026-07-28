@@ -2189,3 +2189,92 @@ membria quando o pedido vem em grupo.
 
 - `pytest -q tests/test_knowledge_retriever.py tests/test_knowledge_router.py tests/test_skills_knowledge.py tests/test_orchestrator.py tests/test_rag.py tests/test_group_rag.py`: 140 passed.
 - Ruff: 0 erros nos arquivos da fase.
+
+---
+
+## 28/07/2026 — Fase F4d.6: categorizer + isolation + composite indexes
+
+### Contexto
+
+A Jennifer alucinou: a resposta a "principais pontos do CDC" citou
+"higiene das maos / mascaras / luvas" — conteudo que NAO existe no PDF
+do CDC. O documento estava armazenado corretamente, mas a busca
+semantica retornou um chunk de outro documento com score mais alto
+que os chunks do CDC, e o LLM sintetizou uma resposta fora de contexto.
+
+### Causa raiz
+
+1. Multiplos documentos no mesmo `agent-knowledge-v2` (owner_hash).
+2. Retriever fazia `find_nearest(query, k=5)` sem filtro por
+   `source_title` ou `class`.
+3. Sem `class/group/theme` nos chunks: tudo era "outros".
+4. Sistema prompt do retriever nao exigia citar `source_title`.
+
+### Mudancas aplicadas (commit por commit, gate verde por fase)
+
+1. **f23ce0c** `feat(firestore): add composite indexes manifest and cloudbuild step`
+   - Cria `firestore.indexes.json` na raiz (3 indices).
+   - Adiciona step `deploy-firestore-indexes` no `cloudbuild-test.yaml`
+     usando `gcloud firestore indexes create --indexes-file=...` (idempotente).
+   - Adiciona env vars `RAG_RETRIEVE_MIN_SCORE=0.7` e `RAG_RETRIEVE_K=10`.
+
+2. **94d1c93** `feat(categorizer): llm-based class/group/theme for attachments`
+   - Cria `agent_orchestration/categorizer.py` com DeepSeek V4 Flash.
+   - Taxonomia: 15 classes, ~50 groups, theme livre.
+   - Heuristica local como fallback (CDC, edital, manual, probabilidade, saude).
+   - Cria `data/agents/agent-categorizer.yaml` (system prompt).
+   - 21 testes (categorizer + taxonomia).
+
+3. **d273a75** `feat(router): invoke categorizer and propagate metadata to skills`
+   - `knowledge_router.categorize_and_extract` extrai texto e categoriza.
+   - `_route_attachment` no tool_registry chama categorizer.
+   - Skills aceitam `metadata` e gravam em `index_private_document`.
+   - `tool_registry` registra `knowledge.categorize`.
+
+4. **a438c32** `feat(rag): persist class/group/theme and filter retrieval`
+   - `index_private_document` aceita `class_/group/theme` e grava em
+     cada chunk.
+   - `search_legal_knowledge` aceita filtros `source_title/class/group`.
+   - `_vector_filters` aceita filtros extras.
+
+5. **af748e7** `feat(retriever): k=10, score=0.7, hints and clarification prompt`
+   - `RAG_RETRIEVE_K=10`, `RAG_RETRIEVE_MIN_SCORE=0.7`.
+   - Detecta `source_title` (regex de filename) e `class` (keywords)
+     na query.
+   - Quando nada bate, devolve `needs_clarification=True` com
+     `clarification_prompt` em vez de alucinar.
+   - Logs estruturados `retriever_decision`.
+
+### Limpeza Firestore (Fase 0)
+
+Antes de comitar Fase 5, foram deletados 3 docs antigos
+(`Contatos frequentes`, `Historico de decisoes`,
+`Preferencias e contexto pessoal`) do `owner_hash`
+`afafa878e52e6cdc486ab42168e753a4`. CDC foi mantido
+(191 chunks).
+
+### Gate final
+
+- `pytest -q tests/`: 540 passed, 30 skipped.
+- Ruff: 0 erros nos arquivos da fase (erros preexistentes em
+  `core/rag.py` sao legados).
+
+### Critérios de pronto
+
+- [x] 3 docs antigos deletados.
+- [x] `firestore.indexes.json` versionado.
+- [x] 5 commits separados com gate verde cada.
+- [x] pytest focado + geral verde.
+- [x] Ruff 0 erros nos arquivos da fase.
+- [x] Documentacao atualizada (AGENTS, HARNESS, GUARDRAILS, DIARIO_BORDO).
+
+### Validacao pos-deploy
+
+- Cloud Build dispara `deploy-firestore-indexes` e `deploy-agents-runtime-test`.
+- Reenviar PDF CDC no WhatsApp; resposta deve mencionar
+  `agent-knowledge-v2` e `class=legal`.
+- Perguntar "principais capitulos do CDC?"; resposta deve listar
+  capitulos reais do Codigo de Defesa do Consumidor (nao termos
+  aleatorios de outro documento).
+- Perguntar "higiene das maos"; resposta deve ser
+  `needs_clarification` (sem alucinacao).
