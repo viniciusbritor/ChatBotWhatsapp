@@ -2278,3 +2278,114 @@ Antes de comitar Fase 5, foram deletados 3 docs antigos
   aleatorios de outro documento).
 - Perguntar "higiene das maos"; resposta deve ser
   `needs_clarification` (sem alucinacao).
+
+---
+
+## 28/07/2026 — Fase F4d.7: rag-retrieval-fix (deploy do Firestore config)
+
+### Contexto
+
+Apos a Fase F4d.6 (categorizer + retriever), o usuario continuou
+reportando que Jennifer "diz que salvou mas nao consegue recuperar".
+Investigacao diagnostica no Firestore revelou:
+
+1. **Storage OK**: 352 chunks em `agent-knowledge-v2` para o owner_hash
+   `afafa878e52e6cdc486ab42168e753a4`:
+   - `cdc-portugues-2013.pdf` (191 chunks, class=legal, group=legislacao)
+   - `dissertacao.pdf` (161 chunks, class=academico, group=dissertacao)
+   - Todos com `vector_embedding` preenchido.
+
+2. **Config Firestore incompleta**:
+   - `agent-knowledge-retriever` NAO EXISTIA na collection `agents`.
+   - `knowledge.retrieve` e `knowledge.categorize` NAO EXISTIAM em
+     `tools`.
+   - `agent-rag` (legado) usava `rag.search_knowledge` (public
+     collection, vazio), nao a collection privada.
+
+3. **Orchestrator routing quebrado**: `_resolve_agent_for_intent`
+   retornava `"knowledge-retriever"`, mas `get_agent("knowledge-retriever")`
+   retornava None. Codigo caia no fallback do orchestrator (jennifier),
+   que delegava para `agent-rag`, que buscava na collection errada.
+
+### Causa raiz
+
+Deploy parcial: o codigo Python foi deployado (commit `8f1c5b0`),
+mas a configuracao Firestore dos agents e tools nao foi escrita. O
+sistema ficou "morto" porque o DeepAgent framework consulta o Firestore
+para resolver tools, agents, delegates e system prompts.
+
+### Correcoes aplicadas (Fase F4d.7)
+
+1. **Orchestrator routing**:
+   - `_resolve_agent_for_intent` agora retorna `"agent-knowledge-retriever"`
+     (com prefixo `agent-`).
+
+2. **Agent config** (Firestore):
+   - Criado `agent-knowledge-retriever` com tools `knowledge.retrieve`
+     e `knowledge.categorize`, parent_id=`jennifier`.
+   - Atualizado `agent-rag` para usar `rag.search_legal_knowledge`
+     (collection privada `agent-knowledge-v2`) e prompt reforcado
+     para citar `source_title`.
+   - Adicionado `agent-knowledge-retriever` em `jennifier.delegates_to`.
+
+3. **Tools config** (Firestore):
+   - `knowledge.retrieve` (envelope, query, limit, min_score).
+   - `knowledge.categorize` (text, source_name).
+
+4. **Backfill de metadata**:
+   - `scripts/backfill_categorizer.py` reprocessa docs sem
+     `class/group/theme`.
+   - Executado: 352 chunks agora tem categorizacao.
+   - `disserta\u00e7\u00e3o.pdf` classificado como `academico/dissertacao`
+     (heuristica com normalizacao de acentos).
+
+5. **Default `RAG_RETRIEVE_MIN_SCORE=0.7`**:
+   - `core/rag.py` agora usa 0.7 como default.
+   - `RAG_RETRIEVE_K=10` mantido.
+
+6. **Heuristica do categorizer**:
+   - Normaliza acentos (NFKD) para detectar "disserta\u00e7\u00e3o",
+     "estat\u00edstica" etc.
+   - Adicionado padrao explicito para "dissertacao"/"monografia"/"tcc".
+
+### Ferramentas de diagnostico
+
+- `scripts/diag_rag.py` (read-only): verifica storage, agents, tools.
+- `scripts/smoke_retrieval.py`: retrieval com OpenAI real (requer
+  OPENAI_API_KEY no env).
+- `scripts/smoke_retrieval_mocked.py`: retrieval com embeddings mockadas
+  para validar logica de routing e filtros (sem API key).
+- `scripts/backfill_categorizer.py`: reprocessa docs antigos.
+
+### Gate
+
+- `pytest -q tests/test_categorizer.py tests/test_knowledge_retriever.py tests/test_orchestrator.py tests/test_rag.py`: 116 passed.
+- Ruff: 2 erros preexistentes em `core/rag.py` (datetime.timezone unused,
+  BRT undefined), nao introduzidos por esta fase.
+
+### Validacao esperada pos-deploy
+
+1. **Storage** confirmado: 352 chunks com `vector_embedding`.
+2. **Retrieval real**: enviar PDF no WhatsApp, perguntar sobre conteudo.
+   Resposta deve citar `source_title` e trechos do CDC/dissertacao.
+3. **Anti-alucinacao**: perguntar "higiene das maos"; deve devolver
+   `clarification_prompt` em vez de inventar.
+4. **Filtros**: `class=legal` para CDC, `class=academico` para
+   dissertacao, validados via query direta no Firestore.
+
+### Limitacoes conhecidas
+
+- Embeddings exigem OPENAI_API_KEY valida no runtime.
+- Se a LLM de categorizacao (DeepSeek) estiver indisponivel, fallback
+  heuristico classifica com confidence 0.3–0.7.
+- O composite index demora ~5–10 min para ser construido no primeiro
+  deploy; queries filtradas falham nesse intervalo.
+
+- Cloud Build dispara `deploy-firestore-indexes` e `deploy-agents-runtime-test`.
+- Reenviar PDF CDC no WhatsApp; resposta deve mencionar
+  `agent-knowledge-v2` e `class=legal`.
+- Perguntar "principais capitulos do CDC?"; resposta deve listar
+  capitulos reais do Codigo de Defesa do Consumidor (nao termos
+  aleatorios de outro documento).
+- Perguntar "higiene das maos"; resposta deve ser
+  `needs_clarification` (sem alucinacao).
