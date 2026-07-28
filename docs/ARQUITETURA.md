@@ -163,7 +163,36 @@ flowchart LR
     class LLM fill:#fff2cc,stroke:#bf9000,color:#000
 ```
 
-### 0.0.1. Fluxo de anexos (F4d.5)
+### 0.0.1. Knowledge Retriever (Fase H)
+
+```mermaid
+flowchart TD
+    U["user: pergunta"]
+    D{"is_rag?"}
+    LLM["DeepSeek V4 Flash tie-breaker"]
+    PR["retrieve_private\nagent-knowledge-v2"]
+    GR["retrieve_group\ngroup-knowledge-v2"]
+    MEM{"user membro?"}
+    PEND["pending_action\nshare_private_knowledge_in_group"]
+    SHARE["compartilhar citando fonte"]
+
+    U --> D
+    D -->|sim| PR
+    D -->|nao| NN["resposta normal"]
+    D -->|ambiguous| LLM
+    LLM -->|rag| PR
+    LLM -->|group| GR
+    PR -->|tem hits| OK1["retornar trechos"]
+    PR -->|zero| GR
+    GR --> MEM
+    MEM -->|nao| DN["negado"]
+    MEM -->|sim| GR2["retornar trechos do grupo"]
+    GR -->|tem hits| OK2
+    GR -->|zero, mas privado tem| PEND
+    PEND --> SHARE
+```
+
+### 0.0.2. Fluxo de anexos (F4d.5)
 
 ```mermaid
 flowchart LR

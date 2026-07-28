@@ -516,6 +516,8 @@ def _resolve_agent_for_intent(intent: Dict[str, Any], instance: str) -> Optional
         return "agent-learning"
     if intent["is_intimacy"]:
         return "agent-intimacy"
+    if intent.get("is_rag"):
+        return "knowledge-retriever"
     if intent["is_drive"]:
         return "manager-drive"
     if intent["is_email"]:
@@ -1161,6 +1163,16 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     intent = _detect_intent(masked_text)
     path = [{"step": 1, "phase": "intent_detect", "details": {key: value for key, value in intent.items() if value}}]
+
+    # F4d.5/H: detecta se a mensagem pede conteudo armazenado no RAG.
+    # Heuristica primeiro; tie-breaker LLM so se ambiguo.
+    from agent_orchestration.knowledge_retriever import is_rag_query
+    try:
+        intent["is_rag"] = await is_rag_query(masked_text)
+    except Exception:
+        intent["is_rag"] = False
+    if intent["is_rag"]:
+        path.append({"step": "1a", "phase": "rag_intent", "details": "true"})
 
     attachment_already_acked = False
     if extra.get("has_document") and not intent.get("is_attachment"):

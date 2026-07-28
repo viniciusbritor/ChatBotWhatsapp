@@ -195,6 +195,10 @@ RAG_GROUP_CHARS_SOFT_LIMIT: "1000000"
 RAG_PRIVATE_CHUNKS_SOFT_LIMIT: "500"
 RAG_PRIVATE_CHARS_SOFT_LIMIT: "1000000"
 
+# Score minimo para retrieval (Fase H). Mesmo default para privado
+# e grupo. Ajustavel por env sem code change.
+RAG_RETRIEVE_MIN_SCORE: "0.5"
+
 # Observabilidade
 LOG_LEVEL: "INFO"
 ENVIRONMENT: "test"

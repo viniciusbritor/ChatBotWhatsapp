@@ -9,6 +9,20 @@ from core.timezone import now_brt
 
 PENDING_ACTION_TTL_SEC = int(os.getenv("PENDING_ACTION_TTL_SEC", "300"))
 PENDING_ACTION_COLLECTION = os.getenv("PENDING_ACTION_COLLECTION", "pending-actions")
+
+# Pending action types used by the orchestrator.
+PENDING_ACTION_NICKNAME_CONSENT = "nickname_consent"
+PENDING_ACTION_GROUP_CONSENT = "group_consent"
+PENDING_ACTION_ATTACHMENT_MODE = "attachment_mode"
+PENDING_ACTION_SHARE_PRIVATE_KNOWLEDGE = "share_private_knowledge_in_group"
+
+ALLOWED_PENDING_ACTION_TYPES = {
+    PENDING_ACTION_NICKNAME_CONSENT,
+    PENDING_ACTION_GROUP_CONSENT,
+    PENDING_ACTION_ATTACHMENT_MODE,
+    PENDING_ACTION_SHARE_PRIVATE_KNOWLEDGE,
+}
+
 logger = logging.getLogger(__name__)
 _local_actions: Dict[str, Dict[str, Any]] = {}
 _local_lock = threading.RLock()

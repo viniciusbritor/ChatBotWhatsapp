@@ -52,6 +52,12 @@ PRIVATE_CHARS_SOFT_LIMIT = int(
     os.getenv("RAG_PRIVATE_CHARS_SOFT_LIMIT", "1000000")
 )
 
+# Minimum similarity score for retrieval (Phase H). Same default for
+# private and group retrievers; tunable via env.
+RAG_RETRIEVE_MIN_SCORE = float(
+    os.getenv("RAG_RETRIEVE_MIN_SCORE", "0.5")
+)
+
 # Plain Firestore collections.
 MESSAGE_HISTORY_COLLECTION = os.getenv(
     "RAG_MESSAGE_HISTORY_COLLECTION", "message-history"

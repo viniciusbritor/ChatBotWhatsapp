@@ -61,6 +61,18 @@ async def _route_attachment(**kwargs):
     return decision
 
 
+async def _retrieve_knowledge(**kwargs):
+    from agent_orchestration.knowledge_retriever import retrieve
+
+    envelope = kwargs.get("envelope") or {}
+    query = kwargs.get("query", "")
+    limit = int(kwargs.get("limit", 5))
+    min_score = kwargs.get("min_score")
+    return await retrieve(
+        envelope=envelope, query=query, limit=limit, min_score=min_score
+    )
+
+
 TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
     "calendar.list_events": {
         "function": google_calendar.list_events,
@@ -413,6 +425,27 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
                 "user_text": {"type": "string", "description": "Texto da mensagem do user"},
             },
             "required": ["envelope", "user_text"],
+        },
+    },
+    "knowledge.retrieve": {
+        "function": _retrieve_knowledge,
+        "implementation": "knowledge_retriever",
+        "description": (
+            "Recupera trechos previamente armazenados na base de conhecimento "
+            "do user (agent-knowledge-v2) ou do grupo (group-knowledge-v2). "
+            "Quando a pergunta vem em grupo e ha match apenas em RAG privado, "
+            "cria pending_action share_private_knowledge_in_group para pedir "
+            "consentimento antes de compartilhar."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "envelope": {"type": "object", "description": "Envelope do webhook"},
+                "query": {"type": "string", "description": "Pergunta do user"},
+                "limit": {"type": "integer", "description": "Maximo de resultados (default 5)"},
+                "min_score": {"type": "number", "description": "Score minimo (default 0.5)"},
+            },
+            "required": ["envelope", "query"],
         },
     },
     "web.fetch_url": {

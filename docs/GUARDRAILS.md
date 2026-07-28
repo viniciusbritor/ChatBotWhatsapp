@@ -148,6 +148,17 @@ em Firestore plain (`message-history/{history_id}`) com indexação por
   `group-knowledge-v2`). Google Drive apenas se o user pedir
   explicitamente (`manda pra mim`, `salvar no drive`,
   `guardar no gdrive`, etc.).
+- **Knowledge Retriever (Fase H)**: quando a pergunta do user
+  refere-se a conteudo previamente armazenado, o
+  `agent-knowledge-retriever` decide o escopo:
+  - privado -> `agent-knowledge-v2` filtrado por `owner_hash`.
+  - grupo -> `group-knowledge-v2` filtrado por `group_hash`.
+    Acesso negado se o user nao for membro.
+  - cruzado privado->grupo -> cria
+    `pending_action share_private_knowledge_in_group` (TTL 300 s)
+    antes de compartilhar.
+  - Score minimo: `RAG_RETRIEVE_MIN_SCORE` (default 0.5).
+- Auditoria de retrieval nao e obrigatoria nesta fase.
 - **Soft limits para RAG individual** (`RAG_PRIVATE_CHUNKS_SOFT_LIMIT`,
   `RAG_PRIVATE_CHARS_SOFT_LIMIT`): espelham o grupo. Documentos acima
   do teto retornam `truncated=True` em vez de abortar.

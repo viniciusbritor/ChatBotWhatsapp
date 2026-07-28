@@ -2145,3 +2145,47 @@ fluxo auditável, testável e extensível.
 
 - `pytest -q tests/test_knowledge_router.py tests/test_skills_knowledge.py`: 18 passed.
 - Suite completa continua verde.
+
+---
+
+## 28/07/2026 — Fase H: Knowledge Retriever
+
+### Contexto
+
+Para fechar o ciclo RAG, faltava a *leitura* (já que a Fase G entregou
+a *escrita*). O retriever decide se a pergunta do user e sobre conteudo
+previamente armazenado, escolhe o escopo (privado ou grupo) e respeita
+membria quando o pedido vem em grupo.
+
+### Arquivos novos
+
+- `agents_runtime/agent_orchestration/knowledge_retriever.py`
+- `agents_runtime/tests/test_knowledge_retriever.py`
+
+### Mudancas em arquivos existentes
+
+- `agents_runtime/core/rag.py`: adiciona `RAG_RETRIEVE_MIN_SCORE` (env, default 0.5).
+- `agents_runtime/core/pending_actions.py`: novos tipos
+  `attachment_mode` e `share_private_knowledge_in_group` exportados, alem
+  de constantes `ALLOWED_PENDING_ACTION_TYPES`.
+- `agents_runtime/tool_registry.py`: nova tool `knowledge.retrieve`.
+- `agents_runtime/orchestrator.py`: hook de `is_rag_query` em
+  `_resolve_agent_for_intent` -- quando a mensagem e RAG, o agent
+  `knowledge-retriever` assume.
+
+### Comportamento
+
+- Heuristica primeiro (keywords RAG + formato de pergunta).
+- Tie-breaker via DeepSeek V4 Flash quando ambiguo.
+- Escopo:
+  - privado -> `agent-knowledge-v2` (filtrado por `owner_hash`).
+  - grupo -> `group-knowledge-v2` (filtrado por `group_hash`).
+    Se o user nao e membro, acesso negado.
+  - cruzado privado->grupo -> cria
+    `pending_action share_private_knowledge_in_group` (TTL 300 s).
+- Score minimo: `RAG_RETRIEVE_MIN_SCORE` (env, default 0.5).
+
+### Gate
+
+- `pytest -q tests/test_knowledge_retriever.py tests/test_knowledge_router.py tests/test_skills_knowledge.py tests/test_orchestrator.py tests/test_rag.py tests/test_group_rag.py`: 140 passed.
+- Ruff: 0 erros nos arquivos da fase.
