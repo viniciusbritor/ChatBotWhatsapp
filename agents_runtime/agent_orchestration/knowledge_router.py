@@ -190,7 +190,29 @@ async def route_attachment(
         "skill": skill,
         "extracted": None,
         "persist_result": None,
+        "category": None,
     }
+
+
+async def categorize_and_extract(
+    envelope: Dict[str, Any],
+    skill: Any,
+) -> Dict[str, Any]:
+    """Extrai texto e categoriza o documento. Devolve dict com extracted + category."""
+    source_name = (
+        (envelope.get("extra", {}) or {}).get("doc_file_name")
+        or envelope.get("source_name", "")
+        or "document"
+    )
+    extracted = await skill.extract(envelope)
+    if not extracted:
+        return {"extracted": None, "category": None}
+
+    from agent_orchestration.categorizer import categorize
+
+    text = (extracted.get("text") or "").strip()
+    category = await categorize(text, source_name)
+    return {"extracted": extracted, "category": category}
 
 
 def _iter_skills():

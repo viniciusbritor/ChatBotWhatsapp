@@ -25,6 +25,7 @@ async def persist(
     envelope: Dict[str, Any],
     extracted: Dict[str, Any],
     scope: str,
+    metadata=None,
 ) -> Dict[str, Any]:
     phone = envelope.get("phone", "")
     text = (extracted or {}).get("text", "")

@@ -670,11 +670,14 @@ async def _persist_attachment(
         envelope,
         extracted_payload,
         decision.get("scope", "private"),
+        metadata=decision.get("category") or {},
     )
     if persist_result.get("error"):
         return persist_result
     persist_result["scope"] = decision.get("scope", "private")
     persist_result["skill_name"] = decision.get("skill_name")
+    if decision.get("category"):
+        persist_result["category"] = decision["category"]
     return persist_result
 
 

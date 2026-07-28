@@ -78,11 +78,13 @@ async def persist(
     envelope: Dict[str, Any],
     extracted: Dict[str, Any],
     scope: str,
+    metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     phone = envelope.get("phone", "")
     text = extracted.get("text", "")
     source_name = extracted.get("source_name", "document.pdf")
     mimetype = extracted.get("mimetype", "application/pdf")
+    extra_metadata = {"mimetype": mimetype, "scope": scope, **(metadata or {})}
     if not text:
         return {"error": "no_text_extracted", "mimetype": mimetype}
 
@@ -105,6 +107,7 @@ async def persist(
                 "index_result": result,
                 "source_name": source_name,
                 "scope": scope,
+                "category": metadata or {},
             }
         except Exception as exc:
             logger.warning("pdf_handler group index failed: %s", exc)
@@ -117,8 +120,8 @@ async def persist(
             phone=phone,
             text_content=text,
             source_title=source_name,
-            category="whatsapp_attachment",
-            metadata={"mimetype": mimetype, "scope": scope},
+            category=extra_metadata.get("class", "legislacao") if extra_metadata.get("class") else "whatsapp_attachment",
+            metadata=extra_metadata,
         )
         if result.get("error"):
             return {"error": "rag_index_failed", "detail": result.get("error")}
@@ -127,6 +130,7 @@ async def persist(
             "index_result": result,
             "source_name": source_name,
             "scope": scope,
+            "category": metadata or {},
         }
     except Exception as exc:
         logger.warning("pdf_handler private index failed: %s", exc)

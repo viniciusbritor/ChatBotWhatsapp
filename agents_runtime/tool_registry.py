@@ -40,7 +40,10 @@ async def _rag_search_legal_knowledge(**kwargs):
 
 
 async def _route_attachment(**kwargs):
-    from agent_orchestration.knowledge_router import route_attachment
+    from agent_orchestration.knowledge_router import (
+        categorize_and_extract,
+        route_attachment,
+    )
 
     envelope = kwargs.get("envelope") or {}
     user_text = kwargs.get("user_text", "")
@@ -48,12 +51,21 @@ async def _route_attachment(**kwargs):
     skill = decision.get("skill")
     extracted = decision.get("extracted")
     if skill is not None:
-        if extracted is None:
-            extracted = await skill.extract(envelope)
+        if extracted is None and decision.get("decision") != "drive":
+            extraction = await categorize_and_extract(envelope, skill)
+            extracted = extraction.get("extracted")
+            category = extraction.get("category")
+            decision["extracted"] = extracted
+            decision["category"] = category
+        if decision.get("decision") == "drive":
+            extracted = envelope.get("_drive_extracted")
             decision["extracted"] = extracted
         if extracted:
             persist_result = await skill.persist(
-                envelope, extracted, decision.get("scope", "private")
+                envelope,
+                extracted,
+                decision.get("scope", "private"),
+                metadata=decision.get("category") or {},
             )
         else:
             persist_result = {"error": "extraction_failed"}
@@ -71,6 +83,14 @@ async def _retrieve_knowledge(**kwargs):
     return await retrieve(
         envelope=envelope, query=query, limit=limit, min_score=min_score
     )
+
+
+async def _categorize(**kwargs):
+    from agent_orchestration.categorizer import categorize
+
+    text = kwargs.get("text", "")
+    source_name = kwargs.get("source_name", "")
+    return await categorize(text=text, source_name=source_name)
 
 
 TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
@@ -446,6 +466,24 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
                 "min_score": {"type": "number", "description": "Score minimo (default 0.5)"},
             },
             "required": ["envelope", "query"],
+        },
+    },
+    "knowledge.categorize": {
+        "function": _categorize,
+        "implementation": "knowledge_categorizer",
+        "description": (
+            "Categoriza um documento (PDF, DOCX, XLSX, texto) em "
+            "{class, group, theme, confidence} antes de armazenar. "
+            "Use apos extrair o texto do anexo. Se o LLM falhar, "
+            "usa heuristica local; em ultimo caso, devolve outros/outros."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "Texto extraido do documento"},
+                "source_name": {"type": "string", "description": "Nome do arquivo original"},
+            },
+            "required": ["text", "source_name"],
         },
     },
     "web.fetch_url": {

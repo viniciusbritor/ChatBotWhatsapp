@@ -75,11 +75,15 @@ async def persist(
     envelope: Dict[str, Any],
     extracted: Dict[str, Any],
     scope: str,
+    metadata=None,
 ) -> Dict[str, Any]:
     phone = envelope.get("phone", "")
+    metadata = metadata or {}
     text = extracted.get("text", "")
     source_name = extracted.get("source_name", "document.docx")
     mimetype = extracted.get("mimetype", MIME_TYPES[0])
+    metadata = metadata or {}
+    extra_metadata = {"mimetype": mimetype, "scope": scope, **metadata}
     if not text:
         return {"error": "no_text_extracted", "mimetype": mimetype}
 
@@ -115,7 +119,7 @@ async def persist(
             text_content=text,
             source_title=source_name,
             category="whatsapp_attachment",
-            metadata={"mimetype": mimetype, "scope": scope},
+            metadata=extra_metadata,
         )
         if result.get("error"):
             return {"error": "rag_index_failed", "detail": result.get("error")}
