@@ -37,6 +37,46 @@ from tools.group import search_group_knowledge
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# In-memory retrieval cache (Fase I subfase 2)
+# ---------------------------------------------------------------------------
+# Lives in the Cloud Run process memory. Max 256 entries; LRU-evicted
+# on overflow. TTL 5 min (configurable via RAG_CACHE_TTL_SEC).
+# Survives only as long as the container instance is warm.
+
+_RETRIEVAL_CACHE: Dict[str, Dict[str, Any]] = {}
+_CACHE_TTL_SEC = int(os.getenv("RAG_CACHE_TTL_SEC", "300"))
+
+
+def _cache_key(
+    envelope: Dict[str, Any],
+    query: str,
+    limit: int,
+    min_score: float,
+) -> str:
+    phone = _extract_phone(envelope) if envelope else ""
+    return hashlib.md5(
+        f"{phone}|{_normalize(query)}|{limit}|{min_score}".encode("utf-8")
+    ).hexdigest()
+
+
+def _cache_get(key: str) -> Optional[Dict[str, Any]]:
+    entry = _RETRIEVAL_CACHE.get(key)
+    if not entry:
+        return None
+    if (time.time() - entry["ts"]) > _CACHE_TTL_SEC:
+        _RETRIEVAL_CACHE.pop(key, None)
+        return None
+    return entry["result"]
+
+
+def _cache_set(key: str, result: Dict[str, Any]) -> None:
+    _RETRIEVAL_CACHE[key] = {"ts": time.time(), "result": result}
+    if len(_RETRIEVAL_CACHE) > 256:
+        oldest = min(_RETRIEVAL_CACHE.items(), key=lambda kv: kv[1]["ts"])
+        _RETRIEVAL_CACHE.pop(oldest[0], None)
+
+
 RAG_KEYWORDS = {
     "memorizei", "memorizado", "memorizada", "memorizou", "memorizaram",
     "indexado", "indexada", "indexados", "no rag", "no vector",
@@ -329,6 +369,12 @@ async def retrieve(
     threshold = float(min_score) if min_score is not None else float(
         os.getenv("RAG_RETRIEVE_MIN_SCORE", str(RAG_RETRIEVE_MIN_SCORE))
     )
+    cache_key = _cache_key(envelope, query, effective_limit, threshold)
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        cached = dict(cached)
+        cached["cache_hit"] = True
+        return cached
     is_group = _is_group(envelope)
     phone = _extract_phone(envelope)
     group_jid = _extract_group_jid(envelope) if is_group else ""
@@ -386,6 +432,7 @@ async def retrieve(
                     "filters": hints,
                 }
                 _log_metrics(result["decision"], result["results"])
+                _cache_set(cache_key, result)
                 return result
             group_hits = await _retrieve_group(
                 group_jid=group_jid, query=query, limit=effective_limit, min_score=threshold
@@ -400,6 +447,7 @@ async def retrieve(
                     "filters": hints,
                 }
                 _log_metrics(result["decision"], result["results"])
+                _cache_set(cache_key, result)
                 return result
             private_hits = await _retrieve_private(
                 phone=phone, query=query, limit=effective_limit, min_score=threshold,
@@ -417,6 +465,7 @@ async def retrieve(
                     "filters": hints,
                 }
                 _log_metrics(result["decision"], result["results"])
+                _cache_set(cache_key, result)
                 return result
             result = {
                 "scope": "none",
@@ -434,6 +483,7 @@ async def retrieve(
                 "filters": hints,
             }
             _log_metrics(result["decision"], result["results"])
+            _cache_set(cache_key, result)
             return result
 
         private_hits = await _retrieve_private(
@@ -452,6 +502,7 @@ async def retrieve(
                 "filters": hints,
             }
             _log_metrics(result["decision"], result["results"])
+            _cache_set(cache_key, result)
             return result
         result = {
             **private_hits,
@@ -469,6 +520,7 @@ async def retrieve(
             "filters": hints,
         }
         _log_metrics(result["decision"], result["results"])
+        _cache_set(cache_key, result)
         return result
     except Exception:
         _log_metrics("error", [])

@@ -155,6 +155,68 @@ class TestCrossScopePrivateInGroup:
         assert mock_set.call_args.args[1] == "share_private_knowledge_in_group"
 
 
+class TestRetrievalCache:
+    @pytest.mark.asyncio
+    async def test_cache_hit_returns_cached_result(self):
+        from agent_orchestration.knowledge_retriever import (
+            retrieve, _RETRIEVAL_CACHE,
+        )
+
+        _RETRIEVAL_CACHE.clear()
+        envelope = {
+            "phone": "5511999",
+            "extra": {"remote_jid": "5511999@s.whatsapp.net"},
+        }
+        mock = AsyncMock(return_value={
+            "results": [
+                {"text": "c1", "score": 0.9, "source": "x.pdf", "class": "legal"}
+            ],
+            "owner_hash": "abc",
+        })
+        with patch(
+            "agent_orchestration.knowledge_retriever.search_legal_knowledge",
+            mock,
+        ):
+            first = await retrieve(envelope, "minha query")
+            second = await retrieve(envelope, "minha query")
+        # Only the first call hit search; second was served from cache.
+        assert mock.await_count == 1
+        assert second.get("cache_hit") is True
+        assert first.get("count") == second.get("count") == 1
+
+    @pytest.mark.asyncio
+    async def test_cache_miss_different_query(self):
+        from agent_orchestration.knowledge_retriever import (
+            retrieve, _RETRIEVAL_CACHE,
+        )
+
+        _RETRIEVAL_CACHE.clear()
+        envelope = {
+            "phone": "5511999",
+            "extra": {"remote_jid": "5511999@s.whatsapp.net"},
+        }
+        mock = AsyncMock(return_value={
+            "results": [], "owner_hash": "abc",
+        })
+        with patch(
+            "agent_orchestration.knowledge_retriever.search_legal_knowledge",
+            mock,
+        ):
+            await retrieve(envelope, "query A")
+            await retrieve(envelope, "query B")
+        assert mock.await_count == 2
+
+    def test_cache_set_respects_max_size(self):
+        from agent_orchestration.knowledge_retriever import (
+            _cache_set, _RETRIEVAL_CACHE,
+        )
+
+        _RETRIEVAL_CACHE.clear()
+        for i in range(300):
+            _cache_set(f"k{i}", {"data": i})
+        assert len(_RETRIEVAL_CACHE) <= 256
+
+
 class TestSharePendingConsume:
     @pytest.mark.asyncio
     async def test_consume_returns_action(self):
@@ -269,8 +331,9 @@ class TestRetrieveWithHints:
 
     @pytest.mark.asyncio
     async def test_default_limit_is_10(self):
-        from agent_orchestration.knowledge_retriever import retrieve
+        from agent_orchestration.knowledge_retriever import retrieve, _RETRIEVAL_CACHE
 
+        _RETRIEVAL_CACHE.clear()
         envelope = {
             "phone": "5511999",
             "extra": {"remote_jid": "5511999@s.whatsapp.net"},
@@ -291,8 +354,9 @@ class TestRetrieveWithHints:
 
     @pytest.mark.asyncio
     async def test_no_results_returns_clarification(self):
-        from agent_orchestration.knowledge_retriever import retrieve
+        from agent_orchestration.knowledge_retriever import retrieve, _RETRIEVAL_CACHE
 
+        _RETRIEVAL_CACHE.clear()
         envelope = {
             "phone": "5511999",
             "extra": {"remote_jid": "5511999@s.whatsapp.net"},
