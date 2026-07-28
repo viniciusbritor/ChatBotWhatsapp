@@ -569,6 +569,8 @@ async def search_legal_knowledge(
     source_title: Optional[str] = None,
     class_: Optional[str] = None,
     group: Optional[str] = None,
+    language: Optional[str] = None,
+    since: Optional[str] = None,
 ) -> Dict[str, Any]:
     db = _get_firestore()
     if db is None:
@@ -583,6 +585,10 @@ async def search_legal_knowledge(
         extra_filters.append(("class", "==", class_))
     if group:
         extra_filters.append(("group", "==", group))
+    if language:
+        extra_filters.append(("language", "==", language))
+    if since:
+        extra_filters.append(("created_at", ">=", since))
     try:
         documents = await _find_nearest(
             db,
@@ -607,13 +613,21 @@ async def search_legal_knowledge(
                     "class": data.get("class", ""),
                     "group": data.get("group", ""),
                     "theme": data.get("theme", ""),
+                    "language": data.get("language", ""),
+                    "created_at": data.get("created_at", ""),
                 }
             )
         return {
             "results": chunks,
             "query": mask_pii(query),
             "owner_hash": _owner_hash(phone),
-            "filters": {"source_title": source_title, "class": class_, "group": group},
+            "filters": {
+                "source_title": source_title,
+                "class": class_,
+                "group": group,
+                "language": language,
+                "since": since,
+            },
         }
     except Exception as exc:
         logger.error("Private vector search failed: %s", exc)

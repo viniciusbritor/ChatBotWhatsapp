@@ -262,6 +262,8 @@ async def _retrieve_private(
     source_title: Optional[str] = None,
     class_: Optional[str] = None,
     group: Optional[str] = None,
+    language: Optional[str] = None,
+    since: Optional[str] = None,
 ) -> Dict[str, Any]:
     result = await search_legal_knowledge(
         phone=phone,
@@ -271,6 +273,8 @@ async def _retrieve_private(
         source_title=source_title,
         class_=class_,
         group=group,
+        language=language,
+        since=since,
     )
     chunks = result.get("results", []) if isinstance(result, dict) else []
     return {
