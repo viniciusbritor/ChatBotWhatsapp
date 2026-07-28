@@ -164,7 +164,12 @@ def _heuristic_categorize(text: str, source_name: str) -> Dict[str, Any]:
 
     Palavras-chave identificam class e group. theme recebe nome do arquivo.
     """
-    blob = f"{source_name}\n{text or ''}".lower()
+    import unicodedata
+
+    raw = f"{source_name}\n{text or ''}"
+    normalized = unicodedata.normalize("NFKD", raw)
+    without_accents = "".join(c for c in normalized if not unicodedata.combining(c))
+    blob = without_accents.lower()
     if any(
         kw in blob
         for kw in ("codigo de defesa do consumidor", "cdc", "lei ", "decreto")
@@ -178,6 +183,8 @@ def _heuristic_categorize(text: str, source_name: str) -> Dict[str, Any]:
         return {"class": "academico", "group": "probabilidade", "theme": source_name or "academico", "confidence": 0.6}
     if any(kw in blob for kw in ("bula", "protocolo clinico", "estudo clinico", "medicina")):
         return {"class": "saude", "group": "protocolo", "theme": source_name or "saude", "confidence": 0.6}
+    if any(kw in blob for kw in ("dissertacao", "monografia", "tcc", "tese")):
+        return {"class": "academico", "group": "dissertacao", "theme": source_name or "academico", "confidence": 0.7}
     return {"class": "outros", "group": "outros", "theme": source_name or "outros", "confidence": 0.3}
 
 

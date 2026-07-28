@@ -517,7 +517,7 @@ def _resolve_agent_for_intent(intent: Dict[str, Any], instance: str) -> Optional
     if intent["is_intimacy"]:
         return "agent-intimacy"
     if intent.get("is_rag"):
-        return "knowledge-retriever"
+        return "agent-knowledge-retriever"
     if intent["is_drive"]:
         return "manager-drive"
     if intent["is_email"]:
