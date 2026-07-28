@@ -12,6 +12,11 @@
 - **Guard de verdade** = `access_guardian` (subagente no grafo LangGraph, Fase H 23/07/2026). O `@_owner_guard` nos `tools/google_*.py` é decoração legada — quem decide owner+OAuth+scopes é o access_guardian **antes** da tool.
 - **LLM único**: DeepSeek V4 Flash via `ChatOpenAI(base_url='https://api.deepseek.com/v1')` (Fase N, 25/07/2026). Cascade removido. Gemini só STT sob consentimento.
 - **DEPLOY**: push em `test` → trigger `deploy-agents-runtime-test` (2nd-gen, us-central1). **PROIBIDO `gcloud builds submit` manual** (GUARDRAILS §10).
+- **CANAL**: apenas **WhatsApp via Evolution API v2.3.7**. **NÃO suportado**: LinkedIn, Telegram, Facebook, Instagram, Discord, SMS. PDF/anexo que chega por outro canal é silenciosamente ignorado (webhook não recebe).
+- **F4d.2 (27/07/2026)**: fileLength do `documentMessage` na Evolution v2.3.7 chega como `dict` (proto Long do Baileys), não como `int`. O `extract_envelope` agora normaliza: `dict → low + high*2^32`, `int → int`, ausente → 0.
+- **F4d.2 (27/07/2026)**: ack do F2 ("Só um instante...") usa `delay_ms = max(1500, calculate_delay_ms(ack_text))` para que o WhatsApp mostre o typing indicator ("digitando...") antes da resposta aparecer. Sem isso, a resposta brota na tela instantaneamente.
+- **F4d (27/07/2026)**: handler de attachment no `orchestrator._handle_attachment` — pipeline PDF/DOCX/XLSX via Evolution v2.3.7. Anexos vão para `agent-knowledge-v2` (individual) ou `group-knowledge-v2` (grupo) quando o user pede para "memorizar"/"indexar"/"armazenar".
+- **F4d.5 (28/07/2026)**: confirmação de leitura paralela ao webhook com log estruturado (`evolution_mark_read_ok` / `_timeout` / `_failed` / `_skipped`). RAG de grupo sem teto rígido: `truncated=True` quando `len(text) > RAG_GROUP_CHARS_SOFT_LIMIT` ou `len(chunks) > RAG_GROUP_CHUNKS_SOFT_LIMIT`. Padrão de chunks permanece `max_chars=1200`, `overlap_pct=15`.
 
 ## Escopos Google (GUARDRAILS §8 — em transição)
 

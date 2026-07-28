@@ -2054,3 +2054,48 @@ nunca havia sido enviado ao Drive.
 - O teste de confirmação verifica que o `message_id` original é reutilizado.
 - O isolamento de pending actions foi adicionado aos testes para evitar estado
   entre casos.
+
+---
+
+## 28/07/2026 — Fase F4d.5: mark_read estruturado e RAG sem teto rígido
+
+### Mudanças aplicadas
+
+1. **Confirmação de leitura (`mark_messages_read`)**
+   - `_safe_mark_read` (em `agents_runtime/main.py`) passou a retornar dict com
+     `status` (`ok`, `timeout`, `failed`, `skipped`).
+   - `_log_mark_read_result` é registrado via `add_done_callback` para emitir
+     log estruturado por tentativa:
+     - `evolution_mark_read_ok` (info)
+     - `evolution_mark_read_timeout` (warning)
+     - `evolution_mark_read_failed` (warning, com `reason` e `error_type`)
+     - `evolution_mark_read_skipped` (warning, falta de `remote_jid`/`message_id`)
+   - Webhook continua retornando em <50ms; tarefa paralela mantém a latência
+     curta e isola falhas do Evolution.
+
+2. **RAG de grupo sem teto rígido**
+   - Removido `_MAX_CHUNKS_PER_FILE = 100` e `_MAX_FILE_CHARS = 50_000`.
+   - Adicionados `_get_chunks_soft_limit()` e `_get_chars_soft_limit()` lendo
+     `RAG_GROUP_CHUNKS_SOFT_LIMIT` (default 500) e `RAG_GROUP_CHARS_SOFT_LIMIT`
+     (default 1.000.000) a cada chamada (lookup dinâmico, não constante).
+   - `index_group_document` retorna `indexed`, `failed`, `chunks`, `chars`,
+     `truncated`, `truncated_reason` (`chars_above_soft_limit` ou
+     `chunks_above_soft_limit`), `chunk_overlap`, `theme`, `visibility`,
+     `collection`, `overwrote`.
+   - Sem abortar; chunks são indexados até o fim e o relatório sinaliza
+     `truncated=True` para observabilidade.
+
+3. **Vector import resiliente**
+   - `from google.cloud.firestore_v1.vector import Vector` com fallback para
+     ambientes sem Firestore Vector instalado.
+
+### Gate local
+
+- `python -m pytest -q tests/test_group_rag.py tests/test_main_webhook.py`: `39 passed`
+- `python -m ruff check agents_runtime/main.py agents_runtime/tools/group.py`: sem erros.
+
+### Sequenciamento
+
+- Branch `fix/rag-attachment-confirmation-1` parte de `origin/test`.
+- `feat/ui-refactor-jennifer-oauth` em `Coherence_Portal` foi descartada
+  conforme decisão do operador; sem merge cruzado.

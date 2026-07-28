@@ -327,7 +327,7 @@ async def evolution_webhook(request: Request):
     message_id = envelope["message_id"]
     ledger_snapshot = register_or_load(message_id, {"payload": envelope, **envelope})
     if ledger_snapshot and ledger_snapshot.get("state") in {"response_ready", "delivered", "failed_terminal"}:
-        asyncio.create_task(_safe_mark_read(envelope))
+        _schedule_mark_read(envelope)
         logger.info(
             "webhook_already_processed",
             extra={
@@ -338,6 +338,7 @@ async def evolution_webhook(request: Request):
         )
         return JSONResponse(content={"status": "duplicate", "message_id": message_id})
 
+    _schedule_mark_read(envelope)
     publisher = get_publisher()
     try:
         message_id_published = publisher.publish(
@@ -360,7 +361,7 @@ async def evolution_webhook(request: Request):
         )
         raise HTTPException(status_code=503, detail="publish_failed")
 
-    asyncio.create_task(_safe_mark_read(envelope))
+    _schedule_mark_read(envelope)
 
     logger.info(
         "webhook_queued",
@@ -381,33 +382,98 @@ async def evolution_webhook(request: Request):
     )
 
 
-async def _safe_mark_read(envelope: Dict[str, Any]) -> None:
-    """Best-effort Evolution read-receipt without blocking the webhook."""
+async def _safe_mark_read(envelope: Dict[str, Any]) -> Dict[str, Any]:
+    """Best-effort Evolution read-receipt without blocking the webhook.
+
+    Retorna um dicionário com ``status`` para que o callback assíncrono
+    consiga diferenciar ``ok``, ``timeout`` e ``failed``. O webhook continua
+    retornando imediatamente; nenhuma exceção vaza para o caller.
+    """
+    message_id = envelope.get("message_id", "")
+    remote_jid = envelope.get("remote_jid", "")
+    instance = envelope.get("instance", "")
+    if not remote_jid or not message_id:
+        return {"status": "skipped", "reason": "missing_remote_jid_or_id"}
     try:
         from core.evolution_client import mark_messages_read
 
-        remote_jid = envelope.get("remote_jid", "")
-        message_ids = []
-        explicit_id = envelope.get("message_id", "")
-        if explicit_id:
-            message_ids.append(explicit_id)
-        if not remote_jid or not message_ids:
-            return
+        message_ids = [message_id]
         await asyncio.wait_for(
-            mark_messages_read(envelope.get("instance", ""), remote_jid, message_ids, from_me=False),
+            mark_messages_read(instance, remote_jid, message_ids, from_me=False),
             timeout=15,
         )
-        logger.info(
-            "evolution_mark_read_ok message_id=%s remote_jid=%s",
-            explicit_id,
-            remote_jid,
-        )
+        return {
+            "status": "ok",
+            "message_id": message_id,
+            "remote_jid": remote_jid,
+            "instance": instance,
+        }
+    except asyncio.TimeoutError:
+        return {
+            "status": "timeout",
+            "message_id": message_id,
+            "remote_jid": remote_jid,
+            "instance": instance,
+            "error_type": "TimeoutError",
+        }
     except Exception as exc:  # noqa: BLE001
+        return {
+            "status": "failed",
+            "message_id": message_id,
+            "remote_jid": remote_jid,
+            "instance": instance,
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        }
+
+
+def _log_mark_read_result(task: "asyncio.Task[Dict[str, Any]]") -> None:
+    """Callback assíncrono: emite log estruturado de cada tentativa.
+
+    Estados possíveis:
+      - ``ok``      → ``evolution_mark_read_ok``
+      - ``timeout`` → ``evolution_mark_read_timeout``
+      - ``failed``  → ``evolution_mark_read_failed``
+      - ``skipped`` → ``evolution_mark_read_skipped``
+    """
+    if task.cancelled():
         logger.warning(
-            "evolution_mark_read_skipped message_id=%s error=%s",
-            envelope.get("message_id", ""),
-            type(exc).__name__,
+            "evolution_mark_read_failed",
+            extra={"event_name": "evolution_mark_read_failed", "reason": "cancelled"},
         )
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.warning(
+            "evolution_mark_read_failed",
+            extra={
+                "event_name": "evolution_mark_read_failed",
+                "reason": "exception",
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
+        return
+    result = task.result() or {}
+    status = result.get("status", "failed")
+    event_name = {
+        "ok": "evolution_mark_read_ok",
+        "timeout": "evolution_mark_read_timeout",
+        "failed": "evolution_mark_read_failed",
+        "skipped": "evolution_mark_read_skipped",
+    }.get(status, "evolution_mark_read_failed")
+    extras = {"event_name": event_name, **result}
+    if status == "ok":
+        logger.info(event_name, extra=extras)
+    else:
+        logger.warning(event_name, extra=extras)
+
+
+def _schedule_mark_read(envelope: Dict[str, Any]) -> "asyncio.Task[Dict[str, Any]]":
+    """Dispara o ack de leitura como tarefa paralela sem bloquear o webhook."""
+    task = asyncio.create_task(_safe_mark_read(envelope))
+    task.add_done_callback(_log_mark_read_result)
+    return task
 
 
 @app.post("/pubsub/push")

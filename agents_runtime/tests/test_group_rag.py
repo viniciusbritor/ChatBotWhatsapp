@@ -95,12 +95,66 @@ class TestIndexGroupDocumentValidation:
         assert result.get("error") == "visibility_must_be_group_or_public"
 
     @pytest.mark.asyncio
-    async def test_file_too_large(self):
+    async def test_chars_above_soft_limit_is_truncated_not_blocked(self):
         from tools.group import index_group_document
-        big_text = "A" * 50001
-        result = await index_group_document("5511999", "g1@g.us", big_text, "group")
-        assert result.get("error") == "file_too_large"
-        assert result.get("size") == 50001
+
+        database = MagicMock()
+        def _fake_embed(text, api_key=""):
+            return [0.1] * 1536
+        with patch("tools.group._get_firestore", return_value=database):
+            with patch("tools.group._embed_text", side_effect=_fake_embed):
+                with patch.dict("os.environ", {"RAG_GROUP_CHARS_SOFT_LIMIT": "100"}, clear=False):
+                    big_text = "Lorem ipsum dolor sit amet. " * 4000
+                    result = await index_group_document(
+                        "5511999", "g1@g.us", big_text, "group"
+                    )
+        assert result.get("error") is None
+        assert result.get("chars") == len(big_text)
+        assert result.get("truncated") is True
+        assert result.get("truncated_reason") == "chars_above_soft_limit"
+
+    @pytest.mark.asyncio
+    async def test_chunks_above_soft_limit_is_truncated_not_blocked(self):
+        from tools.group import index_group_document
+
+        database = MagicMock()
+
+        def _fake_embed(text, api_key=""):
+            return [0.1] * 1536
+
+        with patch("tools.group._get_firestore", return_value=database):
+            with patch("tools.group._embed_text", side_effect=_fake_embed):
+                with patch.dict("os.environ", {"RAG_GROUP_CHUNKS_SOFT_LIMIT": "2"}, clear=False):
+                    text = ("A" * 1100 + " ") * 5  # ~5 chunks
+                    result = await index_group_document(
+                        "5511999", "g1@g.us", text, "group"
+                    )
+        assert result.get("error") is None
+        assert result.get("truncated") is True
+        assert result.get("truncated_reason") == "chunks_above_soft_limit"
+        assert result["chunks"] >= 3
+        assert result["indexed"] >= 1
+
+    @pytest.mark.asyncio
+    async def test_normal_indexing_returns_no_truncation(self):
+        from tools.group import index_group_document
+
+        database = MagicMock()
+
+        def _fake_embed(text, api_key=""):
+            return [0.1] * 1536
+
+        with patch("tools.group._get_firestore", return_value=database):
+            with patch("tools.group._embed_text", side_effect=_fake_embed):
+                text = "Trecho curto de validacao que cabe em um so chunk. " * 8
+                result = await index_group_document(
+                    "5511999", "g1@g.us", text, "group"
+                )
+        assert result.get("error") is None
+        assert result.get("truncated") is False
+        assert result.get("truncated_reason") is None
+        assert result["indexed"] >= 1
+        assert result["failed"] == 0
 
     @pytest.mark.asyncio
     async def test_firestore_unavailable(self):

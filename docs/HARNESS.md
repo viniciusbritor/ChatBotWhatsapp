@@ -183,6 +183,12 @@ RAG_COLLECTIVE_COLLECTION: "collective-knowledge-v2"
 RAG_SHARED_COLLECTION: "public-knowledge-v2"
 RAG_RETENTION_DAYS: "90"
 
+# Tetos saudaveis para RAG de grupo. Acima do limite, o payload
+# final do `index_group_document` reporta `truncated=True` em vez
+# de abortar. Sem teto duro. Logs registram por Chunk.
+RAG_GROUP_CHUNKS_SOFT_LIMIT: "500"
+RAG_GROUP_CHARS_SOFT_LIMIT: "1000000"
+
 # Observabilidade
 LOG_LEVEL: "INFO"
 ENVIRONMENT: "test"

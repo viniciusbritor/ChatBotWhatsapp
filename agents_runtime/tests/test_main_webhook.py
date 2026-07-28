@@ -1,10 +1,16 @@
+import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
 
-from main import evolution_webhook
+from main import (
+    _log_mark_read_result,
+    _safe_mark_read,
+    _schedule_mark_read,
+    evolution_webhook,
+)
 
 
 VALID_PAYLOAD = {
@@ -43,8 +49,15 @@ async def test_webhook_queues_valid_message():
     publisher.publish.return_value = "pubsub-001"
     with patch("core.pubsub_publisher.get_publisher", return_value=publisher):
         with patch("core.message_ledger.register_or_load", return_value=None):
-            with patch("main._safe_mark_read", new=AsyncMock()):
-                response = await evolution_webhook(_request(VALID_PAYLOAD))
+            with patch("main._safe_mark_read",
+                       new=AsyncMock(return_value={
+                           "status": "ok",
+                           "message_id": "WEBHOOK_001",
+                           "remote_jid": "5511966830020@s.whatsapp.net",
+                           "instance": "jennifer",
+                       })):
+                with patch("main._log_mark_read_result"):
+                    response = await evolution_webhook(_request(VALID_PAYLOAD))
 
     payload = json.loads(response.body)
     assert response.status_code == 200
@@ -61,8 +74,10 @@ async def test_webhook_publishes_expected_attributes():
     publisher.publish.return_value = "pubsub-002"
     with patch("core.pubsub_publisher.get_publisher", return_value=publisher):
         with patch("core.message_ledger.register_or_load", return_value=None):
-            with patch("main._safe_mark_read", new=AsyncMock()):
-                await evolution_webhook(_request(VALID_PAYLOAD))
+            with patch("main._safe_mark_read",
+                       new=AsyncMock(return_value={"status": "ok"})):
+                with patch("main._log_mark_read_result"):
+                    await evolution_webhook(_request(VALID_PAYLOAD))
 
     _, kwargs = publisher.publish.call_args
     assert kwargs["topic"] == "chatbotwhatsapp-messages"
@@ -118,9 +133,11 @@ async def test_webhook_returns_generic_publish_error():
     publisher.publish.side_effect = RuntimeError("sensitive internal detail")
     with patch("core.pubsub_publisher.get_publisher", return_value=publisher):
         with patch("core.message_ledger.register_or_load", return_value=None):
-            with patch("main._safe_mark_read", new=AsyncMock()):
-                with pytest.raises(HTTPException) as exc:
-                    await evolution_webhook(_request(VALID_PAYLOAD))
+            with patch("main._safe_mark_read",
+                       new=AsyncMock(return_value={"status": "ok"})):
+                with patch("main._log_mark_read_result"):
+                    with pytest.raises(HTTPException) as exc:
+                        await evolution_webhook(_request(VALID_PAYLOAD))
     assert exc.value.status_code == 503
     assert exc.value.detail == "publish_failed"
     assert "sensitive" not in exc.value.detail
@@ -133,6 +150,116 @@ async def test_webhook_accepts_lowercase_event():
     payload = {**VALID_PAYLOAD, "event": "messages.upsert"}
     with patch("core.pubsub_publisher.get_publisher", return_value=publisher):
         with patch("core.message_ledger.register_or_load", return_value=None):
-            with patch("main._safe_mark_read", new=AsyncMock()):
-                response = await evolution_webhook(_request(payload))
+            with patch("main._safe_mark_read",
+                       new=AsyncMock(return_value={"status": "ok"})):
+                with patch("main._log_mark_read_result"):
+                    response = await evolution_webhook(_request(payload))
     assert json.loads(response.body)["queued"] is True
+
+
+@pytest.mark.asyncio
+async def test_safe_mark_read_returns_ok_on_success():
+    fake = AsyncMock(return_value={"status": "ok", "message_id": "X"})
+    with patch("core.evolution_client.mark_messages_read", new=fake):
+        envelope = {
+            "instance": "jennifer",
+            "message_id": "MSG_OK",
+            "remote_jid": "5511966830020@s.whatsapp.net",
+        }
+        result = await _safe_mark_read(envelope)
+    assert result["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_safe_mark_read_returns_skipped_when_no_remote_jid():
+    envelope = {"instance": "jennifer", "message_id": "MSG_X"}
+    result = await _safe_mark_read(envelope)
+    assert result["status"] == "skipped"
+
+
+@pytest.mark.asyncio
+async def test_safe_mark_read_returns_timeout_on_wait_for():
+    fake = AsyncMock(side_effect=asyncio.TimeoutError)
+    with patch("core.evolution_client.mark_messages_read", new=fake):
+        envelope = {
+            "instance": "jennifer",
+            "message_id": "MSG_TIMEOUT",
+            "remote_jid": "5511966830020@s.whatsapp.net",
+        }
+        result = await _safe_mark_read(envelope)
+    assert result["status"] == "timeout"
+
+
+@pytest.mark.asyncio
+async def test_safe_mark_read_returns_failed_on_exception():
+    fake = AsyncMock(side_effect=RuntimeError("boom"))
+    with patch("core.evolution_client.mark_messages_read", new=fake):
+        envelope = {
+            "instance": "jennifer",
+            "message_id": "MSG_FAIL",
+            "remote_jid": "5511966830020@s.whatsapp.net",
+        }
+        result = await _safe_mark_read(envelope)
+    assert result["status"] == "failed"
+    assert result["error_type"] == "RuntimeError"
+
+
+def test_log_mark_read_result_ok_logs_event():
+    task = MagicMock()
+    task.cancelled.return_value = False
+    task.exception.return_value = None
+    task.result.return_value = {
+        "status": "ok",
+        "message_id": "MSG_OK",
+        "remote_jid": "j",
+        "instance": "jennifer",
+    }
+    with patch("main.logger") as logger:
+        _log_mark_read_result(task)
+    logger.info.assert_called_once()
+    logger.warning.assert_not_called()
+
+
+def test_log_mark_read_result_timeout_logs_warning():
+    task = MagicMock()
+    task.cancelled.return_value = False
+    task.exception.return_value = None
+    task.result.return_value = {
+        "status": "timeout",
+        "message_id": "MSG_T",
+        "remote_jid": "j",
+        "instance": "jennifer",
+        "error_type": "TimeoutError",
+    }
+    with patch("main.logger") as logger:
+        _log_mark_read_result(task)
+    logger.warning.assert_called_once()
+    args, _ = logger.warning.call_args
+    assert args[0] == "evolution_mark_read_timeout"
+
+
+def test_log_mark_read_result_exc_logs_warning():
+    task = MagicMock()
+    task.cancelled.return_value = False
+    task.exception.return_value = RuntimeError("boom")
+    task.result.side_effect = RuntimeError("not used")
+    with patch("main.logger") as logger:
+        _log_mark_read_result(task)
+    logger.warning.assert_called_once()
+    args, _ = logger.warning.call_args
+    assert args[0] == "evolution_mark_read_failed"
+
+
+@pytest.mark.asyncio
+async def test_schedule_mark_read_registers_callback():
+    envelope = {
+        "instance": "jennifer",
+        "message_id": "MSG_S",
+        "remote_jid": "5511966830020@s.whatsapp.net",
+    }
+    with patch("main._safe_mark_read",
+               new=AsyncMock(return_value={"status": "ok"})):
+        with patch("main._log_mark_read_result") as callback:
+            task = _schedule_mark_read(envelope)
+            await task
+    callback.assert_called_once_with(task)

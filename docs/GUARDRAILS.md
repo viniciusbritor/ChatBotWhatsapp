@@ -87,7 +87,13 @@
 
 - Tick azul (`markMessagesAsRead`) é chamado automaticamente para todo webhook
   válido. Falha no tick vira métrica mas nunca bloqueia o webhook.
-- Tick não bloqueia nem repete o webhook: timeout máximo 5 s, sem retry.
+- Tick não bloqueia nem repete o webhook: timeout máximo 15 s via
+  `asyncio.wait_for`, sem retry. Logs estruturados:
+  - `evolution_mark_read_ok` (info) — sucesso HTTP < 400.
+  - `evolution_mark_read_timeout` (warning) — `asyncio.TimeoutError`.
+  - `evolution_mark_read_failed` (warning) — qualquer outra falha, com `reason`
+    (`exception`, `cancelled`) e `error_type`.
+  - `evolution_mark_read_skipped` (warning) — falta de `remote_jid` ou `message_id`.
 - Remetente precisa coincidir com `owner_phone` da instância Evolution para
   acessar Gmail, Drive ou Calendar. Ver `access_guardian` no grafo LangGraph
   (§ 0.0.1 do ARQUITETURA.md).
@@ -127,6 +133,14 @@ em Firestore plain (`message-history/{history_id}`) com indexação por
 - A coleção vetorial legada `conversation-memory-v2` não é mais
   alimentada em produção; pode ser removida após confirmação das novas
   gravações.
+- `index_group_document` não usa teto rígido para chunks ou para o
+  tamanho do texto. Acima dos tetos saudáveis (`RAG_GROUP_CHUNKS_SOFT_LIMIT=500`,
+  `RAG_GROUP_CHARS_SOFT_LIMIT=1_000_000`), o retorno inclui `truncated=True`
+  e `truncated_reason`, mas a indexação prossegue. Logs
+  `index_group_document_chars_soft_limit` e
+  `index_group_document_chunks_soft_limit` são registrados em warning.
+- Anexos individuais memorizados continuam com limite nominal LGPD
+  (TTL em `RAG_RETENTION_DAYS`).
 
 ## 8. Integração com a Evolution API (23/07/2026)
 

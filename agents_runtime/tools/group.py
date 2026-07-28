@@ -323,8 +323,8 @@ _EMBEDDING_MODEL = "text-embedding-3-small"
 _EMBEDDING_DIM = 1536
 _CHUNK_MAX_CHARS = 1200
 _CHUNK_OVERLAP_PCT = 15
-_MAX_FILE_CHARS = 50000
-_MAX_CHUNKS_PER_FILE = 100
+_CHUNKS_SOFT_LIMIT_DEFAULT = 500
+_CHARS_SOFT_LIMIT_DEFAULT = 1_000_000
 _THEME_HEURISTICS = [
     (r"ata|reuniao|minutes", "ata_reuniao"),
     (r"contrato|legal|procuracao", "contrato"),
@@ -332,6 +332,20 @@ _THEME_HEURISTICS = [
     (r"apresentacao|pptx|slides", "apresentacao"),
     (r"manual|tutorial|docs|guia", "documentacao"),
 ]
+
+
+def _get_chunks_soft_limit() -> int:
+    try:
+        return int(os.getenv("RAG_GROUP_CHUNKS_SOFT_LIMIT", str(_CHUNKS_SOFT_LIMIT_DEFAULT)))
+    except ValueError:
+        return _CHUNKS_SOFT_LIMIT_DEFAULT
+
+
+def _get_chars_soft_limit() -> int:
+    try:
+        return int(os.getenv("RAG_GROUP_CHARS_SOFT_LIMIT", str(_CHARS_SOFT_LIMIT_DEFAULT)))
+    except ValueError:
+        return _CHARS_SOFT_LIMIT_DEFAULT
 
 
 def _group_hash(group_jid: str) -> str:
@@ -451,9 +465,9 @@ async def index_group_document(
         return {"error": "text_and_group_jid_required"}
     if visibility not in ("group", "public"):
         return {"error": "visibility_must_be_group_or_public"}
-    if len(text) > _MAX_FILE_CHARS:
-        return {"error": "file_too_large",
-                "size": len(text), "limit": _MAX_FILE_CHARS}
+
+    chars_soft_limit = _get_chars_soft_limit()
+    chunks_soft_limit = _get_chunks_soft_limit()
 
     db = _get_firestore()
     if db is None:
@@ -483,22 +497,46 @@ async def index_group_document(
     chunks = _chunk_text_smart(text)
     if not chunks:
         return {"error": "no_content_to_index"}
-    if len(chunks) > _MAX_CHUNKS_PER_FILE:
-        return {"warning": "too_many_chunks",
-                "chunk_count": len(chunks),
-                "limit": _MAX_CHUNKS_PER_FILE,
-                "partial_indexed": _MAX_CHUNKS_PER_FILE,
-                "chunks_to_index": _MAX_CHUNKS_PER_FILE}
+
+    truncated = False
+    truncated_reason = None
+    truncated_chunks = 0
+    if len(text) > chars_soft_limit:
+        truncated = True
+        truncated_reason = "chars_above_soft_limit"
+        truncated_chunks = len(chunks)
+        logger.warning(
+            "index_group_document_chars_soft_limit chars=%d limit=%d",
+            len(text),
+            chars_soft_limit,
+        )
+    if len(chunks) > chunks_soft_limit:
+        truncated = True
+        if truncated_reason is None:
+            truncated_reason = "chunks_above_soft_limit"
+        truncated_chunks = len(chunks)
+        logger.warning(
+            "index_group_document_chunks_soft_limit chunks=%d limit=%d",
+            len(chunks),
+            chunks_soft_limit,
+        )
 
     theme = _classify_theme(source_name, text)
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     indexed = 0
+    failed = 0
     step = _CHUNK_MAX_CHARS - int(_CHUNK_MAX_CHARS * _CHUNK_OVERLAP_PCT / 100)
 
-    from google.cloud.firestore import Vector
+    try:
+        from google.cloud.firestore_v1.vector import Vector
+    except Exception:
+        class Vector:  # pragma: no cover - fallback para ambientes sem Firestore Vector
+            def __init__(self, values):
+                self.values = values
     for i, chunk in enumerate(chunks):
         embedding = _embed_text(chunk, api_key)
         if embedding is None:
+            failed += 1
             continue
         doc_id = hashlib.sha256(
             f"group:{gh}:{source_name}:{i}:{chunk[:40]}".encode("utf-8")
@@ -524,10 +562,18 @@ async def index_group_document(
             indexed += 1
         except Exception as e:
             logger.warning("index_group_document chunk %d error: %s", i, e)
+            failed += 1
 
     return {
         "indexed": indexed,
+        "failed": failed,
+        "chunks": len(chunks),
         "total_chunks": len(chunks),
+        "chars": len(text),
+        "truncated": truncated,
+        "truncated_reason": truncated_reason,
+        "truncated_chunks": truncated_chunks,
+        "chunk_overlap": int(_CHUNK_MAX_CHARS * _CHUNK_OVERLAP_PCT / 100),
         "theme": theme,
         "visibility": visibility,
         "collection": _GROUP_KNOWLEDGE_COLLECTION,

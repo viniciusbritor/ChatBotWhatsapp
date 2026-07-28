@@ -116,6 +116,41 @@ flowchart LR
     TOPIC -. "5 tentativas" .-> DLQ
 ```
 
+### 0.0.0. Fluxo de anexos (F4d.5)
+
+```mermaid
+flowchart LR
+    WA["WhatsApp: PDF/DOCX/XLSX"]
+    EVO["Evolution API v2.3.7"]
+    WEB["POST /webhook"]
+    PUSH["POST /pubsub/push"]
+    ACK["_schedule_mark_read (paralelo)"]
+    ORCH["orchestrator"]
+    HANDLE["_handle_attachment"]
+    IND["index_private_document"]
+    GRP["index_group_document"]
+    DRV["upload_file (Drive)"]
+
+    WA --> EVO --> WEB
+    WEB --> PUSH
+    WEB --> ACK
+    PUSH --> ORCH
+    ORCH --> HANDLE
+    HANDLE -->|save_to_rag=True, is_group| GRP
+    HANDLE -->|save_to_rag=True, individual| IND
+    HANDLE -->|save_to_rag=False| DRV
+
+    IND -.->|agent-knowledge-v2| F1["Firestore Vector: owner_hash"]
+    GRP -.->|group-knowledge-v2| F2["Firestore Vector: group_hash"]
+    DRV -.->|folder_id| F3["Google Drive: raiz do proprietario"]
+
+    classDef ok fill:#d9ead3,stroke:#38761d,color:#000
+    classDef warn fill:#fff2cc,stroke:#bf9000,color:#000
+    classDef paral fill:#cfe2f3,stroke:#1f6feb,color:#000
+    class WA,EVO,WEB,PUSH,ORCH,HANDLE,IND,GRP,DRV,F1,F2,F3 ok
+    class ACK paral
+```
+
 ### 0.0.1. Grafo LangGraph (Fase H)
 
 ```mermaid
