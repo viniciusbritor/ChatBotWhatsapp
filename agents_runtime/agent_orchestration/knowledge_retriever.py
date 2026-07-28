@@ -342,6 +342,38 @@ async def _maybe_request_share(
         return None
 
 
+async def _request_feedback(
+    phone: str,
+    query: str,
+) -> Optional[Dict[str, Any]]:
+    """Create the retrieval_feedback pending_action.
+
+    Triggered when retrieve() returns needs_clarification=True. The
+    bot can then ask the user to refine the query or provide more
+    context. Returns the pending action dict if created, else None.
+    """
+    if not phone:
+        return None
+    try:
+        from core.pending_actions import (
+            PENDING_ACTION_RETRIEVAL_FEEDBACK,
+            set_pending_action,
+        )
+        return await set_pending_action(
+            phone,
+            PENDING_ACTION_RETRIEVAL_FEEDBACK,
+            {
+                "phone": phone,
+                "query": query,
+                "source": "knowledge_retriever",
+            },
+            ttl_sec=180,
+        )
+    except Exception as exc:
+        logger.warning("retrieval_feedback pending_action failed: %s", exc)
+        return None
+
+
 async def retrieve(
     envelope: Dict[str, Any],
     query: str,
