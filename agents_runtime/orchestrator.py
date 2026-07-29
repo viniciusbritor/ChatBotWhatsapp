@@ -1936,6 +1936,87 @@ def _is_tool_message(message: Any) -> bool:
     return msg_type in {"tool", "ToolMessage"}
 
 
+def _tool_message_name(message: Any) -> str:
+    """Extract the tool name associated with a tool result message.
+
+    Returns empty string when the message has no ``name`` so the caller
+    can pair it with the earliest pending AI tool_call. Returns the
+    ``tool_call_id`` only as a last-resort fallback (rarely needed in
+    practice but keeps the tool_results list ordered when LangChain
+    strips the name).
+    """
+    if isinstance(message, dict):
+        return str(message.get("name") or message.get("tool") or "")
+    name = getattr(message, "name", None)
+    if name:
+        return str(name)
+    return ""
+
+
+def _tool_message_payload(message: Any) -> Any:
+    """Extract the actual result data from a tool message.
+
+    LangChain ``ToolMessage.content`` can be a string, a list of
+    blocks, or arbitrary JSON. Pure-dict messages (no LangChain
+    objects) carry ``content`` directly. We try to normalise to a
+    Python dict/list when the content is a JSON string.
+    """
+    if isinstance(message, dict):
+        content = message.get("content")
+        if content is None:
+            content = message.get("data")
+    else:
+        content = getattr(message, "content", None)
+    if content is None:
+        return None
+    if isinstance(content, (dict, list)):
+        return content
+    if isinstance(content, str):
+        try:
+            import json as _json
+            return _json.loads(content)
+        except Exception:
+            return content
+    return content
+
+
+def _extract_deepagent_tool_results(messages: List[Any]) -> List[Dict[str, Any]]:
+    """Walk the DeepAgent message log and pair tool calls with their
+    results. Returns a list of ``{"tool": str, "result": Any}`` items
+    in chronological order, ready for ``_detect_tabular_payload``.
+
+    Robust to LangChain 1.x ``AIMessage.tool_calls`` (list of dicts)
+    and to messages without explicit tool_calls (fallback to the
+    ``ToolMessage.name`` field).
+    """
+    results: List[Dict[str, Any]] = []
+    pending_calls: List[str] = []
+
+    for m in messages or []:
+        if _is_ai_message(m):
+            tool_calls = getattr(m, "tool_calls", None)
+            if isinstance(tool_calls, list):
+                for call in tool_calls:
+                    if isinstance(call, dict):
+                        name = call.get("name") or call.get("tool") or ""
+                    else:
+                        name = getattr(call, "name", "") or ""
+                    if name:
+                        pending_calls.append(str(name))
+        elif _is_tool_message(m):
+            tool_name = _tool_message_name(m)
+            if not tool_name and pending_calls:
+                tool_name = pending_calls.pop(0)
+            payload = _tool_message_payload(m)
+            if isinstance(payload, (dict, list)):
+                results.append({"tool": tool_name or "unknown_tool",
+                                 "result": payload})
+            else:
+                results.append({"tool": tool_name or "unknown_tool",
+                                 "result": {"raw": str(payload) if payload is not None else ""}})
+    return results[-10:]
+
+
 def _extract_message_content(message: Any) -> str:
     """Extract the text content from an AI message in any supported format.
 
@@ -2047,6 +2128,8 @@ async def _execute_deep_agent(
     delay_ms = calculate_delay_ms(reply_text)
     presence = calculate_presence()
 
+    captured_tool_results = _extract_deepagent_tool_results(messages)
+
     from core import metrics
     model_used = "deepseek-v4-flash"
     provider = "deepseek"
@@ -2065,6 +2148,7 @@ async def _execute_deep_agent(
             "provider": provider,
             "tool_rounds": len([m for m in messages if _is_tool_message(m)]),
             "tool_calls": [],
+            "tool_results": captured_tool_results,
             "has_audio": extra.get("has_audio", False),
             "runtime": "deepagents",
         },
