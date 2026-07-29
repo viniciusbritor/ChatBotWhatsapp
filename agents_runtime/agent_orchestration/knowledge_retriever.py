@@ -23,6 +23,7 @@ Retrieval reuses ``core.rag.search_legal_knowledge`` (private) and
 from __future__ import annotations
 
 import asyncio
+import unicodedata
 import hashlib
 import logging
 import os
@@ -87,14 +88,16 @@ RAG_KEYWORDS = {
 }
 
 QUESTION_KEYWORDS = {
-    "?", "qual", "quais", "como", "quando", "onde", "por que", "porque",
-    "o que", "me diga", "me conte", "resuma", "explique",
-    "tem alguma coisa sobre", "existe algum documento",
+    "tem alguma coisa sobre",
+    "existe algum documento",
 }
 
 
 def _normalize(text: str) -> str:
-    return re.sub(r"\s+", " ", (text or "").lower()).strip()
+    lowered = (text or "").lower()
+    decomposed = unicodedata.normalize("NFKD", lowered)
+    without_accents = "".join(c for c in decomposed if not unicodedata.combining(c))
+    return re.sub(r"\s+", " ", without_accents).strip()
 
 
 def _looks_like_rag_query(text: str) -> bool:
@@ -206,15 +209,56 @@ def _extract_phone(envelope: Dict[str, Any]) -> str:
 
 
 _DOC_HINT = re.compile(
-    r"\b([\w\-\.\(\)]+\.(?:pdf|docx|xlsx|txt|md|csv))\b", re.IGNORECASE
+    r"[\w\u00C0-\u017F][\w\-\.\(\)\u00C0-\u017F ]*\.(?:pdf|docx|xlsx|txt|md|csv)",
+    re.IGNORECASE,
 )
 
 
+_FILENAME_STOPWORDS = frozenset({
+    "a", "as", "o", "os", "um", "uma", "uns", "umas",
+    "de", "da", "do", "das", "dos", "em", "no", "na", "nos", "nas",
+    "para", "pra", "por", "pelo", "pela", "com", "sem",
+    "que", "qual", "quais", "quem", "quando", "onde", "como",
+    "sobre", "apos", "depois", "antes", "entre",
+    "arquivo", "arquivos", "documento", "documentos", "doc", "docs",
+    "pdf", "planilha", "planilhas", "relatorio", "relatorios",
+    "este", "esta", "esse", "essa", "isto", "isso", "aquilo",
+    "tem", "tenho", "tinha", "tens",
+    "fala", "fale", "falei", "falam", "me", "te", "se",
+    "do", "da", "e", "ou", "mas", "pois",
+    "chamado", "chamada", "nome", "titulo", "conteudo",
+    "informacao", "informacoes", "dados", "lista",
+    "todos", "todas", "todo", "toda", "algum", "alguma",
+    "alguns", "algumas", "qualquer", "quaisquer",
+})
+
+
 def _extract_source_title_hint(query: str) -> Optional[str]:
-    match = _DOC_HINT.search(query or "")
+    """Extract the longest filename-like token from the query.
+
+    The regex accepts internal spaces and Latin-1 accented letters so
+    that filenames like 'dissertação vinicius.pdf' are captured in full.
+
+    After the regex match, leading stopwords/prepositions are trimmed
+    so that phrases like 'me fale sobre dissertação vinicius.pdf' yield
+    'dissertação vinicius.pdf' instead of the whole prefix.
+    """
+    raw = (query or "").strip()
+    if not raw:
+        return None
+    match = _DOC_HINT.search(raw)
     if not match:
         return None
-    return match.group(1).strip(".,;:!?()")
+    candidate = match.group(0).strip(".,;:!?()\"' \t\n\r\u00A0")
+    candidate = re.sub(r"\s+", " ", candidate)
+    if not candidate:
+        return None
+
+    words = candidate.split(" ")
+    while len(words) > 1 and _normalize(words[0]) in _FILENAME_STOPWORDS:
+        words.pop(0)
+    candidate = " ".join(words)
+    return candidate or None
 
 
 CLASS_HINTS = {
@@ -527,6 +571,20 @@ async def retrieve(
 
             db = _get_db()
             if db is None or not _is_user_member(db, group_jid, phone):
+                try:
+                    from core.audit import log_action
+                    log_action(
+                        actor="agent-knowledge-retriever",
+                        action="CROSS_SCOPE_ATTEMPT",
+                        target=phone,
+                        details={
+                            "query_preview": _normalize(query)[:120],
+                            "group_jid": group_jid,
+                            "reason": "not_member_or_firestore_unavailable",
+                        },
+                    )
+                except Exception:
+                    pass
                 result = {
                     "scope": "group",
                     "decision": "denied",

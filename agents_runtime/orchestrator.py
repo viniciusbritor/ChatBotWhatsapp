@@ -22,7 +22,7 @@ import asyncio
 import unicodedata
 import io
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 
 from core.llm_provider import LLMProvider, LLMError
 from core.masker import mask_pii
@@ -166,7 +166,149 @@ async def _finalize_orchestration(
             agent_id=agent_id,
             response_identity="Jennifer",
         ))
+
+    if (
+        reply_text
+        and os.getenv("IMAGE_REPORT_AUTO", "true").lower() == "true"
+        and payload.get("phone")
+    ):
+        try:
+            tabular_payload = _detect_tabular_payload(result)
+            if tabular_payload:
+                await _auto_send_image(payload, tabular_payload, reply_text)
+        except Exception as exc:
+            logger.warning("auto_render_failed: %s", exc)
+
     return result
+
+
+_MIME_LABELS = {
+    "application/vnd.google-apps.folder": "Pasta",
+    "application/pdf": "PDF",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "Word",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "Planilha",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "Apresentação",
+    "image/png": "PNG",
+    "image/jpeg": "Imagem",
+}
+
+
+def _detect_tabular_payload(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Inspect agent metadata for tabular tool results we can render as
+    a PNG. Returns a dict ready to feed ``render_report`` or None.
+
+    Detected sources:
+    - ``drive.list_folder`` -> ``files`` list -> Nome / Tipo / Modificado
+    - ``gmail.search_messages`` -> ``messages`` list -> Assunto / De / Data
+    - ``calendar.list_events`` -> ``events`` list -> Evento / Início / Fim
+    """
+    metadata = result.get("metadata", {}) or {}
+    tool_results = metadata.get("tool_results") or []
+    if not isinstance(tool_results, list):
+        return None
+
+    for entry in tool_results:
+        if not isinstance(entry, dict):
+            continue
+        tool = entry.get("tool") or entry.get("name") or ""
+        result_data = entry.get("result")
+        if not isinstance(result_data, dict):
+            continue
+        if tool == "drive.list_folder" or tool.endswith("list_folder"):
+            files = result_data.get("files") or []
+            if not files:
+                continue
+            rows = [
+                [
+                    str(f.get("name", ""))[:64],
+                    _MIME_LABELS.get(
+                        f.get("mime_type") or "",
+                        (f.get("mime_type") or "").split(".")[-1].upper() or "Arquivo",
+                    ),
+                    str(f.get("modified") or "")[:10],
+                ]
+                for f in files[:20]
+            ]
+            return {
+                "title": "Arquivos da pasta",
+                "headers": ["Nome", "Tipo", "Modificado"],
+                "rows": rows,
+                "emoji_header": "📁",
+            }
+        if tool == "gmail.search_messages" or tool.endswith("search_messages"):
+            messages = result_data.get("messages") or result_data.get("threads") or []
+            if not messages:
+                continue
+            rows = [
+                [
+                    str(m.get("subject") or m.get("snippet") or "(sem assunto)")[:64],
+                    str(m.get("from") or m.get("sender") or "")[:48],
+                    str(m.get("date") or m.get("internal_date") or "")[:10],
+                ]
+                for m in messages[:20]
+            ]
+            return {
+                "title": "Emails encontrados",
+                "headers": ["Assunto", "De", "Data"],
+                "rows": rows,
+                "emoji_header": "📧",
+            }
+        if tool == "calendar.list_events" or tool.endswith("list_events"):
+            events = result_data.get("events") or result_data.get("items") or []
+            if not events:
+                continue
+            rows = []
+            for ev in events[:20]:
+                start = ev.get("start") or {}
+                end = ev.get("end") or {}
+                rows.append([
+                    str(ev.get("summary") or "(sem titulo)")[:48],
+                    str(start.get("dateTime") or start.get("date") or "")[:16],
+                    str(end.get("dateTime") or end.get("date") or "")[:16],
+                ])
+            return {
+                "title": "Eventos da agenda",
+                "headers": ["Evento", "Início", "Fim"],
+                "rows": rows,
+                "emoji_header": "📅",
+            }
+    return None
+
+
+async def _auto_send_image(
+    payload: Dict[str, Any],
+    tabular: Dict[str, Any],
+    caption: str,
+) -> None:
+    """Render and dispatch the tabular payload as a PNG to WhatsApp."""
+    from core.evolution_client import send_image
+    from tools.image_report import render_report
+
+    rendered = render_report(
+        title=tabular["title"],
+        headers=tabular.get("headers"),
+        rows=tabular.get("rows", []),
+        emoji_header=tabular.get("emoji_header", ""),
+        footer=caption[:120],
+    )
+    if not rendered or rendered.get("error"):
+        return
+    extra = payload.get("extra", {}) or {}
+    instance = payload.get("instance", "Jennifer")
+    phone = payload.get("phone", "")
+    if not phone:
+        return
+    try:
+        await send_image(
+            instance=instance,
+            phone=phone,
+            image_bytes=rendered["png_bytes"],
+            filename=f"{tabular['title'].lower().replace(' ', '_')}.png",
+            caption=caption[:1024],
+            remote_jid=extra.get("remote_jid", ""),
+        )
+    except Exception as exc:
+        logger.warning("auto_send_image_failed: %s", exc)
 
 
 def get_recent_interactions(limit: int = 5) -> List[Dict[str, Any]]:
@@ -501,13 +643,35 @@ def _select_orchestrator_agent(instance: str) -> Optional[str]:
     return None
 
 
+def _agent_has_tool(agent_id: str, tool_prefix: str) -> bool:
+    """Return True when the agent's ``tools`` list contains any tool
+    whose id starts with ``tool_prefix`` (e.g. ``"gmail."``).
+    Used to decide whether the orchestrator should skip its
+    blocking prefetch step: if the agent already exposes a tool to
+    fetch fresh data, prefetching duplicates work and adds 8s of
+    latency."""
+    if not agent_id or not tool_prefix:
+        return False
+    agent = get_agent(agent_id)
+    if not agent:
+        return False
+    return any(
+        isinstance(tool, str) and tool.startswith(tool_prefix)
+        for tool in agent.get("tools", [])
+    )
+
+
 def _iter_agents():
     for agent in list_agents():
         yield agent.get("id", ""), agent
 
 
 def _resolve_agent_for_intent(intent: Dict[str, Any], instance: str) -> Optional[str]:
-    """Resolve which agent should handle this intent (hardcoded + dynamic from Firestore)."""
+    """Resolve which agent should handle this intent (hardcoded + dynamic from Firestore).
+
+    Deprecated: prefer ``_resolve_agents_for_intents`` for multi-intent queries.
+    Kept for callers that expect a single agent id (e.g. group_consent flow).
+    """
     if intent.get("is_runtime_status"):
         return "runtime-status"
     if intent["is_gross"] or intent["is_assault_related"]:
@@ -534,6 +698,56 @@ def _resolve_agent_for_intent(intent: Dict[str, Any], instance: str) -> Optional
             return agent_id
 
     return None
+
+
+_AGENT_INTENT_FLAGS: List[Tuple[str, str]] = [
+    ("is_rag", "agent-knowledge-retriever"),
+    ("is_drive", "manager-drive"),
+    ("is_email", "manager-email"),
+    ("is_calendar", "manager-calendar"),
+    ("is_web_search", "manager-web"),
+]
+
+
+def _resolve_agents_for_intents(intent: Dict[str, Any], instance: str) -> List[str]:
+    """Resolve ALL agents that should handle this intent in parallel.
+
+    Multi-intent: when a query triggers more than one intent flag
+    (e.g., 'quais meus ultimos 5 emails?' matches both is_email AND is_rag
+    because of the `?` marker), we want BOTH agents to execute in parallel.
+
+    Returns a deduped list of agent ids in stable order. Returns an empty
+    list when no specialist agent matches (caller decides whether to
+    fall back to the jennifier orchestrator).
+
+    Defense-in-depth (F4d.9): when a personal-intent agent is in the
+    list, the knowledge-retriever is excluded. Personal intents
+    (email/calendar/drive) already have tools that fetch fresh data;
+    running the retriever in parallel would inflate cost without
+    adding value (the personal agent can call knowledge.retrieve as
+    a tool when needed).
+    """
+    if intent.get("is_runtime_status"):
+        return ["runtime-status"]
+    if intent.get("is_gross") or intent.get("is_assault_related"):
+        return ["agent-morality"]
+    if intent.get("is_correction"):
+        return ["agent-learning"]
+    if intent.get("is_intimacy"):
+        return ["agent-intimacy"]
+
+    seen: set = set()
+    agents: List[str] = []
+    for flag, agent_id in _AGENT_INTENT_FLAGS:
+        if intent.get(flag) and agent_id not in seen:
+            agents.append(agent_id)
+            seen.add(agent_id)
+
+    personal_present = any(a.startswith("manager-") for a in agents)
+    if personal_present:
+        agents = [a for a in agents if a != "agent-knowledge-retriever"]
+
+    return agents
 
 
 PERSONAL_INTENTS = {"is_calendar", "is_drive", "is_email"}
@@ -652,6 +866,11 @@ async def _persist_attachment(
     (Firestore Vector por padrão; Google Drive apenas se o user pedir
     explicitamente). Para manter compatibilidade com a assinatura
     legada, ``save_to_rag=False`` força o caminho Drive.
+
+    F4d.6+: Quando o destino é RAG (Firestore Vector), também roda o
+    categorizer (LLM + heuristica) para preencher class/group/theme do
+    documento. Sem isso os chunks sao indexados sem metadata de filtro,
+    comprometendo a retrieval (Fase H).
     """
     from agent_orchestration.knowledge_router import route_attachment
 
@@ -666,18 +885,41 @@ async def _persist_attachment(
             "detail": decision,
         }
     extracted_payload = decision.get("extracted") or extracted
+    category_metadata = decision.get("category") or {}
+    persist_scope = decision.get("scope", "private")
+
+    if (
+        skill is not None
+        and save_to_rag
+        and not category_metadata
+        and persist_scope != "drive"
+    ):
+        try:
+            from agent_orchestration.knowledge_router import (
+                categorize_and_extract,
+            )
+            extraction = await categorize_and_extract(envelope, skill)
+            if extraction.get("extracted"):
+                extracted_payload = extraction["extracted"]
+            if extraction.get("category"):
+                category_metadata = extraction["category"]
+                decision["extracted"] = extracted_payload
+                decision["category"] = category_metadata
+        except Exception as exc:
+            logger.warning("categorize_and_extract failed in _persist_attachment: %s", exc)
+
     persist_result = await skill.persist(
         envelope,
         extracted_payload,
-        decision.get("scope", "private"),
-        metadata=decision.get("category") or {},
+        persist_scope,
+        metadata=category_metadata,
     )
     if persist_result.get("error"):
         return persist_result
-    persist_result["scope"] = decision.get("scope", "private")
+    persist_result["scope"] = persist_scope
     persist_result["skill_name"] = decision.get("skill_name")
-    if decision.get("category"):
-        persist_result["category"] = decision["category"]
+    if category_metadata:
+        persist_result["category"] = category_metadata
     return persist_result
 
 
@@ -1009,6 +1251,248 @@ async def index_audio_failure_for_audit(body: Dict[str, Any], error_code: str) -
         return {"status": "error", "reason": type(exc).__name__}
 
 
+async def _execute_single_specialist(
+    specialist_id: str,
+    intent: Dict[str, Any],
+    payload: Dict[str, Any],
+    masked_text: str,
+    extra: Dict[str, Any],
+    instance: str,
+    phone: str,
+    sender_name: str,
+    path: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Run one specialist agent end-to-end (legacy single-agent path).
+
+    Wraps the access_guardian check, prefetch logic and tool execution
+    that used to live inline in `orchestrate`. Returns the agent's
+    result dict (ready for ``_finalize_orchestration``).
+    """
+    agent = get_agent(specialist_id)
+    if not agent or not agent.get("enabled", True):
+        path.append({"step": 2, "phase": "fallback_to_orchestrator", "reason": "specialist_disabled"})
+        orchestrator_id = await _get_orchestrator(instance)
+        if not orchestrator_id:
+            return _error_response(503, "no_orchestrator", "Nenhum orchestrator disponivel")
+        orchestrator = get_agent(orchestrator_id)
+        if not orchestrator:
+            return _error_response(503, "agent_not_found", f"Orchestrator {orchestrator_id} nao encontrado")
+        return await _execute_agent(orchestrator, masked_text, payload, extra)
+
+    agent_copy = dict(agent)
+    prefetch_data = None
+
+    guard_result = await _run_guard_graph(payload, masked_text, intent)
+    guard_verdict = (guard_result or {}).get("verdict", "noop")
+    if guard_verdict in {"deny", "request_oauth"}:
+        decision = (guard_result or {}).get("decision") or {}
+        link = decision.get("oauth_link", "")
+        if guard_verdict == "request_oauth" and link:
+            reply = (
+                "Oi! Para acessar " + decision.get("capability", "essa ferramenta") +
+                ", preciso que voce autorize sua conta Google. "
+                f"Acesse este link e faca o login: {link}"
+            )
+        else:
+            reply = (
+                "Oi! Essa acao so pode ser executada pelo proprietario "
+                "da conta WhatsApp."
+            )
+        return {
+            "reply": reply,
+            "delay_ms": 0,
+            "presence": "composing",
+            "metadata": {
+                "agent_id": "access_guardian",
+                "guardian_verdict": guard_verdict,
+                "guardian_reason": decision.get("reason", ""),
+                "guardian_capability": decision.get("capability", ""),
+                "response_identity": "Jennifer",
+                "blocked": True,
+            },
+        }
+
+    if guard_verdict == "allow" and _is_personal_intent(intent):
+        try:
+            ack_map = {
+                "calendar": "Só um instante. Vou ver sua agenda... 📅",
+                "drive": "Só um instante. Vou procurar aqui... 📁",
+                "email": "Só um instante. Vou buscar seus emails... 📧",
+            }
+            ack_intent = "calendar" if intent.get("is_calendar") else (
+                "drive" if intent.get("is_drive") else "email"
+            )
+            ack_text = ack_map.get(ack_intent, "Só um instante... ⏳")
+            from core.evolution_client import send_presence, send_text
+            ack_delay_ms = max(1500, calculate_delay_ms(ack_text))
+            asyncio.create_task(send_presence(instance, phone, "composing", remote_jid=extra.get("remote_jid", "")))
+            asyncio.create_task(send_text(
+                instance=instance, phone=phone, text=ack_text,
+                delay_ms=ack_delay_ms, presence="composing",
+                remote_jid=extra.get("remote_jid", ""),
+            ))
+        except Exception:
+            pass
+
+    if guard_result.get("prefetch"):
+        prefetch_data = guard_result["prefetch"]
+
+    if prefetch_data is None and _is_read_query(masked_text):
+        if _agent_has_tool(specialist_id, "calendar."):
+            pass
+        elif _agent_has_tool(specialist_id, "gmail."):
+            pass
+        elif _agent_has_tool(specialist_id, "drive."):
+            pass
+        else:
+            try:
+                if intent.get("is_calendar"):
+                    prefetch_data = await asyncio.wait_for(
+                        _prefetch_calendar(phone, instance), timeout=8)
+                elif intent.get("is_email"):
+                    prefetch_data = await asyncio.wait_for(
+                        _prefetch_email(phone, instance), timeout=8)
+                elif intent.get("is_drive"):
+                    prefetch_data = await asyncio.wait_for(
+                        _prefetch_drive_multi(phone, masked_text, instance), timeout=8)
+            except asyncio.TimeoutError:
+                logger.warning(f"Prefetch timeout for {specialist_id}")
+                prefetch_data = None
+            except Exception as e:
+                logger.warning(f"Prefetch failed for {specialist_id}: {e}")
+                prefetch_data = None
+
+    if prefetch_data and _has_real_data(prefetch_data):
+        prefetch_data = mask_pii(prefetch_data)
+        data_label = "CALENDARIO" if intent.get("is_calendar") else \
+                     "EMAILS" if intent.get("is_email") else "DRIVE"
+        tone_guide = _prefetch_tone_guide(intent)
+        agent_copy["system_prompt"] += (
+            f"\n\n[DADOS PRE-CARREGADOS DO {data_label}]\n{prefetch_data}\n\n"
+            f"{tone_guide}"
+            "NAO chame ferramentas — os dados ja estao prontos."
+        )
+        agent_copy["tools"] = []
+
+    if _is_group_message(payload) and intent.get("is_drive"):
+        group_jid = _extract_group_jid(payload)
+        if group_jid:
+            try:
+                from tools.group import get_group_drive_folder, get_group_info
+                drive_folder = await get_group_drive_folder(group_jid)
+                group_info = await get_group_info(group_jid)
+                group_name = group_info.get("name", "grupo")
+                if drive_folder:
+                    agent_copy["system_prompt"] += (
+                        f"\n\n[CONTEXTO DE GRUPO]\n"
+                        f"Voce esta respondendo no grupo '{group_name}'. "
+                        f"Use APENAS a pasta do grupo (ID: {drive_folder}) para buscas. "
+                        f"Nao acesse outras pastas do Drive do owner."
+                    )
+                else:
+                    agent_copy["system_prompt"] += (
+                        f"\n\n[CONTEXTO DE GRUPO]\n"
+                        f"Voce esta respondendo no grupo '{group_name}'. "
+                        f"Este grupo ainda nao tem uma pasta no Drive associada. "
+                        f"Informe o usuario e pergunte se quer criar uma."
+                    )
+            except Exception:
+                pass
+
+    path.append({"step": 2, "phase": "specialist", "agent": specialist_id,
+                 "prefetch": bool(prefetch_data),
+                 "reason": {k: v for k, v in intent.items() if v}})
+    return await _execute_agent(agent_copy, masked_text, payload, extra)
+
+
+async def _execute_multi_specialists_parallel(
+    specialist_ids: List[str],
+    intent: Dict[str, Any],
+    payload: Dict[str, Any],
+    masked_text: str,
+    extra: Dict[str, Any],
+    instance: str,
+    phone: str,
+    sender_name: str,
+    path: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Run multiple specialist agents in parallel and merge results.
+
+    Multi-intent example: 'quais meus ultimos 5 emails?' matches both
+    ``is_email`` and ``is_rag`` (because of the `?` marker). The user
+    expects BOTH agents to execute and return combined output.
+
+    Behavior:
+    - Each agent is called via ``_execute_agent`` concurrently via
+      ``asyncio.gather``.
+    - Per-agent errors are isolated (return_exceptions=True); one
+      failing agent doesn't break the others.
+    - The final reply is the concatenation of all non-empty agent
+      outputs, each prefixed with the agent id for traceability.
+    """
+    path.append({
+        "step": 2,
+        "phase": "multi_specialist_parallel",
+        "agents": list(specialist_ids),
+        "reason": {k: v for k, v in intent.items() if v},
+    })
+
+    async def _run_one(specialist_id: str) -> Tuple[str, Optional[Dict[str, Any]]]:
+        try:
+            agent = get_agent(specialist_id)
+            if not agent or not agent.get("enabled", True):
+                return specialist_id, None
+            agent_copy = dict(agent)
+            res = await _execute_agent(agent_copy, masked_text, payload, extra)
+            return specialist_id, res
+        except Exception as exc:
+            logger.exception("multi_specialist_failed agent=%s", specialist_id)
+            return specialist_id, {"reply": "", "metadata": {"error": type(exc).__name__}}
+
+    pairs = await asyncio.gather(*[_run_one(s) for s in specialist_ids])
+    successful = [(sid, r) for sid, r in pairs if r and r.get("reply")]
+
+    if not successful:
+        return _error_response(500, "multi_agent_empty",
+                               "Os agentes nao conseguiram gerar uma resposta.")
+
+    if len(successful) == 1:
+        sid, r = successful[0]
+        return r
+
+    sections: List[str] = []
+    for sid, r in successful:
+        reply = (r.get("reply") or "").strip()
+        if not reply:
+            continue
+        sections.append(reply)
+    if not sections:
+        return _error_response(500, "multi_agent_empty",
+                               "Os agentes nao conseguiram gerar uma resposta.")
+
+    merged_reply = "\n\n---\n\n".join(sections)
+    merged_metadata = {
+        "agent_id": "+".join(sid for sid, _ in successful),
+        "response_identity": "Jennifer",
+        "multi_agent": True,
+        "agents_executed": [sid for sid, _ in successful],
+        "agent_errors": [
+            {"agent_id": sid, "error": (r or {}).get("metadata", {}).get("error")}
+            for sid, r in pairs if r and (r.get("metadata") or {}).get("error")
+        ],
+    }
+    primary_delay = max(
+        (r.get("delay_ms") or 0 for _, r in successful),
+        default=0,
+    )
+    return {
+        "reply": merged_reply,
+        "delay_ms": primary_delay,
+        "presence": "composing",
+        "metadata": merged_metadata,
+    }
+
+
 async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Main orchestration entry point.
 
@@ -1133,7 +1617,8 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
                 logger.warning("set_member_confirmation failed: %s", exc)
             intent_token = f"is_{requested_intent}"
             intent = {intent_token: True}
-            specialist_id = _resolve_agent_for_intent(intent, instance)
+            specialist_ids = _resolve_agents_for_intents(intent, instance)
+            specialist_id = specialist_ids[0] if specialist_ids else None
             if specialist_id:
                 agent = get_agent(specialist_id)
                 if agent:
@@ -1176,6 +1661,9 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
         intent["is_rag"] = False
     if intent["is_rag"]:
         path.append({"step": "1a", "phase": "rag_intent", "details": "true"})
+
+    specialist_ids = _resolve_agents_for_intents(intent, instance)
+    specialist_id = specialist_ids[0] if specialist_ids else None
 
     attachment_already_acked = False
     if extra.get("has_document") and not intent.get("is_attachment"):
@@ -1298,138 +1786,17 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "applied": True,
             },
         }
-    elif specialist_id:
-        agent = get_agent(specialist_id)
-        if agent and agent.get("enabled", True):
-            agent_copy = dict(agent)
-            prefetch_data = None
-
-            guard_result = await _run_guard_graph(payload, masked_text, intent)
-            guard_verdict = (guard_result or {}).get("verdict", "noop")
-            if guard_verdict in {"deny", "request_oauth"}:
-                decision = (guard_result or {}).get("decision") or {}
-                link = decision.get("oauth_link", "")
-                if guard_verdict == "request_oauth" and link:
-                    reply = (
-                        "Oi! Para acessar " + decision.get("capability", "essa ferramenta") +
-                        ", preciso que voce autorize sua conta Google. "
-                        f"Acesse este link e faca o login: {link}"
-                    )
-                else:
-                    reply = (
-                        "Oi! Essa acao so pode ser executada pelo proprietario "
-                        "da conta WhatsApp."
-                    )
-                return {
-                    "reply": reply,
-                    "delay_ms": 0,
-                    "presence": "composing",
-                    "metadata": {
-                        "agent_id": "access_guardian",
-                        "guardian_verdict": guard_verdict,
-                        "guardian_reason": decision.get("reason", ""),
-                        "guardian_capability": decision.get("capability", ""),
-                        "response_identity": "Jennifer",
-                        "blocked": True,
-                    },
-                }
-
-            if guard_verdict == "allow" and _is_personal_intent(intent) and not attachment_already_acked:
-                try:
-                    ack_map = {
-                        "calendar": "Só um instante. Vou ver sua agenda... 📅",
-                        "drive": "Só um instante. Vou procurar aqui... 📁",
-                        "email": "Só um instante. Vou buscar seus emails... 📧",
-                    }
-                    ack_intent = "calendar" if intent.get("is_calendar") else (
-                        "drive" if intent.get("is_drive") else "email"
-                    )
-                    ack_text = ack_map.get(ack_intent, "Só um instante... ⏳")
-                    from core.evolution_client import send_presence, send_text
-                    # delay_ms > 0 faz o WhatsApp mostrar "digitando..." (typing
-                    # indicator) antes de exibir a mensagem. Sem isso, a
-                    # resposta aparece instantaneamente e nao parece humana.
-                    ack_delay_ms = max(1500, calculate_delay_ms(ack_text))
-                    asyncio.create_task(send_presence(instance, phone, "composing", remote_jid=extra.get("remote_jid", "")))
-                    asyncio.create_task(send_text(
-                        instance=instance, phone=phone, text=ack_text,
-                        delay_ms=ack_delay_ms, presence="composing",
-                        remote_jid=extra.get("remote_jid", ""),
-                    ))
-                except Exception:
-                    pass
-
-            if guard_result.get("prefetch"):
-                prefetch_data = guard_result["prefetch"]
-
-            if prefetch_data is None and _is_read_query(masked_text):
-                try:
-                    if intent["is_calendar"]:
-                        prefetch_data = await asyncio.wait_for(
-                            _prefetch_calendar(phone, instance), timeout=8)
-                    elif intent["is_email"]:
-                        prefetch_data = await asyncio.wait_for(
-                            _prefetch_email(phone, instance), timeout=8)
-                    elif intent["is_drive"]:
-                        prefetch_data = await asyncio.wait_for(
-                            _prefetch_drive_multi(phone, masked_text, instance), timeout=8)
-                except asyncio.TimeoutError:
-                    logger.warning(f"Prefetch timeout for {specialist_id}")
-                    prefetch_data = None
-                except Exception as e:
-                    logger.warning(f"Prefetch failed for {specialist_id}: {e}")
-                    prefetch_data = None
-
-            if prefetch_data and _has_real_data(prefetch_data):
-                prefetch_data = mask_pii(prefetch_data)
-                data_label = "CALENDARIO" if intent["is_calendar"] else \
-                             "EMAILS" if intent["is_email"] else "DRIVE"
-                tone_guide = _prefetch_tone_guide(intent)
-                agent_copy["system_prompt"] += (
-                    f"\n\n[DADOS PRE-CARREGADOS DO {data_label}]\n{prefetch_data}\n\n"
-                    f"{tone_guide}"
-                    "NAO chame ferramentas — os dados ja estao prontos."
-                )
-                agent_copy["tools"] = []
-
-            if _is_group_message(payload) and intent.get("is_drive"):
-                group_jid = _extract_group_jid(payload)
-                if group_jid:
-                    try:
-                        from tools.group import get_group_drive_folder, get_group_info
-                        drive_folder = await get_group_drive_folder(group_jid)
-                        group_info = await get_group_info(group_jid)
-                        group_name = group_info.get("name", "grupo")
-                        if drive_folder:
-                            agent_copy["system_prompt"] += (
-                                f"\n\n[CONTEXTO DE GRUPO]\n"
-                                f"Voce esta respondendo no grupo '{group_name}'. "
-                                f"Use APENAS a pasta do grupo (ID: {drive_folder}) para buscas. "
-                                f"Nao acesse outras pastas do Drive do owner."
-                            )
-                        else:
-                            agent_copy["system_prompt"] += (
-                                f"\n\n[CONTEXTO DE GRUPO]\n"
-                                f"Voce esta respondendo no grupo '{group_name}'. "
-                                f"Este grupo ainda nao tem uma pasta no Drive associada. "
-                                f"Informe o usuario e pergunte se quer criar uma."
-                            )
-                    except Exception:
-                        pass
-
-            path.append({"step": 2, "phase": "specialist", "agent": specialist_id,
-                         "prefetch": bool(prefetch_data),
-                         "reason": {k: v for k, v in intent.items() if v}})
-            result = await _execute_agent(agent_copy, masked_text, payload, extra)
+    elif specialist_ids:
+        if len(specialist_ids) == 1:
+            result = await _execute_single_specialist(
+                specialist_ids[0], intent, payload, masked_text, extra,
+                instance, phone, sender_name, path,
+            )
         else:
-            path.append({"step": 2, "phase": "fallback_to_orchestrator", "reason": "specialist_disabled"})
-            orchestrator_id = await _get_orchestrator(instance)
-            if not orchestrator_id:
-                return _error_response(503, "no_orchestrator", "Nenhum orchestrator disponivel")
-            orchestrator = get_agent(orchestrator_id)
-            if not orchestrator:
-                return _error_response(503, "agent_not_found", f"Orchestrator {orchestrator_id} nao encontrado")
-            result = await _execute_agent(orchestrator, masked_text, payload, extra)
+            result = await _execute_multi_specialists_parallel(
+                specialist_ids, intent, payload, masked_text, extra,
+                instance, phone, sender_name, path,
+            )
     else:
         orchestrator_id = await _get_orchestrator(instance)
         if not orchestrator_id:
@@ -1776,6 +2143,8 @@ async def _execute_agent(
         if schema:
             tool_schemas.append({"type": "function", "function": schema})
 
+    captured_tool_results: List[Dict[str, Any]] = []
+
     async def tool_executor(tool_name: str, tool_args: dict) -> str:
         tool_fn = get_tool(tool_name)
         if not tool_fn:
@@ -1789,6 +2158,10 @@ async def _execute_agent(
                 result = await asyncio.wait_for(coro, timeout=30)
             else:
                 result = coro
+            if isinstance(result, dict):
+                captured_tool_results.append({"tool": tool_name, "result": result})
+                if len(captured_tool_results) > 10:
+                    captured_tool_results.pop(0)
             truncated = mask_pii(json.dumps(result, ensure_ascii=False, default=str))
             if len(truncated) > 2000:
                 truncated = truncated[:2000] + "...(truncated)"
@@ -1858,6 +2231,7 @@ async def _execute_agent(
                 "provider": provider,
                 "tool_rounds": result.get("tool_rounds", 0),
                 "tool_calls": tool_calls_made,
+                "tool_results": captured_tool_results,
                 "has_audio": extra.get("has_audio", False),
             },
         }

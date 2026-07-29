@@ -446,7 +446,7 @@ class TestPrefetchInstancePropagation:
             with patch("orchestrator.get_user", return_value={"phone": "5511966830020"}):
                 with patch("orchestrator._run_guard_graph", AsyncMock(return_value={"verdict": "allow"})):
                     with patch("orchestrator._resolve_agent_for_intent", return_value="manager-calendar"):
-                        with patch("orchestrator.get_agent", return_value={"id": "manager-calendar", "name": "Calendar", "tools": ["calendar.list_events"], "system_prompt": "Test", "enabled": True}):
+                        with patch("orchestrator.get_agent", return_value={"id": "manager-calendar", "name": "Calendar", "tools": [], "system_prompt": "Test", "enabled": True}):
                             with patch("orchestrator._prefetch_calendar", new_callable=AsyncMock) as mock_prefetch:
                                 with patch("orchestrator._execute_agent", new_callable=AsyncMock) as mock_exec:
                                     with patch("orchestrator._schedule_indexing", side_effect=close_coroutine):
@@ -459,10 +459,35 @@ class TestPrefetchInstancePropagation:
                                             "sender_name": "Vinicius",
                                             "extra": {},
                                         })
-                                        assert mock_prefetch.called, "_prefetch_calendar should have been called for calendar intent"
+                                        assert mock_prefetch.called, "_prefetch_calendar should be called when agent has no tools"
                                         called_args = mock_prefetch.call_args
                                         assert called_args.args[0] == "5511966830020"
                                         assert called_args.args[1] == "Jennifer"
+
+
+    @pytest.mark.asyncio
+    async def test_orchestrate_calendar_intent_skips_prefetch_when_agent_has_tools(self):
+        """F4d.9: skip the 8s prefetch when the agent already exposes a
+        tool to fetch fresh data (calendar.list_events)."""
+        from orchestrator import orchestrate
+
+        with patch("orchestrator._detect_intent", return_value=_calendar_intent_full()):
+            with patch("orchestrator.get_user", return_value={"phone": "5511966830020"}):
+                with patch("orchestrator._run_guard_graph", AsyncMock(return_value={"verdict": "allow"})):
+                    with patch("orchestrator._resolve_agent_for_intent", return_value="manager-calendar"):
+                        with patch("orchestrator.get_agent", return_value={"id": "manager-calendar", "name": "Calendar", "tools": ["calendar.list_events"], "system_prompt": "Test", "enabled": True}):
+                            with patch("orchestrator._prefetch_calendar", new_callable=AsyncMock) as mock_prefetch:
+                                with patch("orchestrator._execute_agent", new_callable=AsyncMock) as mock_exec:
+                                    with patch("orchestrator._schedule_indexing", side_effect=close_coroutine):
+                                        mock_exec.return_value = {"reply": "ok", "delay_ms": 0, "presence": "composing", "metadata": {"agent_id": "manager-calendar"}}
+                                        await orchestrate({
+                                            "instance": "Jennifer",
+                                            "phone": "5511966830020",
+                                            "text": "compromissos de hoje",
+                                            "sender_name": "Vinicius",
+                                            "extra": {},
+                                        })
+                                        assert not mock_prefetch.called, "_prefetch_calendar should be skipped when agent has calendar tools"
 
 
 class TestAttachmentIntents:

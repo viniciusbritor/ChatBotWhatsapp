@@ -514,6 +514,27 @@ async def pubsub_push(request: Request):
 
     request_id = envelope["message_id"]
     message_id = (payload.get("message_id") if isinstance(payload, dict) else None) or request_id
+    rate_limited_phone = (
+        payload.get("phone", "")
+        if isinstance(payload, dict)
+        else ""
+    )
+    if rate_limited_phone:
+        try:
+            from core.rate_limit import is_rate_limited
+            limited, _remaining = is_rate_limited(rate_limited_phone)
+            if limited:
+                logger.warning(
+                    "rate_limited phone=%s request_id=%s",
+                    rate_limited_phone, request_id,
+                )
+                return {
+                    "status": "rate_limited",
+                    "request_id": request_id,
+                    "message_id": message_id,
+                }
+        except Exception as exc:
+            logger.warning("rate_limit_check_failed: %s", exc)
 
     async def _process(p: Dict[str, Any]) -> Dict[str, Any]:
         from core.evolution_client import send_text

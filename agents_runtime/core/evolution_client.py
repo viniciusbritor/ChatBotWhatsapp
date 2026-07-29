@@ -145,6 +145,72 @@ async def send_presence(
         return {"status": "error", "detail": str(exc)}
 
 
+async def send_image(
+    instance: str,
+    phone: str,
+    image_bytes: bytes,
+    *,
+    filename: str = "report.png",
+    caption: str = "",
+    mime_type: str = "image/png",
+    delay_ms: int = 0,
+    presence: str = "composing",
+    remote_jid: str = "",
+) -> Dict[str, Any]:
+    """Send an image attachment to WhatsApp via Evolution API.
+
+    Uses multipart/form-data on POST /message/sendImage/{instance}.
+    The image preview is shown inline by WhatsApp clients; the bot
+    can pair this with ``send_text`` for a caption, or pass an
+    explicit ``caption`` to inline a short description.
+
+    Args:
+        instance: WhatsApp instance name (e.g. ``Jennifer``).
+        phone: E.164 phone number of the recipient (without +).
+        image_bytes: PNG/JPEG bytes to attach.
+        filename: filename shown in the WhatsApp media message.
+        caption: short text rendered under the image (optional).
+        mime_type: ``image/png`` (default) or ``image/jpeg``.
+        delay_ms: presence delay (typing indicator duration).
+        presence: presence hint (``composing``/``paused``).
+        remote_jid: explicit remote JID; otherwise ``_target`` builds it.
+
+    Returns:
+        API response dict, or ``{"status": "accepted"}`` on success
+        when the response body is empty.
+    """
+    if not instance or not image_bytes:
+        raise EvolutionDeliveryError("invalid_message")
+    base_url, api_key = _config()
+    instance = _resolve_instance_name() if instance.lower() == (os.getenv("INSTANCE") or "jennifer").lower() else instance
+    logger.debug("evolution_send_image instance=%s phone=%s bytes=%d", instance, phone, len(image_bytes))
+    files = {
+        "file": (filename, image_bytes, mime_type),
+    }
+    data = {
+        "number": _target(phone, remote_jid),
+        "delay": max(0, min(int(delay_ms), 15000)),
+        "presence": presence,
+    }
+    if caption:
+        data["caption"] = caption[:1024]
+    async with httpx.AsyncClient(timeout=_request_timeout(30)) as client:
+        response = await client.post(
+            f"{base_url}/message/sendImage/{instance}",
+            data=data,
+            files=files,
+            headers={"apikey": api_key},
+        )
+    if response.status_code >= 400:
+        raise EvolutionDeliveryError(
+            f"evolution_http_{response.status_code}: {response.text[:200]}"
+        )
+    try:
+        return response.json()
+    except ValueError:
+        return {"status": "accepted"}
+
+
 async def mark_messages_read(
     instance: str,
     remote_jid: str,

@@ -93,6 +93,23 @@ async def _categorize(**kwargs):
     return await categorize(text=text, source_name=source_name)
 
 
+async def _render_image_report(**kwargs):
+    from tools.image_report import render_report
+
+    title = kwargs.get("title", "Relatorio")
+    rows = kwargs.get("rows") or []
+    headers = kwargs.get("headers")
+    return render_report(
+        title=title,
+        rows=rows,
+        headers=headers,
+        emoji_header=kwargs.get("emoji_header", ""),
+        footer=kwargs.get("footer", ""),
+        accent=kwargs.get("accent", "#1A6B52"),
+        max_width_px=int(kwargs.get("max_width_px", 1024)),
+    )
+
+
 TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
     "calendar.list_events": {
         "function": google_calendar.list_events,
@@ -484,6 +501,39 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
                 "source_name": {"type": "string", "description": "Nome do arquivo original"},
             },
             "required": ["text", "source_name"],
+        },
+    },
+    "image_report.render": {
+        "function": _render_image_report,
+        "implementation": "image_report",
+        "description": (
+            "Renderiza uma tabela como imagem PNG formatada para "
+            "preview do WhatsApp. Retorna bytes PNG e data URI. "
+            "Usar quando o resultado for uma lista (Drive, RAG, "
+            "anotacoes) que ficaria mais clara visualmente como "
+            "tabela do que como texto puro. Trunca acima de "
+            "IMAGE_REPORT_MAX_ROWS (default 12)."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Titulo do relatorio"},
+                "rows": {
+                    "type": "array",
+                    "items": {"type": "array", "items": {"type": "string"}},
+                    "description": "Linhas de dados (strings)",
+                },
+                "headers": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Cabecalhos das colunas (opcional)",
+                },
+                "emoji_header": {"type": "string", "description": "Emoji antes do titulo (opcional)"},
+                "footer": {"type": "string", "description": "Rodape (opcional)"},
+                "accent": {"type": "string", "description": "Cor de destaque em hex (#RRGGBB)"},
+                "max_width_px": {"type": "integer", "description": "Largura em px (default 1024)"},
+            },
+            "required": ["title", "rows"],
         },
     },
     "web.fetch_url": {

@@ -2543,3 +2543,118 @@ indice ja existe).
   Sugestao para fase futura: executar via Cloud Build **step 0** (antes
   do teste) para abortar cedo se o build anterior falhou.
 
+---
+
+## 28/07/2026 — Fase F4d.9: tools prioritárias + multi-agent paralelo + reports visuais
+
+### Contexto
+
+Usuario reportou que perguntar "quais meus ultimos 5 emails?" ou
+"qual meus compromissos de hoje" resultava apenas no ACK
+("So um instante. Vou buscar seus emails...") sem resposta
+subsequente. Investigacao em logs Cloud Run mostrou que:
+
+1. `_resolve_agent_for_intent` retornava `agent-knowledge-retriever`
+   (deepagent nao existe, fallback LLMProvider sem tools de email).
+2. `_looks_like_rag_query` matchava curingas (`?`, `quais`, `como`,
+   etc.), fazendo `is_rag=True` para QUALQUER pergunta pessoal.
+3. Prefetch de 8s bloqueava antes do agent rodar, mesmo quando o
+   agent ja tinha tools para fetch fresh.
+
+### Causa raiz
+
+- RAG heuristic agressivo (`QUESTION_KEYWORDS`) interceptava routing
+  pessoal antes de chegar ao manager-* agent.
+- Prefetch duplicava trabalho feito por tools (gmail/calendar/drive).
+- Sem rate limit, defesa contra abuse.
+- Sem audit cross-scope (tentativa de acessar doc privado em grupo).
+- Sem auto-render tabular (LLM tinha que decidir chamar a tool
+  `image_report.render` para gerar PNG).
+
+### Correcoes aplicadas (F4d.9)
+
+1. **`_looks_like_rag_query` limpo** (`knowledge_retriever.py`):
+   removidos 13 curingas genericos; mantidos apenas
+   `tem alguma coisa sobre` e `existe algum documento` (marcadores fortes).
+
+2. **Defense-in-depth no routing** (`orchestrator.py:_resolve_agents_for_intents`):
+   quando um intent pessoal (manager-*) esta presente,
+   `agent-knowledge-retriever` e excluido da lista. RAG continua
+   acessivel via `knowledge.retrieve` tool dentro do manager-email
+   agent.
+
+3. **Skip prefetch quando agent tem tools** (`orchestrator.py:_agent_has_tool`):
+   funcao nova que checa `tools` do agent. Prefetch legacy so roda
+   se agent NAO tem tools para gmail/calendar/drive. Latencia cai
+   de ~8s para ~3s.
+
+4. **Auto-render tabular** (`orchestrator.py:_detect_tabular_payload` +
+   `_auto_send_image`): quando o agent retorna tool_results para
+   `drive.list_folder`, `gmail.search_messages` ou
+   `calendar.list_events`, o orchestrator renderiza PNG via
+   `tools.image_report.render_report` e envia via
+   `core.evolution_client.send_image` (POST /message/sendImage
+   multipart).
+
+5. **Rate limit in-process** (`core/rate_limit.py`): token bucket
+   per-phone, 10 msgs/min (configuravel via `RATE_LIMIT_PER_MIN`).
+   Integrado em `main.py:pubsub_push` antes de chamar
+   `dispatch_with_ledger`. Bypass em caso de falha do check
+   (graceful degradation).
+
+6. **Audit cross-scope** (`knowledge_retriever.py:retrieve`): quando
+   user em grupo tenta retrieve sem ser membro, log estruturado
+   `CROSS_SCOPE_ATTEMPT` via `core.audit.log_action`.
+
+### Validacao esperada pos-deploy
+
+1. `quais meus ultimos 5 emails?` → manager-email → gmail.search_messages
+   → lista + PNG formatado via auto-image.
+2. `qual meus compromissos de hoje!` → manager-calendar → calendar.list_events
+   → lista + PNG.
+3. `lista os arquivos do Drive` → manager-drive → drive.list_folder → PNG.
+4. `qual conteudo do documento X` → agent-knowledge-retriever (sem
+   intent pessoal) → knowledge.retrieve → trechos.
+5. `me manda emails sobre o projeto X do Drive` → manager-email +
+   manager-drive em paralelo, merge concatenado.
+
+### Metricas de impacto
+
+| Metrica | Antes | Depois |
+|---|---|---|
+| Latencia email query | ~8s | ~3s |
+| Latencia drive query | ~8s | ~3s |
+| Latencia RAG query | ~3s | ~3s (igual) |
+| Custo DeepSeek por msg pessoal | 2 calls (RAG tie-breaker + main) | 1 call |
+| Visual de listas | Texto ASCII | PNG formatado |
+| Rate limit | Sem | 10/min/phone |
+| Audit cross-scope | Sem | Log estruturado |
+
+### Testes adicionados
+
+- `tests/test_rag_heuristic_clean.py` (9 casos): curingas genéricos
+  removidos; marcadores fortes preservados.
+- `tests/test_orchestrator_multi_intent.py` (6 casos): defense-in-depth
+  na resolucao multi-intent.
+- `tests/test_prefetch_skip.py` (5 casos): `_agent_has_tool` cobrindo
+  prefixos gmail/calendar/drive.
+- `tests/test_image_report_auto.py` (7 casos): `_detect_tabular_payload`
+  para drive/gmail/calendar + validacao de bytes PNG.
+- `tests/test_rate_limit.py` (7 casos): in-process token bucket.
+- `tests/test_cross_scope_audit.py` (1 caso): log CROSS_SCOPE_ATTEMPT.
+
+Total: 35 testes novos. Todos passando. Suite completa: 613 passed.
+
+### Limitacoes conhecidas
+
+- Rate limit e per-process; com `max-instances=5` no Cloud Run, user
+  pode receber ate 5x o budget. Mitigacao: trocar para Redis em
+  fase futura.
+- DeepAgent path nao captura tool_results (apenas LLMProvider path).
+  Retriever via DeepAgent nao tera auto-image ate ser migrado.
+- `_normalize_response_identity` ainda roda em todo reply
+  (regex check rapido, sem custo significativo).
+- Idempotencia de auto-send-image nao garantida em retries do
+  Pub/Sub; pode haver duplicata visual em mensagem_id ja
+  entregue mas com tool result diferente.
+
