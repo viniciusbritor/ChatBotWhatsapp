@@ -78,26 +78,37 @@ def _cache_set(key: str, result: Dict[str, Any]) -> None:
         _RETRIEVAL_CACHE.pop(oldest[0], None)
 
 
-RAG_KEYWORDS = {
+def _normalize(text: str) -> str:
+    lowered = (text or "").lower()
+    decomposed = unicodedata.normalize("NFKD", lowered)
+    without_accents = "".join(c for c in decomposed if not unicodedata.combining(c))
+    return re.sub(r"\s+", " ", without_accents).strip()
+
+
+RAG_KEYWORDS_RAW = {
     "memorizei", "memorizado", "memorizada", "memorizou", "memorizaram",
     "indexado", "indexada", "indexados", "no rag", "no vector",
     "base de conhecimento", "knowledge base", "conhecimento",
     "salvou", "salvamos", "gravamos", "guardamos", "armazenamos",
     "ata que", "documento que", "pdf que", "planilha que",
     "docx que", "arquivo que",
+    "esse documento", "este documento", "desse documento",
+    "deste documento", "o documento", "o arquivo",
+    "esse pdf", "esse docx", "essa planilha", "dessa planilha",
+    "desse pdf", "desse arquivo", "deste arquivo",
+    "sobre o que é", "sobre o que", "do que se trata",
+    "qual o tema", "qual é o tema", "de que trata",
+    "quem é o autor", "qual o autor", "qual é o autor",
+    "quem escreveu", "de quem é", "conteudo do",
+    "conteudo da", "conteudo desse", "conteudo deste",
 }
+
+RAG_KEYWORDS = frozenset(_normalize(kw) for kw in RAG_KEYWORDS_RAW)
 
 QUESTION_KEYWORDS = {
     "tem alguma coisa sobre",
     "existe algum documento",
 }
-
-
-def _normalize(text: str) -> str:
-    lowered = (text or "").lower()
-    decomposed = unicodedata.normalize("NFKD", lowered)
-    without_accents = "".join(c for c in decomposed if not unicodedata.combining(c))
-    return re.sub(r"\s+", " ", without_accents).strip()
 
 
 def _looks_like_rag_query(text: str) -> bool:

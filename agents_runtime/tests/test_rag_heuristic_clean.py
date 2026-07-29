@@ -63,3 +63,32 @@ def test_looks_like_rag_query_pure_heuristic():
     assert _looks_like_rag_query("qual é o email") is False
     assert _looks_like_rag_query("?") is False
     assert _looks_like_rag_query("quais emails") is False
+
+
+@pytest.mark.asyncio
+async def test_sobre_esse_documento_is_rag():
+    """Bug que o user reportou: 'Sobre o que é esse documento?' deve is_rag=True."""
+    assert await is_rag_query("Sobre o que é esse documento?") is True
+
+
+@pytest.mark.asyncio
+async def test_quem_e_o_autor_is_rag():
+    """Bug 2: 'quem é o autor?' apos indexar documento."""
+    assert await is_rag_query("quem é o autor?") is True
+
+
+@pytest.mark.asyncio
+async def test_qual_o_tema_is_rag():
+    assert await is_rag_query("qual o tema dele?") is True
+
+
+@pytest.mark.asyncio
+async def test_de_que_se_trata_is_rag():
+    assert await is_rag_query("de que se trata esse pdf?") is True
+
+
+@pytest.mark.asyncio
+async def test_followup_greeting_is_not_rag():
+    """Regressao: 'oi', 'obrigado' continuam False."""
+    assert await is_rag_query("oi jen") is False
+    assert await is_rag_query("valeu") is False
