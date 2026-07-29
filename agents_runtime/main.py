@@ -400,7 +400,7 @@ async def _safe_mark_read(envelope: Dict[str, Any]) -> Dict[str, Any]:
         message_ids = [message_id]
         await asyncio.wait_for(
             mark_messages_read(instance, remote_jid, message_ids, from_me=False),
-            timeout=15,
+            timeout=5,
         )
         return {
             "status": "ok",

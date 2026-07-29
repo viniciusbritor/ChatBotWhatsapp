@@ -30,23 +30,36 @@ def _config() -> Tuple[str, str]:
     return base_url, api_key
 
 
+_INSTANCE_CACHE: Dict[str, tuple] = {}
+_INSTANCE_CACHE_TTL_SEC = 60
+
+
 def _resolve_instance_name() -> str:
     """Resolve the Evolution instance name case-sensitively.
 
     The runtime is configured with ``INSTANCE=jennifer`` but the actual
     instance on the Evolution server is ``Jennifer``. The Evolution API
     rejects case mismatches with 404. We fetch the instance list once
-    and return the canonical casing.
+    and cache the canonical casing for 60s.
+
+    The cache avoids the latency of an HTTP round-trip on every
+    ``send_text``/``send_image``/``send_presence`` call (the webhook
+    handler can call Evolution 3-4x per message).
     """
     desired = (os.getenv("INSTANCE") or "jennifer").strip()
     if not desired:
         return desired
+    cached = _INSTANCE_CACHE.get(desired)
+    if cached:
+        resolved, ts = cached
+        if time.time() - ts < _INSTANCE_CACHE_TTL_SEC:
+            return resolved
     try:
         api_key = os.getenv("EVOLUTION_API_KEY") or get_secret("EVOLUTION_API_KEY") or ""
         if not api_key:
             return desired
         base_url, _ = _config()
-        with httpx.Client(timeout=10) as client:
+        with httpx.Client(timeout=5) as client:
             response = client.get(
                 f"{base_url}/instance/fetchInstances",
                 headers={"apikey": api_key},
@@ -63,6 +76,7 @@ def _resolve_instance_name() -> str:
                         desired,
                         name,
                     )
+                _INSTANCE_CACHE[desired] = (name, time.time())
                 return name
     except Exception as exc:  # noqa: BLE001
         logger.warning("evolution_instance_resolve_failed error=%s", exc)

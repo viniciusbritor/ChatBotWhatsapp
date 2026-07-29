@@ -1270,7 +1270,19 @@ async def _execute_single_specialist(
     """
     agent = get_agent(specialist_id)
     if not agent or not agent.get("enabled", True):
+        if not agent:
+            try:
+                from agent_loader import _load_all
+                _load_all()
+                agent = get_agent(specialist_id)
+            except Exception as exc:
+                logger.warning("emergency_reload_failed err=%s", exc)
+    if not agent or not agent.get("enabled", True):
         path.append({"step": 2, "phase": "fallback_to_orchestrator", "reason": "specialist_disabled"})
+        logger.warning(
+            "specialist_agent_missing specialist_id=%s falling_back_to_orchestrator",
+            specialist_id,
+        )
         orchestrator_id = await _get_orchestrator(instance)
         if not orchestrator_id:
             return _error_response(503, "no_orchestrator", "Nenhum orchestrator disponivel")
@@ -1282,7 +1294,19 @@ async def _execute_single_specialist(
     agent_copy = dict(agent)
     prefetch_data = None
 
-    guard_result = await _run_guard_graph(payload, masked_text, intent)
+    skip_guard = (
+        specialist_id.startswith("manager-")
+        and _agent_has_tool(specialist_id, "calendar.")
+        or specialist_id.startswith("manager-")
+        and _agent_has_tool(specialist_id, "gmail.")
+        or specialist_id.startswith("manager-")
+        and _agent_has_tool(specialist_id, "drive.")
+    )
+
+    if skip_guard:
+        guard_result = {"verdict": "noop", "decision": {}, "prefetch": None, "trace": ["guard_skipped:manager_has_tools"]}
+    else:
+        guard_result = await _run_guard_graph(payload, masked_text, intent)
     guard_verdict = (guard_result or {}).get("verdict", "noop")
     if guard_verdict in {"deny", "request_oauth"}:
         decision = (guard_result or {}).get("decision") or {}
@@ -1348,13 +1372,13 @@ async def _execute_single_specialist(
             try:
                 if intent.get("is_calendar"):
                     prefetch_data = await asyncio.wait_for(
-                        _prefetch_calendar(phone, instance), timeout=8)
+                        _prefetch_calendar(phone, instance), timeout=4)
                 elif intent.get("is_email"):
                     prefetch_data = await asyncio.wait_for(
-                        _prefetch_email(phone, instance), timeout=8)
+                        _prefetch_email(phone, instance), timeout=4)
                 elif intent.get("is_drive"):
                     prefetch_data = await asyncio.wait_for(
-                        _prefetch_drive_multi(phone, masked_text, instance), timeout=8)
+                        _prefetch_drive_multi(phone, masked_text, instance), timeout=4)
             except asyncio.TimeoutError:
                 logger.warning(f"Prefetch timeout for {specialist_id}")
                 prefetch_data = None

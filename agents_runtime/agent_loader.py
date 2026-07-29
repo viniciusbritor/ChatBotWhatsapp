@@ -142,6 +142,33 @@ def start_loader():
     _loader_thread = threading.Thread(target=_poll_loop, daemon=True, name="agent-loader")
     _loader_thread.start()
     logger.info("Agent loader thread started")
+    _prewarm_deep_agents()
+
+
+def _prewarm_deep_agents() -> None:
+    """Build the DeepAgent for every manager-* that has a registered
+    prompt. Avoids the 13s cold-start penalty on the first request.
+
+    Runs in a background thread so the FastAPI app starts accepting
+    traffic immediately. Failures are logged and ignored — the
+    per-request fallback to LLMProvider still works.
+    """
+    def _build_all() -> None:
+        try:
+            from deepagent_layer import get_deep_agent
+            from deepagent_layer.agents import list_supported_managers
+        except Exception as exc:
+            logger.debug("prewarm skipped (deepagent_layer unavailable): %s", exc)
+            return
+        for manager_id in list_supported_managers():
+            try:
+                agent = get_deep_agent(manager_id)
+                if agent is not None:
+                    logger.info("prewarmed_deep_agent manager_id=%s", manager_id)
+            except Exception as exc:
+                logger.debug("prewarm_failed manager_id=%s err=%s", manager_id, exc)
+
+    threading.Thread(target=_build_all, daemon=True, name="deepagent-prewarm").start()
 
 
 def stop_loader():
