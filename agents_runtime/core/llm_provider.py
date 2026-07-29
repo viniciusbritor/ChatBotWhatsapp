@@ -101,11 +101,17 @@ class LLMProvider:
         if "choices" not in data or not data["choices"]:
             raise LLMError("deepseek_empty_response")
         content = data["choices"][0]["message"].get("content", "") or ""
+        usage = data.get("usage") or {}
         return {
             "content": content,
             "model_used": data.get("model", self.deepseek_model),
             "provider": self.PROVIDER_TAG,
             "attempts": [f"{self.PROVIDER_TAG}:success"],
+            "usage": {
+                "prompt_tokens": int(usage.get("prompt_tokens", 0) or 0),
+                "completion_tokens": int(usage.get("completion_tokens", 0) or 0),
+                "total_tokens": int(usage.get("total_tokens", 0) or 0),
+            },
         }
 
     async def chat_escalating(
@@ -170,6 +176,7 @@ class LLMProvider:
         ]
         model_id = self.deepseek_model
         tool_count = 0
+        total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
         wire_to_real: Dict[str, str] = {}
         if tools:
@@ -206,12 +213,17 @@ class LLMProvider:
             resp.raise_for_status()
             data = resp.json()
             choices = data.get("choices", [])
+            round_usage = data.get("usage") or {}
+            total_usage["prompt_tokens"] += int(round_usage.get("prompt_tokens", 0) or 0)
+            total_usage["completion_tokens"] += int(round_usage.get("completion_tokens", 0) or 0)
+            total_usage["total_tokens"] += int(round_usage.get("total_tokens", 0) or 0)
             if not choices:
                 return {
                     "content": "Resposta vazia do LLM.",
                     "model_used": model_id,
                     "tool_rounds": tool_count,
                     "provider": self.PROVIDER_TAG,
+                    "usage": total_usage,
                 }
             msg = choices[0].get("message", {})
             content = msg.get("content", "") or ""
@@ -222,6 +234,7 @@ class LLMProvider:
                     "model_used": model_id,
                     "tool_rounds": tool_count,
                     "provider": self.PROVIDER_TAG,
+                    "usage": total_usage,
                 }
             for tc in tool_calls:
                 func = tc.get("function", {})
@@ -282,6 +295,7 @@ class LLMProvider:
                 "model_used": model_id,
                 "tool_rounds": tool_count,
                 "provider": self.PROVIDER_TAG,
+                "usage": total_usage,
             }
 
     async def transcribe_audio_base64(self, audio_b64: str, mimetype: str = "audio/ogg") -> str:

@@ -32,6 +32,9 @@ from tool_registry import get_tool, get_tool_schema, is_user_scoped_tool
 from agent_loader import get_agent, get_skill, list_agents, get_user, get_config, has_nickname
 from core.audit import log_action
 from core.timezone import now_brt
+from core.observability import (
+    new_tracker, set_current_tracker, current_tracker, attach_to_metadata,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +113,11 @@ async def _finalize_orchestration(
 ) -> Dict[str, Any]:
     metadata = result.setdefault("metadata", {})
     metadata.setdefault("response_identity", "Jennifer")
+    try:
+        from core.observability import attach_to_metadata, current_tracker
+        attach_to_metadata(metadata, current_tracker())
+    except Exception as exc:
+        logger.debug("observability_attach_failed: %s", exc)
     path.append({
         "step": 3,
         "phase": "result",
@@ -1426,7 +1434,8 @@ async def _execute_single_specialist(
     path.append({"step": 2, "phase": "specialist", "agent": specialist_id,
                  "prefetch": bool(prefetch_data),
                  "reason": {k: v for k, v in intent.items() if v}})
-    return await _execute_agent(agent_copy, masked_text, payload, extra)
+    with current_tracker().stage("execute_agent", agent_id=specialist_id):
+        return await _execute_agent(agent_copy, masked_text, payload, extra)
 
 
 async def _execute_multi_specialists_parallel(
@@ -1547,6 +1556,10 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
     text = payload.get("text", "")
     sender_name = payload.get("sender_name", "user")
     extra = payload.get("extra", {})
+
+    _tracker = new_tracker()
+    set_current_tracker(_tracker)
+    _tracker.add_costs(deepseek_input_tokens=0, deepseek_output_tokens=0)
 
     cache_key = _idempotency_key(payload)
     if cache_key and cache_key in _response_cache:
@@ -1676,18 +1689,22 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
     intent = _detect_intent(masked_text)
     path = [{"step": 1, "phase": "intent_detect", "details": {key: value for key, value in intent.items() if value}}]
 
-    # F4d.5/H: detecta se a mensagem pede conteudo armazenado no RAG.
-    # Heuristica primeiro; tie-breaker LLM so se ambiguo.
-    from agent_orchestration.knowledge_retriever import is_rag_query
-    try:
-        intent["is_rag"] = await is_rag_query(masked_text)
-    except Exception:
-        intent["is_rag"] = False
+    with current_tracker().stage("intent_detected"):
+        # F4d.5/H: detecta se a mensagem pede conteudo armazenado no RAG.
+        # Heuristica primeiro; tie-breaker LLM so se ambiguo.
+        from agent_orchestration.knowledge_retriever import is_rag_query
+        try:
+            intent["is_rag"] = await is_rag_query(masked_text)
+        except Exception:
+            intent["is_rag"] = False
     if intent["is_rag"]:
         path.append({"step": "1a", "phase": "rag_intent", "details": "true"})
 
     specialist_ids = _resolve_agents_for_intents(intent, instance)
     specialist_id = specialist_ids[0] if specialist_ids else None
+
+    if specialist_ids:
+        _tracker.add_cost("agents_resolved", len(specialist_ids))
 
     attachment_already_acked = False
     if extra.get("has_document") and not intent.get("is_attachment"):
@@ -2063,7 +2080,8 @@ async def _execute_deep_agent(
         logger.warning("deepagent_layer unavailable: %s", exc)
         return None
 
-    deep_agent = get_deep_agent(agent_id)
+    with current_tracker().stage("deepagent_build", agent_id=agent_id):
+        deep_agent = get_deep_agent(agent_id)
     if deep_agent is None:
         return None
 
@@ -2096,13 +2114,14 @@ async def _execute_deep_agent(
         config["configurable"]["phone"] = phone
 
     try:
-        result = await asyncio.wait_for(
-            deep_agent.ainvoke(
-                {"messages": [{"role": "user", "content": user_prompt}]},
-                config=config,
-            ),
-            timeout=120,
-        )
+        with current_tracker().stage("deepagent_ainvoke", agent_id=agent_id):
+            result = await asyncio.wait_for(
+                deep_agent.ainvoke(
+                    {"messages": [{"role": "user", "content": user_prompt}]},
+                    config=config,
+                ),
+                timeout=120,
+            )
     except asyncio.TimeoutError:
         record_agent_failure(agent_id, execution_started, "deepagent_timeout")
         return _error_response(504, "deepagent_timeout", "Jennifer demorou demais. Tenta de novo?")
@@ -2284,25 +2303,34 @@ async def _execute_agent(
 
     try:
         if tool_schemas:
-            result = await llm.chat_with_tools(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                tools=tool_schemas,
-                tool_executor=tool_executor,
-                model=fast_model,
-                temperature=0.7,
-                max_tokens=1000,
-                thinking_disabled=not thinking,
-                max_tool_rounds=5,
-            )
+            with current_tracker().stage("llm_chat_with_tools", model=fast_model):
+                result = await llm.chat_with_tools(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    tools=tool_schemas,
+                    tool_executor=tool_executor,
+                    model=fast_model,
+                    temperature=0.7,
+                    max_tokens=1000,
+                    thinking_disabled=not thinking,
+                    max_tool_rounds=5,
+                )
         else:
-            result = await llm.chat(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                model=fast_model,
-                temperature=0.7,
-                max_tokens=500,
-                thinking_disabled=not thinking,
+            with current_tracker().stage("llm_chat", model=fast_model):
+                result = await llm.chat(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    model=fast_model,
+                    temperature=0.7,
+                    max_tokens=500,
+                    thinking_disabled=not thinking,
+                )
+
+        usage = result.get("usage") or {}
+        if usage:
+            current_tracker().add_costs(
+                deepseek_input_tokens=usage.get("prompt_tokens", 0),
+                deepseek_output_tokens=usage.get("completion_tokens", 0),
             )
 
         reply_text = result["content"]
