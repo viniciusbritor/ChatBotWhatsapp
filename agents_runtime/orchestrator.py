@@ -44,6 +44,9 @@ _response_cache: Dict[str, Dict[str, Any]] = {}
 CACHE_TTL_SEC = int(os.getenv("RESPONSE_IDEMPOTENCY_TTL_SEC", "86400"))
 _indexing_tasks: set = set()
 
+MULTI_SPECIALIST_TIMEOUT_SEC = float(os.getenv("MULTI_SPECIALIST_TIMEOUT_SEC", "30"))
+PREFETCH_DRIVE_MULTI_TIMEOUT_SEC = float(os.getenv("PREFETCH_DRIVE_MULTI_TIMEOUT_SEC", "8"))
+
 
 def _finish_indexing_task(task: asyncio.Task) -> None:
     _indexing_tasks.discard(task)
@@ -1076,13 +1079,23 @@ async def _prefetch_drive_multi(phone: str, text: str, instance: str = "") -> Op
     query1 = _extract_search_terms(text)
     query2 = " ".join(w for w in text.lower().split()
                       if len(w.strip(",.!?;:")) > 3)[:5]
-    results = await asyncio.gather(
-        _prefetch_drive(phone, query1, instance),
-        _prefetch_drive(phone, query2, instance),
-        _prefetch_drive_docs(phone, query1, instance),
-        _prefetch_drive_docs(phone, query2, instance),
-        return_exceptions=True,
-    )
+    results: List[Any] = []
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(
+                _prefetch_drive(phone, query1, instance),
+                _prefetch_drive(phone, query2, instance),
+                _prefetch_drive_docs(phone, query1, instance),
+                _prefetch_drive_docs(phone, query2, instance),
+                return_exceptions=True,
+            ),
+            timeout=PREFETCH_DRIVE_MULTI_TIMEOUT_SEC,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "prefetch_drive_multi_timeout timeout_sec=%s",
+            PREFETCH_DRIVE_MULTI_TIMEOUT_SEC,
+        )
     best, best_count = None, 0
     for r in results:
         if isinstance(r, str):
@@ -1482,7 +1495,29 @@ async def _execute_multi_specialists_parallel(
             logger.exception("multi_specialist_failed agent=%s", specialist_id)
             return specialist_id, {"reply": "", "metadata": {"error": type(exc).__name__}}
 
-    pairs = await asyncio.gather(*[_run_one(s) for s in specialist_ids])
+    async def _run_one_safe(specialist_id: str) -> Tuple[str, Optional[Dict[str, Any]]]:
+        try:
+            return await asyncio.wait_for(
+                _run_one(specialist_id),
+                timeout=MULTI_SPECIALIST_TIMEOUT_SEC,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "multi_specialist_task_timeout agent=%s timeout_sec=%s",
+                specialist_id, MULTI_SPECIALIST_TIMEOUT_SEC,
+            )
+            path.append({
+                "step": 2,
+                "phase": "multi_specialist_task_timeout",
+                "agent_id": specialist_id,
+                "timeout_sec": MULTI_SPECIALIST_TIMEOUT_SEC,
+            })
+            return specialist_id, {
+                "reply": "",
+                "metadata": {"error": "agent_timeout", "agent_id": specialist_id},
+            }
+
+    pairs = await asyncio.gather(*[_run_one_safe(s) for s in specialist_ids])
     successful = [(sid, r) for sid, r in pairs if r and r.get("reply")]
 
     if not successful:

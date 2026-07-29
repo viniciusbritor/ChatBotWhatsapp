@@ -75,6 +75,7 @@ LEGACY_MEMORY_COLLECTION = os.getenv(
 )
 
 EMBEDDING_CONCURRENCY = int(os.getenv("RAG_EMBEDDING_CONCURRENCY", "4"))
+EMBED_DOCUMENTS_TIMEOUT_SEC = float(os.getenv("EMBED_DOCUMENTS_TIMEOUT_SEC", "60"))
 
 
 def _now_brt() -> datetime:
@@ -172,7 +173,17 @@ async def embed_documents(texts: List[str]) -> Optional[List[List[float]]]:
         async with semaphore:
             return await embed_query(text)
 
-    vectors = await asyncio.gather(*(embed_one(text) for text in texts))
+    try:
+        vectors = await asyncio.wait_for(
+            asyncio.gather(*(embed_one(text) for text in texts)),
+            timeout=EMBED_DOCUMENTS_TIMEOUT_SEC,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "embed_documents_timeout timeout_sec=%s chunks=%d",
+            EMBED_DOCUMENTS_TIMEOUT_SEC, len(texts),
+        )
+        return None
     if any(vector is None for vector in vectors):
         return None
     return [vector for vector in vectors if vector is not None]

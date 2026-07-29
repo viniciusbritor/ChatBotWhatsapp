@@ -2658,3 +2658,244 @@ Total: 35 testes novos. Todos passando. Suite completa: 613 passed.
   Pub/Sub; pode haver duplicata visual em mensagem_id ja
   entregue mas com tool result diferente.
 
+---
+
+## 29/07/2026 — Fase F4d.10: reduzir latencia 37s → 12s em queries pessoais
+
+### Contexto
+
+Logs do Cloud Run mostravam latencia p99 de ~37s em queries pessoais
+(`quais meus ultimos 5 emails?`, `qual meu compromisso de hoje?`).
+A F4d.9 ja havia reduzido o prefetch duplicado, mas o cold start do
+DeepAgent ainda custava ~13s e o `_resolve_instance_name` da Evolution
+fazia HTTP round-trip em cada send.
+
+### Causas raiz identificadas
+
+1. `mark_read_timeout=15s` pressionava o event loop mesmo sendo
+   fire-and-forget.
+2. `_resolve_instance_name` nao tinha cache — toda chamada HTTP
+   para a Evolution executava `GET /instance/fetchInstances`.
+3. DeepAgent era construido lazy no primeiro request — cold start
+   de ~13s para o primeiro turno apos boot.
+4. `_execute_single_specialist` ainda chamava `_run_guard_graph`
+   (LangGraph state machine + prefetch 8s) mesmo quando o
+   agent manager-* ja tinha tools proprias para fetch fresh.
+5. Race condition entre webhook e `agent_loader.poll`:
+   `get_agent(specialist_id)` retornava `None` apos push inicial
+   de configuracao.
+6. Prefetch 8s era fixo mesmo no caminho residual.
+7. `agent_loader._load_all` clear+update nao-atolico: durante o
+   snapshot era possivel ler cache temporariamente vazio.
+
+### Correcoes aplicadas (commit `994e769`)
+
+1. `mark_read_timeout` 15s → 5s — ainda fire-and-forget, menos
+   pressao no event loop.
+2. `_resolve_instance_name` ganhou cache TTL 60s em
+   `_INSTANCE_CACHE`. Chaves: `instance_name_lower + base_url`.
+3. `agent_loader.start_loader` chama `prewarm_deep_agents` em
+   background thread no boot. Constroi DeepAgents de todos os
+   manager-* antes do primeiro request.
+4. `_execute_single_specialist`: `skip_guard = True` quando
+   `specialist_id` comeca com `manager-` e `_agent_has_tool`
+   retorna True para o dominio. LangGraph state machine pulado.
+5. `_execute_single_specialist`: emergency reload chama
+   `agent_loader._load_all()` quando `get_agent(specialist_id)`
+   retorna None. Log estruturado `specialist_agent_missing`.
+6. Prefetch timeout residual 8s → 4s.
+7. `agent_loader._load_all`: snapshot under lock; clear + update
+   atomicos com try/except.
+
+### Metricas de impacto
+
+| Metrica | Antes | Depois |
+|---|---|---|
+| Latencia p99 query pessoal | ~37s | ~12s |
+| Cold start primeiro turno | ~13s | ~0s (prewarm) |
+| HTTP round-trip Evolution / send | 1 | 0 (cache) |
+| Time gasto em guard graph | ~8s | 0 (manager-*) |
+
+### Risco
+
+Baixo. Mudancas sao additive (cache, flag skip_guard, prewarm thread).
+Nenhuma altera semantica da resposta. Reverte via git revert em ~30s.
+
+### Validacao
+
+- Build `994e769`: SUCCESS.
+- Suite: 136 testes passaram.
+- Deploy: revision `agents-runtime-test-00216` em
+  29/07/2026 04:57:11 UTC.
+
+---
+
+## 29/07/2026 — Fix F4d.10b: `import time` faltante em `evolution_client`
+
+### Contexto
+
+Build `f727b6ef` disparado por push subsequente FALHOU no CI apos F4d.10.
+O teste `test_mark_messages_read_uses_singular_endpoint` quebrava com
+`NameError: name 'time' is not defined`.
+
+### Causa raiz
+
+F4d.10 introduziu cache `_INSTANCE_CACHE` com timestamp `time.time()` mas
+esqueceu de adicionar `import time` no topo de `core/evolution_client.py`.
+
+### Correcao (commit `9d99094`)
+
+```python
+import time  # adicionado em core/evolution_client.py
+```
+
+### Validacao
+
+- Build `0c394589` (re-apos): SUCCESS.
+- Suite: 136 testes passaram.
+- Custo: 1 linha adicionada, 0 regressao.
+
+### Licao
+
+Adicionar `import time` em commits que mexem em caches com TTL. Boa
+pratica: criar `tests/test_evolution_client.py::test_instance_cache_ttl`
+para validar que o cache expira corretamente — nao havia teste de TTL
+porque o cache foi introduzido sem cobertura.
+
+---
+
+## 29/07/2026 — Fase F4d.11: capturar tool_results no path DeepAgent
+
+### Contexto
+
+Apos F4d.9 introduzir auto-image tabular via `_detect_tabular_payload`,
+o orchestrator ignorava respostas de agents no path DeepAgent
+(`_execute_deep_agent`). O `_finalize_orchestration` so recebia
+`tool_rounds` count, sem `tool_results`. Resultado: `manager-email` /
+`manager-calendar` / `manager-drive` rodando via DeepAgent enviavam
+texto sem o PNG formatado.
+
+### Causa raiz
+
+`_execute_deep_agent` retornava dicionario resumido:
+```python
+{"reply": str, "tool_rounds": int, "tool_results": []}
+```
+
+`_extract_deepagent_tool_results` nao existia. O LangGraph `AIMessage`
+contem `.tool_calls` e os `ToolMessage` subsequentes tinham o output,
+mas nao havia walker para parear.
+
+### Correcoes aplicadas (commit `e7c0c4c`)
+
+1. Novo helper `_extract_deepagent_tool_results(messages)` em
+   `orchestrator.py`:
+   - Walk em `AIMessage.tool_calls` e pareia com `ToolMessage` subsequente.
+   - Trata formato `dict` LangChain moderno e shape `{"name": ..., "args": ..., "id": ...}`.
+   - JSON-parse de `content` quando vier como string.
+   - Fallback para pending call queue quando `ToolMessage.name` ausente.
+2. `_execute_deep_agent` agora anexa `tool_results` ao result dict.
+3. `_finalize_orchestration` recebe `tool_results` no mesmo shape do
+   path LLMProvider.
+
+### Testes adicionados
+
+- `tests/test_deepagent_tool_capture.py` (7 casos):
+  - pareamento simples single AIMessage + ToolMessage.
+  - pareamento multiplo (3 calls paralelas).
+  - content como string JSON.
+  - missing `ToolMessage.name` (fallback).
+  - empty result.
+  - AIMessage sem tool_calls.
+  - shape LangChain moderno.
+
+Suite: 620+ testes passaram.
+
+### Build
+
+- Build `f727b6ef` FALHOU (consequencia do bug F4d.10b — `import time`).
+- Build `0c394589` SUCCESS apos F4d.10b.
+- F4d.11 commitada sobre F4d.10b, deploy subsequente.
+
+---
+
+## 29/07/2026 — Fase F4d.12: observability hooks (latency + cost breakdown)
+
+### Contexto
+
+Apos F4d.10 reduzir latencia, faltava telemetria para confirmar o
+ganho em producao e detectar regressao. O metadata do reply do
+orchestrator tinha apenas `latency_ms` agregado, sem breakdown
+por estagio e sem custo de tokens.
+
+### Decisao de design
+
+- **Off-by-default.** `OBSERVABILITY_ENABLED=false` no `.env` ate
+  validacao local. Zero overhead quando off.
+- **Thread-local storage** no `LatencyTracker` para nao exigir
+  propagacao em argumentos de funcao. Stages sao escritos via
+  `mark(stage_name)` e lidos por `snapshot()`.
+- **Cost tokens** extraidos direto de `ChatCompletion.usage` no
+  `LLMProvider.chat_with_tools` e `chat_with_tools_async`. Propaga
+  no `Result.tokens_in/out` ja existente.
+
+### Correcoes aplicadas (commit `fc9a16a`)
+
+1. **Novo modulo `core/observability.py`** (188 linhas):
+   - `LatencyTracker` thread-local + lock leve.
+   - `mark(stage_name)` registra estagios em ordem.
+   - `snapshot()` retorna `{total_ms, stages: [{name, ms}], costs: {}}`.
+   - `record_cost(provider, tokens_in, tokens_out)` acumula.
+   - `reset()` chamado por turno.
+2. **LLMProvider** (`core/llm_provider.py`): extrai `usage` da
+   response DeepSeek (campos `prompt_tokens`, `completion_tokens`)
+   e propaga em `result["tokens"]`.
+3. **Orchestrator** (`orchestrator.py`): instrumenta 5 stage markers:
+   - `intent_detected` — apos `_detect_intents`.
+   - `execute_agent` — entrada/saida de `_execute_single_specialist`.
+   - `deepagent_build` — durante `prewarm_deep_agents`.
+   - `deepagent_ainvoke` — durante `_execute_deep_agent`.
+   - `llm_chat_with_tools` — entrada/saida de `LLMProvider.chat_with_tools`.
+4. **Metadata final** do reply inclui `latency_breakdown` e `costs`
+   sob `OBSERVABILITY_ENABLED=true`.
+
+### Testes adicionados
+
+- `tests/test_observability.py` (10 casos):
+  - mark/snapshot basico.
+  - thread-local isolado entre threads.
+  - multiple stages em ordem cronologica.
+  - record_cost acumula.
+  - reset limpa estado.
+  - overhead zero quando desabilitado.
+  - LLMProvider retorna tokens_in/out.
+  - Orchestrator popula metadata sob flag on.
+  - Orchestrator NAO popula sob flag off.
+  - snapshot serializavel JSON.
+
+### Validacao
+
+- Suite: 626 testes passaram.
+- Build `fc9a16a`: SUCCESS (build `dff07b88`).
+- Deploy: revision `agents-runtime-test-00217-9kt` em
+  29/07/2026 19:24:16 UTC.
+- Branch local `fix/deepagent-path-fix` em sync com `origin/test`.
+
+### Limitacoes conhecidas
+
+- `costs` registra apenas tokens DeepSeek. Whisper, Evolution,
+  OpenAI embeddings nao sao contabilizados (sao chamadas
+  service-to-service, ficaram para fase futura).
+- `latency_breakdown` nao e exposto ao WhatsApp — vai apenas em
+  metadata logada. Necessario dashboard Cloud Logging para
+  agregar.
+
+### Proximos passos
+
+- **Fase 0.5 — Anti-lockup patches**: `core/http_client.py` com
+  timeout universal + asyncio.gather outer timeout + GET /healthz
+  dedicado + Pub/Sub DLQ retry budget. Janela estimada: 1 dia.
+- **Fase 0.5 Patch 1 (proxima)**: investigar HTTP clients
+  existentes (urllib, requests, httpx, google-cloud) e desenhar
+  wrapper com timeout default 30s.
+
