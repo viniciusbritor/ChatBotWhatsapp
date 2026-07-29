@@ -92,3 +92,40 @@ async def test_followup_greeting_is_not_rag():
     """Regressao: 'oi', 'obrigado' continuam False."""
     assert await is_rag_query("oi jen") is False
     assert await is_rag_query("valeu") is False
+
+
+@pytest.mark.asyncio
+async def test_llm_tiebreaker_with_context(monkeypatch):
+    """LLM tie-breaker recebe recent_context e retorna True
+    para 'Sobre o que é esse documento?' apos indexing."""
+    from unittest.mock import AsyncMock
+
+    from agent_orchestration.knowledge_retriever import is_rag_query
+
+    fake_ctx = (
+        "Jennifer: Feito! Memorei 161 trechos do arquivo "
+        "'dissertacao.pdf' no conhecimento privado."
+    )
+    captured = {}
+
+    async def fake_llm(text, recent_context=""):
+        captured["text"] = text
+        captured["ctx"] = recent_context
+        return True
+
+    monkeypatch.setattr(
+        "agent_orchestration.knowledge_retriever._looks_like_rag_query",
+        lambda t: False,
+    )
+    monkeypatch.setattr(
+        "agent_orchestration.knowledge_retriever._llm_is_rag_query",
+        fake_llm,
+    )
+
+    result = await is_rag_query(
+        "Sobre o que é esse documento? quem é o autor?",
+        recent_context=fake_ctx,
+    )
+    assert result is True
+    assert captured["ctx"] == fake_ctx
+

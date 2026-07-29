@@ -128,8 +128,16 @@ def _looks_like_rag_query(text: str) -> bool:
     return False
 
 
-async def _llm_is_rag_query(text: str) -> Optional[bool]:
-    """Tie-breaker using DeepSeek V4 Flash. Returns True/False/None."""
+async def _llm_is_rag_query(
+    text: str,
+    recent_context: str = "",
+) -> Optional[bool]:
+    """Tie-breaker using DeepSeek V4 Flash. Returns True/False/None.
+
+    ``recent_context`` carries the last 1-2 messages of the phone so
+    the LLM can interpret conversational references like "esse documento"
+    as RAG queries when the previous turn was about indexing.
+    """
     if not text.strip():
         return None
     try:
@@ -157,8 +165,11 @@ async def _llm_is_rag_query(text: str) -> Optional[bool]:
         prompt = (
             "O usuario esta pedindo algo que foi previamente salvo/armazenado "
             "no Firestore Vector (base de conhecimento da Jennifer)?\n"
-            "Responda apenas 'sim' ou 'nao'.\n"
-            f"Mensagem: {text.strip()[:400]}\nResposta:"
+            "Considere o historico recente para avaliar referencias como "
+            "'esse documento' ou 'o que voce memorizou'.\n"
+            f"Historico: {recent_context[:300]}\n"
+            f"Mensagem: {text.strip()[:400]}\n"
+            "Responda apenas 'sim' ou 'nao':"
         )
         result = await asyncio.to_thread(llm.invoke, prompt)
         raw = (
@@ -177,11 +188,14 @@ async def _llm_is_rag_query(text: str) -> Optional[bool]:
         return None
 
 
-async def is_rag_query(text: str) -> bool:
+async def is_rag_query(
+    text: str,
+    recent_context: str = "",
+) -> bool:
     """Returns True when the message refers to previously stored knowledge."""
     if _looks_like_rag_query(text):
         return True
-    llm_answer = await _llm_is_rag_query(text)
+    llm_answer = await _llm_is_rag_query(text, recent_context=recent_context)
     return bool(llm_answer)
 
 

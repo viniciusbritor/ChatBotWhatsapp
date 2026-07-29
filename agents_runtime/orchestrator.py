@@ -1728,8 +1728,17 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
         # F4d.5/H: detecta se a mensagem pede conteudo armazenado no RAG.
         # Heuristica primeiro; tie-breaker LLM so se ambiguo.
         from agent_orchestration.knowledge_retriever import is_rag_query
+        recent_ctx = ""
         try:
-            intent["is_rag"] = await is_rag_query(masked_text)
+            recent_ctx = _get_conversation_history(
+                payload.get("phone", ""), limit=2,
+            ) or ""
+        except Exception:
+            recent_ctx = ""
+        try:
+            intent["is_rag"] = await is_rag_query(
+                masked_text, recent_context=recent_ctx,
+            )
         except Exception:
             intent["is_rag"] = False
     if intent["is_rag"]:
