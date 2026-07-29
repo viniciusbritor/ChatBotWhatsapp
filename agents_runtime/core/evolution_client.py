@@ -35,6 +35,18 @@ _INSTANCE_CACHE: Dict[str, tuple] = {}
 _INSTANCE_CACHE_TTL_SEC = 60
 
 
+def _is_evolution_warm() -> bool:
+    """Return True if at least one Evolution call has populated the cache.
+
+    Used by the webhook layer to choose a longer cold-start timeout for
+    markMessagesAsRead. The first HTTP call to Evolution pays DNS + TLS
+    + fetchInstances cost (8-10s on Cloud Run cold start), so naively
+    using the warm timeout (5s) kills the request before the read
+    receipt reaches the user's WhatsApp.
+    """
+    return bool(_INSTANCE_CACHE)
+
+
 def _resolve_instance_name() -> str:
     """Resolve the Evolution instance name case-sensitively.
 

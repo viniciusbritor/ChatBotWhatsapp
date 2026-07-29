@@ -47,6 +47,9 @@ VERSION = "1.0.0"
 COMMIT_SHA = os.getenv("COMMIT_SHA", "local-dev")
 DEPLOYED_AT = os.getenv("DEPLOYED_AT", "local")
 
+MARK_READ_TIMEOUT_COLD_SEC = float(os.getenv("MARK_READ_TIMEOUT_COLD_SEC", "12"))
+MARK_READ_TIMEOUT_WARM_SEC = float(os.getenv("MARK_READ_TIMEOUT_WARM_SEC", "5"))
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -388,6 +391,12 @@ async def _safe_mark_read(envelope: Dict[str, Any]) -> Dict[str, Any]:
     Retorna um dicionário com ``status`` para que o callback assíncrono
     consiga diferenciar ``ok``, ``timeout`` e ``failed``. O webhook continua
     retornando imediatamente; nenhuma exceção vaza para o caller.
+
+    Cold start mitigation: the first HTTP call to Evolution after a
+    Cloud Run cold start pays DNS + TLS + fetchInstances cost (8-10s).
+    The warm timeout (5s) kills the request before it completes, so
+    the user never sees the read receipt. We detect cold start via
+    ``_INSTANCE_CACHE`` emptiness and use a longer timeout.
     """
     message_id = envelope.get("message_id", "")
     remote_jid = envelope.get("remote_jid", "")
@@ -395,18 +404,24 @@ async def _safe_mark_read(envelope: Dict[str, Any]) -> Dict[str, Any]:
     if not remote_jid or not message_id:
         return {"status": "skipped", "reason": "missing_remote_jid_or_id"}
     try:
-        from core.evolution_client import mark_messages_read
+        from core.evolution_client import mark_messages_read, _is_evolution_warm
 
+        timeout_sec = (
+            MARK_READ_TIMEOUT_WARM_SEC
+            if _is_evolution_warm()
+            else MARK_READ_TIMEOUT_COLD_SEC
+        )
         message_ids = [message_id]
         await asyncio.wait_for(
             mark_messages_read(instance, remote_jid, message_ids, from_me=False),
-            timeout=5,
+            timeout=timeout_sec,
         )
         return {
             "status": "ok",
             "message_id": message_id,
             "remote_jid": remote_jid,
             "instance": instance,
+            "timeout_sec": timeout_sec,
         }
     except asyncio.TimeoutError:
         return {

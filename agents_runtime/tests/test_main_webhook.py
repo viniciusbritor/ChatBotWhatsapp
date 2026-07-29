@@ -204,6 +204,45 @@ async def test_safe_mark_read_returns_failed_on_exception():
     assert result["error_type"] == "RuntimeError"
 
 
+@pytest.mark.asyncio
+async def test_safe_mark_read_cold_start_uses_longer_timeout():
+    """Cold start (empty _INSTANCE_CACHE) deve usar MarkReadTimeoutCold."""
+    fake = AsyncMock(return_value={"status": "ok"})
+    with patch("core.evolution_client._INSTANCE_CACHE", {}), \
+         patch("core.evolution_client.mark_messages_read", new=fake), \
+         patch("main.MARK_READ_TIMEOUT_COLD_SEC", 12.0), \
+         patch("main.MARK_READ_TIMEOUT_WARM_SEC", 5.0):
+        envelope = {
+            "instance": "jennifer",
+            "message_id": "MSG_COLD",
+            "remote_jid": "5511966830020@s.whatsapp.net",
+        }
+        result = await _safe_mark_read(envelope)
+    assert result["status"] == "ok"
+    assert result["timeout_sec"] == 12.0
+
+
+@pytest.mark.asyncio
+async def test_safe_mark_read_warm_uses_shorter_timeout():
+    """Warm (cache populated) deve usar MarkReadTimeoutWarm."""
+    fake = AsyncMock(return_value={"status": "ok"})
+    with patch(
+        "core.evolution_client._INSTANCE_CACHE",
+        {"jennifer": ("Jennifer", 123.0)},
+    ), \
+         patch("core.evolution_client.mark_messages_read", new=fake), \
+         patch("main.MARK_READ_TIMEOUT_COLD_SEC", 12.0), \
+         patch("main.MARK_READ_TIMEOUT_WARM_SEC", 5.0):
+        envelope = {
+            "instance": "jennifer",
+            "message_id": "MSG_WARM",
+            "remote_jid": "5511966830020@s.whatsapp.net",
+        }
+        result = await _safe_mark_read(envelope)
+    assert result["status"] == "ok"
+    assert result["timeout_sec"] == 5.0
+
+
 def test_log_mark_read_result_ok_logs_event():
     task = MagicMock()
     task.cancelled.return_value = False
