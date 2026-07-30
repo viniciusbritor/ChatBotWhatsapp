@@ -129,3 +129,54 @@ async def test_llm_tiebreaker_with_context(monkeypatch):
     assert result is True
     assert captured["ctx"] == fake_ctx
 
+
+@pytest.mark.asyncio
+async def test_recent_indexing_forces_rag(monkeypatch):
+    """Apos indexing, qualquer query do mesmo phone vira RAG."""
+    from unittest.mock import AsyncMock
+
+    from agent_orchestration.knowledge_retriever import (
+        _RECENT_INDEXING,
+        is_rag_query,
+        register_indexing,
+    )
+    _RECENT_INDEXING.clear()
+    monkeypatch.setattr(
+        "agent_orchestration.knowledge_retriever._looks_like_rag_query",
+        lambda t: False,
+    )
+    monkeypatch.setattr(
+        "agent_orchestration.knowledge_retriever._llm_is_rag_query",
+        AsyncMock(return_value=False),
+    )
+    phone = "+5511966830020"
+    register_indexing(phone)
+    assert await is_rag_query("oi", phone=phone) is True
+    assert await is_rag_query("obrigado", phone=phone) is True
+
+
+@pytest.mark.asyncio
+async def test_recent_indexing_does_not_affect_other_phone(monkeypatch):
+    """Indexing de um phone NAO afeta outro phone."""
+    from unittest.mock import AsyncMock
+
+    from agent_orchestration.knowledge_retriever import (
+        _RECENT_INDEXING,
+        is_rag_query,
+        register_indexing,
+    )
+    _RECENT_INDEXING.clear()
+    monkeypatch.setattr(
+        "agent_orchestration.knowledge_retriever._looks_like_rag_query",
+        lambda t: False,
+    )
+    monkeypatch.setattr(
+        "agent_orchestration.knowledge_retriever._llm_is_rag_query",
+        AsyncMock(return_value=False),
+    )
+    phone_a = "+5511966830020"
+    phone_b = "+5511999999999"
+    register_indexing(phone_a)
+    assert await is_rag_query("oi", phone=phone_a) is True
+    assert await is_rag_query("oi", phone=phone_b) is False
+

@@ -111,6 +111,32 @@ QUESTION_KEYWORDS = {
 }
 
 
+_RECENT_INDEXING: Dict[str, float] = {}
+RECENT_INDEXING_WINDOW_SEC = int(os.getenv("RECENT_INDEXING_WINDOW_SEC", "300"))
+
+
+def register_indexing(phone: str) -> None:
+    """Marca que um documento foi indexado para este phone.
+
+    Chamado pelo orchestrator apos sucesso de index_private_document
+    ou index_group_document. Mantido em memoria in-process para que
+    perguntas follow-up (<RECENT_INDEXING_WINDOW_SEC) sejam auto-RAG.
+    """
+    if not phone:
+        return
+    _RECENT_INDEXING[phone] = time.time()
+
+
+def _had_recent_indexing(phone: str) -> bool:
+    """Retorna True se houve indexing para este phone nos ultimos N segundos."""
+    if not phone:
+        return False
+    ts = _RECENT_INDEXING.get(phone)
+    if not ts:
+        return False
+    return (time.time() - ts) < RECENT_INDEXING_WINDOW_SEC
+
+
 def _looks_like_rag_query(text: str) -> bool:
     """Heuristic: explicit RAG keyword present, or a question form.
 
@@ -191,8 +217,11 @@ async def _llm_is_rag_query(
 async def is_rag_query(
     text: str,
     recent_context: str = "",
+    phone: str = "",
 ) -> bool:
     """Returns True when the message refers to previously stored knowledge."""
+    if _had_recent_indexing(phone):
+        return True
     if _looks_like_rag_query(text):
         return True
     llm_answer = await _llm_is_rag_query(text, recent_context=recent_context)

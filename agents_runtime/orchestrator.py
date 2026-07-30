@@ -544,6 +544,11 @@ async def _handle_attachment(
             f"Feito! Memorei {indexed} trechos do arquivo '{source_name}' "
             f"no conhecimento {scope}. Quer me perguntar algo sobre o arquivo para verificar?"
         )
+        try:
+            from agent_orchestration.knowledge_retriever import register_indexing
+            register_indexing(phone)
+        except Exception:
+            pass
     elif status.startswith("drive_"):
         folder = "Meu Drive" if status == "drive_individual" else "pasta do grupo"
         reply = (
@@ -1737,7 +1742,9 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
             recent_ctx = ""
         try:
             intent["is_rag"] = await is_rag_query(
-                masked_text, recent_context=recent_ctx,
+                masked_text,
+                recent_context=recent_ctx,
+                phone=payload.get("phone", ""),
             )
         except Exception:
             intent["is_rag"] = False
