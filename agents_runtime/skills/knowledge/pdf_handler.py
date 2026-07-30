@@ -6,7 +6,6 @@ embeddings into either ``agent-knowledge-v2`` (individual) or
 """
 from __future__ import annotations
 
-import io
 import logging
 from typing import Any, Dict, Optional
 
@@ -26,12 +25,9 @@ async def extract(envelope: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return None
     text = ""
     try:
-        from pypdf import PdfReader
+        from core.pdf_extract import parse_pdf_robust
 
-        reader = PdfReader(io.BytesIO(raw_bytes))
-        text = "\n".join(
-            (page.extract_text() or "") for page in reader.pages
-        )
+        text = parse_pdf_robust(raw_bytes)
     except Exception as exc:
         logger.warning("pdf_handler extract failed: %s", exc)
         return None

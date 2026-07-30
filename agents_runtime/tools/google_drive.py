@@ -279,11 +279,9 @@ _TEXT_CSV = "text/csv"
 
 
 def _parse_pdf(raw: bytes) -> str:
-    from pypdf import PdfReader
+    from core.pdf_extract import parse_pdf_robust
 
-    reader = PdfReader(io.BytesIO(raw))
-    parts = [page.extract_text() or "" for page in reader.pages]
-    return "\n".join(parts)
+    return parse_pdf_robust(raw)
 
 
 def _parse_docx(raw: bytes) -> str:
