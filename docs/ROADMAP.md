@@ -8,7 +8,7 @@
 
 Chatbot WhatsApp único, humano-latência, humano-forma, FinOps consciente. Privacy-by-design (1:1 + grupo), RAG-first para conhecimento memorizado, tools Google (calendar/email/drive), imagens para conteúdo tabular.
 
-## 📍 Onde estamos (30/07/2026)
+## 📍 Onde estamos (30/07/2026 ~09:30 BRT)
 
 | Dimensão | Status | Cobertura |
 |---|---|---|
@@ -20,6 +20,10 @@ Chatbot WhatsApp único, humano-latência, humano-forma, FinOps consciente. Priv
 | Humanização (sazionalidade BRT + tom caloroso) | ✅ | Testes 24/24 |
 | Privacy (masker + group isolation + OAuth) | ✅ | Audit doc |
 | FinOps (cost_usd_estimated no tracker) | ✅ | Testes 9/9 |
+| Latência warm path | ✅ | Guard sync + max_tokens |
+| RAG vector composite indexes | ✅ | 3 indexes em production |
+| Admin: write endpoints (agents/skills/tools/users) | ✅ | Já existia |
+| Admin: folder permissions (NEW) | ✅ storage | ⏳ runtime enforcement |
 
 ## 🟡 Próximas fases (em ordem de valor)
 

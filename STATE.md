@@ -11,28 +11,29 @@
 ## Resumo executivo
 
 **Branch atual:** `test`
-**Último commit local:** `da6d01b` (Fase E FinOps)
-**Último deploy em produção:** `2c600ba0` SUCCESS, revision `agents-runtime-test-00233`
-**Status:** 11 deploys nesta sessão — bugs de RAG/PDF corrigidos, humanização + privacidade + FinOps deployados
+**Último commit local:** `e82ffbe` (TASK A folder permissions fase 1)
+**Último deploy em produção:** `b42ec173` SUCCESS, revision `agents-runtime-test-00237`
+**Status:** 13 deploys nesta sessão — bugs críticos + admin + privacy + FinOps + RAG indexes resolvidos
 
 ## Pendências ativas (próximas fases)
 
 > Documento vivo. Cada fase termina com gate binário e deploy isolado.
 
-### Fase A.2 — Latência: guard sync
-- **Status:** 🟡 Pendente (próxima sessão)
-- **Resolve:** Latência warm path cai ~8s ao substituir LangGraph state machine por função sync
-- **Esforço:** 3h | **Custo estimado:** **-$2/mês** (menos CPU time)
-- **Tasks:**
-  - Medir baseline warm (Fase 0.5 status final + A.1 baseline)
-  - Refatorar `_run_guard_graph` em `agent_orchestration/graph.py`
-  - Manter compat com `agent_loader` + `access_guardian`
-  - Testes de regressão de latência
+### TASK B RAG — runtime enforcement (Fase 2)
+- **Status:** 🟡 Pendente
+- **Resolve:** Tools (drive/gmail/calendar) filtram resultados por folder_permissions
+- **Esforço:** 4h | **Custo:** zero
+
+### TASK A Admin — runtime enforcement (Fase 2)
+- **Status:** 🟡 Pendente
+- **Resolve:** Tools consultam `get_user_allowed_tools()` antes de retornar resultados
 
 ### Pendências externas (bloqueio usuário)
-- [ ] Rotação de credenciais expostas em `ad6399a` (DEEPSEEK, MINIMAX, NVIDIA, agents-runtime-sa-token)
-- [ ] Drive scope rollback para `drive.file + drive.readonly` (requer re-consentimento)
-- [ ] OAuth Client setup no Google Cloud Console para telefone `+5511966830020`
+> **Restrição (user 30/07):** rotacao de credenciais NAO sera feita por mim. Quebraria tudo.
+> Apenas o user tem acesso ao Secret Manager. Manter as chaves atuais.
+- [ ] ~~Rotação de credenciais expostas em `ad6399a`~~ — **EXCLUIDA** por user
+- [ ] Drive scope rollback para `drive.file + drive.readonly` (requer re-consentimento pelo user)
+- [ ] OAuth Client setup no Google Cloud Console para telefone `+5511966830020` (setup manual user)
 - [ ] Backfill embeddings legacy (script não criado)
 - [ ] README desatualizado em `agents_runtime/README.md`
 
@@ -57,10 +58,13 @@
 | 8 | PDF partial | `c3bed1f` | Tolerância página-a-página + logging |
 | A | Max tokens | `ee977fa` | Manager 1000 → 1500 via env |
 | B | Auto-image RAG | `32a04ef` | knowledge.retrieve → tabela PNG |
-| C | Humanização | `60ccee6` | Sazionalidade BRT + tom caloroso |
+| C | Humanização | `60ccee6` | Sazonalidade BRT + tom caloroso |
 | D | Privacy audit | `bc0e217` | PRIVACY_AUDIT.md completo |
 | E | FinOps pricing | `da6d01b` | core/pricing.py + cost_usd_estimated |
-| F | ROADMAP.md | — | Pendente este commit |
+| F | ROADMAP.md | `94aacaf` | ROADMAP.md + STATE.md consolidado |
+| **G** | Guard sync | `8710c0e` | **Latência -8s warm (chamada direta)** |
+| **H** | RAG indexes | `29c48a0` | **Vector composite indexes (resolve Edital.pdf bug)** |
+| **I** | Admin folder perms | `e82ffbe` | **Folder permissions endpoints + storage** |
 
 ## Documentos operacionais criados
 
