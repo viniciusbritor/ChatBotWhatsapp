@@ -162,7 +162,28 @@ async def embed_query(text: str) -> Optional[List[float]]:
     try:
         return await asyncio.to_thread(embed_best, clean_text)
     except Exception as exc:
-        logger.error("Embedding failed: %s", exc)
+        try:
+            import openai
+            if isinstance(exc, openai.RateLimitError):
+                logger.warning(
+                    "embedding_rate_limit text_len=%d", len(text),
+                )
+                return None
+            if isinstance(exc, openai.AuthenticationError):
+                key_prefix = (os.getenv("OPENAI_API_KEY", "") or "")[:7] + "***"
+                logger.error(
+                    "embedding_auth_failed api_key_prefix=%s", key_prefix,
+                )
+                return None
+            if isinstance(exc, openai.APITimeoutError):
+                logger.warning("embedding_timeout text_len=%d", len(text))
+                return None
+        except ImportError:
+            pass
+        logger.warning(
+            "embedding_other_error type=%s text_len=%d msg=%s",
+            type(exc).__name__, len(text), str(exc)[:100],
+        )
         return None
 
 
@@ -184,6 +205,12 @@ async def embed_documents(texts: List[str]) -> Optional[List[List[float]]]:
             EMBED_DOCUMENTS_TIMEOUT_SEC, len(texts),
         )
         return None
+    none_count = sum(1 for v in vectors if v is None)
+    if none_count > 0:
+        logger.warning(
+            "embed_documents_partial_failure chunks=%d failures=%d",
+            len(texts), none_count,
+        )
     if any(vector is None for vector in vectors):
         return None
     return [vector for vector in vectors if vector is not None]
@@ -554,6 +581,12 @@ async def index_private_document(
         except Exception as exc:
             logger.warning("Vector commit failed (plain kept) error=%s", exc)
             vector_ids = []
+    else:
+        vector_count = 0 if vectors is None else len(vectors)
+        logger.warning(
+            "index_private_document_vector_skipped chunks=%d vectors=%d",
+            len(chunks), vector_count,
+        )
 
     return {
         "doc_ids": plain_ids,
