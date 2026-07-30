@@ -124,6 +124,18 @@ async def persist(
         )
         if result.get("error"):
             return {"error": "rag_index_failed", "detail": result.get("error")}
+        if result.get("partial"):
+            chunks_idx = result.get("chunks_indexed", 0)
+            total = result.get("chunks", 0)
+            return {
+                "status": "rag_individual_partial",
+                "index_result": result,
+                "source_name": source_name,
+                "scope": scope,
+                "category": metadata or {},
+                "chunks_indexed": chunks_idx,
+                "chunks_total": total,
+            }
         return {
             "status": "rag_individual",
             "index_result": result,

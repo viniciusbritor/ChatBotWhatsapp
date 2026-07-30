@@ -12,7 +12,7 @@ Covers:
 """
 import asyncio
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -208,7 +208,8 @@ async def test_embed_documents_timeout_returns_none():
 
 
 @pytest.mark.asyncio
-async def test_embed_documents_partial_none_returns_none():
+async def test_embed_documents_partial_none_returns_filtered():
+    """Phase 4: partial success. 1 falha em 3 -> retorna 2 vectors."""
     from core import rag
 
     async def mixed(text):
@@ -220,4 +221,4 @@ async def test_embed_documents_partial_none_returns_none():
          patch.object(rag, "EMBED_DOCUMENTS_TIMEOUT_SEC", 5.0):
         result = await rag.embed_documents(["t1", "t2", "t3"])
 
-    assert result is None
+    assert result == [[0.1, 0.2], [0.1, 0.2]]

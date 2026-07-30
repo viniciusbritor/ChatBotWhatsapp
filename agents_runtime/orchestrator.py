@@ -561,14 +561,23 @@ async def _handle_attachment(
 
     status = persist.get("status", "")
     source_name = extracted.get("source_name", "document")
-    if status in {"rag_group", "rag_individual"}:
+    if status in {"rag_group", "rag_individual", "rag_individual_partial"}:
         index_result = persist.get("index_result", {})
         indexed = index_result.get("chunks", index_result.get("indexed", 0))
         scope = "grupo" if status == "rag_group" else "privado"
-        reply = (
-            f"Feito! Memorei {indexed} trechos do arquivo '{source_name}' "
-            f"no conhecimento {scope}. Quer me perguntar algo sobre o arquivo para verificar?"
-        )
+        if status == "rag_individual_partial":
+            chunks_idx = persist.get("chunks_indexed", indexed)
+            chunks_total = persist.get("chunks_total", indexed)
+            reply = (
+                f"Feito! Indexei {chunks_idx}/{chunks_total} trechos do "
+                f"arquivo '{source_name}' (alguns embeddings falharam, "
+                f"mas o doc esta parcialmente pesquisavel). Quer me perguntar algo?"
+            )
+        else:
+            reply = (
+                f"Feito! Memorei {indexed} trechos do arquivo '{source_name}' "
+                f"no conhecimento {scope}. Quer me perguntar algo sobre o arquivo para verificar?"
+            )
         try:
             from agent_orchestration.knowledge_retriever import register_indexing
             extra = payload.get("extra", {}) or {}

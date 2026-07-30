@@ -239,7 +239,7 @@ async def embed_documents(texts: List[str]) -> Optional[List[List[float]]]:
             "embed_documents_partial_failure chunks=%d failures=%d",
             len(texts), none_count,
         )
-    if any(vector is None for vector in vectors):
+    if none_count == len(texts):
         return None
     return [vector for vector in vectors if vector is not None]
 
@@ -589,6 +589,8 @@ async def index_private_document(
     await asyncio.to_thread(plain_batch.commit)
 
     vectors = await embed_documents(chunks)
+    partial = False
+
     if vectors is not None and len(vectors) == len(chunks):
         from google.cloud.firestore_v1.vector import Vector
 
@@ -609,18 +611,57 @@ async def index_private_document(
         except Exception as exc:
             logger.warning("Vector commit failed (plain kept) error=%s", exc)
             vector_ids = []
-    else:
+    elif vectors is not None and len(vectors) > 0:
+        # PHASE 4: partial success. Indexa o que deu certo.
+        partial = True
+        logger.info(
+            "index_private_document_partial chunks=%d vectors=%d",
+            len(chunks), len(vectors),
+        )
+        from google.cloud.firestore_v1.vector import Vector
+
+        valid_pairs = [
+            (i, v) for i, v in enumerate(vectors) if v is not None
+        ]
+        for index, vector in valid_pairs:
+            document_id = hashlib.sha256(
+                f"{owner_hash}:{source_title}:{index}:{chunks[index][:100]}".encode("utf-8")
+            ).hexdigest()[:32]
+            data = dict(
+                common,
+                vector_embedding=Vector(vector),
+                embedding_model=EMBEDDING_MODEL,
+                embedding_dim=EMBEDDING_DIM,
+            )
+            vector_batch.set(db.collection(PRIVATE_COLLECTION).document(document_id), data)
+            vector_ids.append(document_id)
+        try:
+            await asyncio.to_thread(vector_batch.commit)
+        except Exception as exc:
+            logger.warning("Vector partial commit failed error=%s", exc)
+            vector_ids = []
+    elif vectors is None or len(vectors) == 0:
         vector_count = 0 if vectors is None else len(vectors)
         logger.warning(
             "index_private_document_vector_skipped chunks=%d vectors=%d",
             len(chunks), vector_count,
         )
+        # PHASE 4: all failed -> return error (vs Phase 1-3 fail-closed)
+        if len(chunks) > 0:
+            if vectors is None:
+                return {"error": "embedding_failed", "chunks": len(chunks)}
+            return {
+                "error": "all_embeddings_failed",
+                "chunks": len(chunks),
+            }
 
     return {
         "doc_ids": plain_ids,
         "vector_doc_ids": vector_ids,
         "owner_hash": owner_hash,
         "chunks": len(chunks),
+        "chunks_indexed": len(vector_ids),
+        "partial": partial,
         "chars": len(text_content),
         "truncated": truncated,
         "class": class_value,
