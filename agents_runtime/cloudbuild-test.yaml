@@ -29,6 +29,27 @@ steps:
       - "-c"
       - "gcloud firestore indexes composite create --project=coherence-ominichannel-fs --collection-group=agent-knowledge-v2 --query-scope=COLLECTION --field-config=field-path=owner_hash,order=ascending --field-config=field-path=source_title,order=ascending --async || (echo 'index already exists, skipping'; exit 0)"
 
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    id: "deploy-firestore-vector-index-agent-knowledge"
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - "gcloud firestore indexes composite create --project=coherence-ominichannel-fs --collection-group=agent-knowledge-v2 --query-scope=COLLECTION --field-config=order=ASCENDING,field-path=embedding_model --field-config=order=ASCENDING,field-path=embedding_dim --field-config=order=ASCENDING,field-path=schema_version --field-config=order=ASCENDING,field-path=__name__ --field-config=field-path=vector_embedding,vector-config={dimension=1536,flat} --async || (echo 'vector index agent-knowledge-v2 already exists, skipping'; exit 0)"
+
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    id: "deploy-firestore-vector-index-agent-knowledge-private"
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - "gcloud firestore indexes composite create --project=coherence-ominichannel-fs --collection-group=agent-knowledge-v2 --query-scope=COLLECTION --field-config=order=ASCENDING,field-path=owner_hash --field-config=order=ASCENDING,field-path=embedding_model --field-config=order=ASCENDING,field-path=embedding_dim --field-config=order=ASCENDING,field-path=schema_version --field-config=order=ASCENDING,field-path=__name__ --field-config=field-path=vector_embedding,vector-config={dimension=1536,flat} --async || (echo 'vector index agent-knowledge-v2 owner_hash already exists, skipping'; exit 0)"
+
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    id: "deploy-firestore-vector-index-agent-knowledge-filename-class"
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - "gcloud firestore indexes composite create --project=coherence-ominichannel-fs --collection-group=agent-knowledge-v2 --query-scope=COLLECTION --field-config=order=ASCENDING,field-path=owner_hash --field-config=order=ASCENDING,field-path=source_title --field-config=order=ASCENDING,field-path=class --field-config=order=ASCENDING,field-path=__name__ --field-config=field-path=vector_embedding,vector-config={dimension=1536,flat} --async || (echo 'vector index agent-knowledge-v2 owner_hash+source_title+class already exists, skipping'; exit 0)"
+
   - name: "gcr.io/cloud-builders/docker"
     args:
       - "build"
