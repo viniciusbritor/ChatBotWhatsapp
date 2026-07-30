@@ -6,9 +6,9 @@
 ## Resumo executivo
 
 **Branch atual:** `test`
-**Último commit local:** `95f0260` (Fase 4 RAG recent indexing)
-**Último deploy em produção:** `0f1da60e` SUCCESS, revision `agents-runtime-test-00222-l6l`
-**Status:** 4 fases RAG + anti-lockup deployadas, em coleta de feedback
+**Último commit local:** `04b859f` (housekeeping batch)
+**Último deploy em produção:** `832a0e01` SUCCESS, revision `agents-runtime-test-00223`
+**Status:** 4 fases RAG + housekeeping deployadas, em coleta de feedback
 
 ## Conquistas da sessão (DEPLOYADAS em test)
 
@@ -19,6 +19,17 @@
 | **2 — RAG keywords** | `4883d5a` | **28 keywords conversacionais + normalização de acentos** (resolve "Sobre o que é esse documento?") |
 | **3 — LLM contexto** | `b8ccf48` | **Tie-breaker recebe últimas 2 msgs do phone** |
 | **4 — Recent indexing** | `95f0260` | **Auto is_rag por 5min após indexing** |
+| **Housekeeping** | `04b859f` | **GUARDRAILS §8 corrigido, refs mortas removidas, ruff zero warnings, STATE.md commitado** |
+
+## WhatsappAgente — RESOLVIDO (histórico)
+
+Confirmado pelo usuário em 30/07/2026 que está 100% resolvido:
+- Repo `viniciusbritor/WhatsappAgente` no GitHub — deletado
+- Service Cloud Run `whatsapp-agente-test` — deletado em 23/07/2026
+- Pastas locais (legado) — handled out-of-band pelo usuário
+- `agents_runtime/whatsapp_agente_pubsub_reference.py` — deletado em 19/07/2026 (commit `2a926e8`, 481 linhas)
+
+Pasta `WhatsappAgente/` local pode existir como untracked (no .gitignore). Não tocar.
 
 ## Pendente de execução (próximas fases)
 
