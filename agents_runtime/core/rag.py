@@ -21,7 +21,7 @@ import asyncio
 import hashlib
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import requests
@@ -751,7 +751,6 @@ MEMORY_COLLECTION = LEGACY_MEMORY_COLLECTION  # noqa: F401
 
 
 __all__ = [
-    "BRT",
     "EMBEDDING_MODEL",
     "EMBEDDING_DIM",
     "EMBEDDING_BASE_URL",

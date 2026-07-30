@@ -221,8 +221,17 @@ em Firestore plain (`message-history/{history_id}`) com indexação por
 
 ## 8. OAuth Google
 
-- Escopos mínimos obrigatórios: `gmail.readonly + gmail.send`,
-  `drive.file + drive.readonly`, `calendar + calendar.events`.
+- Escopos ativos (29/07/2026) em `agents_runtime/main.py:1112-1118`:
+  ```
+  gmail.readonly + gmail.send
+  drive                          (FULL — TEMPORÁRIO desde 25/07/2026)
+  calendar + calendar.events
+  ```
+- Estado alvo: voltar para `gmail.readonly + gmail.send` + `drive.file + drive.readonly` +
+  `calendar + calendar.events`. Migração exige re-consentimento de todos os usuários
+  ativos (o `refresh_token` não amplia escopos — apenas o consentimento original).
+- Bypass vigente (commit `01e8b9d`): `access_guardian._has_required_scope()` aceita `drive`
+  como cobertura de `drive.file` **E** `drive.readonly` simultaneamente.
 - Tokens persistidos **sem** `client_secret` e **sem** `client_id`.
 - Apenas o telefone do proprietário da instância pode chamar Gmail/Drive.
 - Revogação disponível via `POST /oauth/google` (re-login) ou remoção

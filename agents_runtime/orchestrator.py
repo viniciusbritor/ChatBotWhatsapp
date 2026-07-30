@@ -33,7 +33,7 @@ from agent_loader import get_agent, get_skill, list_agents, get_user, get_config
 from core.audit import log_action
 from core.timezone import now_brt
 from core.observability import (
-    new_tracker, set_current_tracker, current_tracker, attach_to_metadata,
+    new_tracker, set_current_tracker, current_tracker,
 )
 
 logger = logging.getLogger(__name__)
@@ -1757,13 +1757,11 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
     if specialist_ids:
         _tracker.add_cost("agents_resolved", len(specialist_ids))
 
-    attachment_already_acked = False
     if extra.get("has_document") and not intent.get("is_attachment"):
         intent["is_attachment"] = True
     if extra.get("has_document") and intent.get("is_attachment"):
         attachment_result = await _handle_attachment(payload, intent, sender_name)
         if attachment_result is not None:
-            attachment_already_acked = True
             path.append({"step": 2, "phase": "attachment_handler",
                          "status": attachment_result.get("metadata", {}).get("attachment", "unknown")})
             return await _finalize_orchestration(

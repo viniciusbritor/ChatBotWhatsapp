@@ -2,7 +2,9 @@
 
 > Historico cronologico de decisoes tecnicas, alteracoes e bugs para evitar reincidencia.
 
-> **Documento mestre:** [`PLAN_OMNICHANNEL_AGENTES.md`](./PLAN_OMNICHANNEL_AGENTES.md) — plano consolidado.
+> **Documento mestre:** [`ARQUITETURA.md`](./ARQUITETURA.md) + [`HARNESS.md`](./HARNESS.md) + [`GUARDRAILS.md`](./GUARDRAILS.md). Historico abaixo.
+>
+> **Nota (29/07/2026):** referencias antigas a `PLAN_OMNICHANNEL_AGENTES.md` e `docs/fases/fase_*/` nao existem mais no repo (removidos em cleanup de 22/07/2026). Entradas mais novas (F4d.6+) continuam completas. Entradas antigas que listam paths inexistentes sao preservadas como historico.
 
 ## 22/07/2026 — Fase 1: Liberar API de Custos e Mapear Arquitetura
 

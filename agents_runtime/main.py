@@ -14,7 +14,7 @@ import hmac
 import logging
 import re
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import Any, Dict
 from fastapi import FastAPI, Request, HTTPException
@@ -1159,7 +1159,6 @@ async def oauth_google(request: Request):
 async def oauth_callback(request: Request):
     import requests
     from core.oauth_per_user import parse_oauth_state
-    from core.timezone import BRT
 
     code = request.query_params.get("code", "")
     state = request.query_params.get("state", "")
