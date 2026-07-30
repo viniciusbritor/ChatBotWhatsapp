@@ -732,7 +732,32 @@ _AGENT_INTENT_FLAGS: List[Tuple[str, str]] = [
 ]
 
 
-def _resolve_agents_for_intents(intent: Dict[str, Any], instance: str) -> List[str]:
+_FILENAME_EXT = re.compile(
+    r"\.(pdf|docx|xlsx|txt|csv|md|rtf|odt)\b",
+    re.IGNORECASE,
+)
+
+
+def _import_rag_helpers():
+    """Import lazy do retriever para evitar import circular."""
+    from agent_orchestration.knowledge_retriever import _had_recent_indexing
+    return _had_recent_indexing
+
+
+def _has_filename_hint(text: str) -> bool:
+    """Detecta mencao explicita a um arquivo com extensao conhecida
+    na mensagem do usuario (ex: 'cdc-portugues-2013.pdf', 'relatorio.docx')."""
+    if not text:
+        return False
+    return bool(_FILENAME_EXT.search(text))
+
+
+def _resolve_agents_for_intents(
+    intent: Dict[str, Any],
+    instance: str,
+    masked_text: str = "",
+    scope_key: str = "",
+) -> List[str]:
     """Resolve ALL agents that should handle this intent in parallel.
 
     Multi-intent: when a query triggers more than one intent flag
@@ -749,6 +774,12 @@ def _resolve_agents_for_intents(intent: Dict[str, Any], instance: str) -> List[s
     running the retriever in parallel would inflate cost without
     adding value (the personal agent can call knowledge.retrieve as
     a tool when needed).
+
+    Filename override (30/07/2026): when a query cita um arquivo com
+    extensao conhecida E houve indexing recente para este scope
+    (phone ou group_jid), o retriever e preferido sobre Drive/RAG
+    heuristic. O user acabou de indexar esse arquivo, entao ele
+    DEVE estar no RAG, nao no Drive.
     """
     if intent.get("is_runtime_status"):
         return ["runtime-status"]
@@ -758,6 +789,16 @@ def _resolve_agents_for_intents(intent: Dict[str, Any], instance: str) -> List[s
         return ["agent-learning"]
     if intent.get("is_intimacy"):
         return ["agent-intimacy"]
+
+    if (
+        masked_text
+        and scope_key
+        and _has_filename_hint(masked_text)
+        and _import_rag_helpers()(scope_key)
+    ):
+        return ["agent-knowledge-retriever"]
+
+
 
     seen: set = set()
     agents: List[str] = []
@@ -1765,7 +1806,9 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
     if intent["is_rag"]:
         path.append({"step": "1a", "phase": "rag_intent", "details": "true"})
 
-    specialist_ids = _resolve_agents_for_intents(intent, instance)
+    specialist_ids = _resolve_agents_for_intents(
+        intent, instance, masked_text=masked_text, scope_key=scope_key,
+    )
     specialist_id = specialist_ids[0] if specialist_ids else None
 
     if specialist_ids:
