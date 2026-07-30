@@ -1,7 +1,7 @@
 # STATE.md — Estado da Sessão
 
 > Documento persistente para retomada de sessão após restart da IDE.
-> Última atualização: 2026-07-30
+> Última atualização: 2026-07-30 04:00 BRT
 
 > **Fonte autoritativa de pendências** (ativas + histórico): este arquivo.
 > `docs/GUARDRAILS.md` §11 e `docs/ARQUITETURA.md` §11 foram reduzidos a
@@ -11,20 +11,73 @@
 ## Resumo executivo
 
 **Branch atual:** `test`
-**Último commit local:** `04b859f` (housekeeping batch)
-**Último deploy em produção:** `832a0e01` SUCCESS, revision `agents-runtime-test-00223`
-**Status:** 4 fases RAG + housekeeping deployadas, em coleta de feedback
+**Último commit local:** `da6d01b` (Fase E FinOps)
+**Último deploy em produção:** `2c600ba0` SUCCESS, revision `agents-runtime-test-00233`
+**Status:** 11 deploys nesta sessão — bugs de RAG/PDF corrigidos, humanização + privacidade + FinOps deployados
 
-## Conquistas da sessão (DEPLOYADAS em test)
+## Pendências ativas (próximas fases)
 
-| Fase | Commit | Mudança principal |
-|---|---|---|
-| Fase 0.5 | `5b3d571` | Anti-lockup patches (per-task asyncio timeouts) |
-| **1 — Tick azul** | `8dce677` | **Cold start timeout 12s vs warm 5s** (resolve "não aparece confirmação em cold start") |
-| **2 — RAG keywords** | `4883d5a` | **28 keywords conversacionais + normalização de acentos** (resolve "Sobre o que é esse documento?") |
-| **3 — LLM contexto** | `b8ccf48` | **Tie-breaker recebe últimas 2 msgs do phone** |
-| **4 — Recent indexing** | `95f0260` | **Auto is_rag por 5min após indexing** |
-| **Housekeeping** | `04b859f` | **GUARDRAILS §8 corrigido, refs mortas removidas, ruff zero warnings, STATE.md commitado** |
+> Documento vivo. Cada fase termina com gate binário e deploy isolado.
+
+### Fase A.2 — Latência: guard sync
+- **Status:** 🟡 Pendente (próxima sessão)
+- **Resolve:** Latência warm path cai ~8s ao substituir LangGraph state machine por função sync
+- **Esforço:** 3h | **Custo estimado:** **-$2/mês** (menos CPU time)
+- **Tasks:**
+  - Medir baseline warm (Fase 0.5 status final + A.1 baseline)
+  - Refatorar `_run_guard_graph` em `agent_orchestration/graph.py`
+  - Manter compat com `agent_loader` + `access_guardian`
+  - Testes de regressão de latência
+
+### Pendências externas (bloqueio usuário)
+- [ ] Rotação de credenciais expostas em `ad6399a` (DEEPSEEK, MINIMAX, NVIDIA, agents-runtime-sa-token)
+- [ ] Drive scope rollback para `drive.file + drive.readonly` (requer re-consentimento)
+- [ ] OAuth Client setup no Google Cloud Console para telefone `+5511966830020`
+- [ ] Backfill embeddings legacy (script não criado)
+- [ ] README desatualizado em `agents_runtime/README.md`
+
+### Edge cases pendentes (não-críticos)
+- [ ] Anexo + pergunta pessoal — routing híbrido RAG + Drive
+- [ ] Multi-intent write race (Fase 4.1)
+- [ ] Retry budget granular in-process (Fase 0.5 Patch 4)
+- [ ] Audit log assíncrono (Fase 5 — performance)
+
+## Conquistas da sessão 30/07/2026 (DEPLOYADAS em test)
+
+| # | Fase | Commit | Mudança |
+|---|---|---|---|
+| 0 | Dedup docs | `109410f` | GUARDRAILS/ARQUITETURA/STATE autoritativo |
+| 1 | Tick azul | `8dce677` | Cold start 12s vs warm 5s |
+| 2 | RAG keywords | `4883d5a` | 28 keywords conversacionais + acento |
+| 3 | LLM contexto | `b8ccf48` | Tie-breaker com 2 últimas msgs |
+| 4 | Recent indexing | `95f0260` | Auto is_rag por 5min pós-indexing |
+| 5 | Scope-aware | `a062456` | phone OU group_jid; keywords user |
+| 6 | Filename routing | `789f488` | Bypass defense-in-depth para `.pdf/.docx` |
+| 7 | PDF multi-parser | `4e01dd9` | pypdf → pdfplumber → pdfminer |
+| 8 | PDF partial | `c3bed1f` | Tolerância página-a-página + logging |
+| A | Max tokens | `ee977fa` | Manager 1000 → 1500 via env |
+| B | Auto-image RAG | `32a04ef` | knowledge.retrieve → tabela PNG |
+| C | Humanização | `60ccee6` | Sazionalidade BRT + tom caloroso |
+| D | Privacy audit | `bc0e217` | PRIVACY_AUDIT.md completo |
+| E | FinOps pricing | `da6d01b` | core/pricing.py + cost_usd_estimated |
+| F | ROADMAP.md | — | Pendente este commit |
+
+## Documentos operacionais criados
+
+| Doc | Função |
+|---|---|
+| `docs/CURRENT_PLAN.md` | Plano detalhado das fases A-F com custos estimados |
+| `docs/PRIVACY_AUDIT.md` | Auditoria completa de privacidade (7 camadas) |
+| `docs/ROADMAP.md` | Roadmap longo prazo + loop methodology |
+| `STATE.md` | Este arquivo — fonte autoritativa |
+
+## WhatsappAgente — RESOLVIDO (histórico)
+
+Confirmado pelo usuário em 30/07/2026 que está 100% resolvido:
+- Repo `viniciusbritor/WhatsappAgente` no GitHub — deletado
+- Service Cloud Run `whatsapp-agente-test` — deletado em 23/07/2026
+- Pastas locais (legado) — handled out-of-band pelo usuário
+- `agents_runtime/whatsapp_agente_pubsub_reference.py` — deletado em 19/07/2026 (commit `2a926e8`, 481 linhas)
 
 ## WhatsappAgente — RESOLVIDO (histórico)
 
