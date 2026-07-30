@@ -215,6 +215,7 @@ def _detect_tabular_payload(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     - ``drive.list_folder`` -> ``files`` list -> Nome / Tipo / Modificado
     - ``gmail.search_messages`` -> ``messages`` list -> Assunto / De / Data
     - ``calendar.list_events`` -> ``events`` list -> Evento / Início / Fim
+    - ``knowledge.retrieve`` -> ``results`` list -> Fonte / Trecho / Score
     """
     metadata = result.get("metadata", {}) or {}
     tool_results = metadata.get("tool_results") or []
@@ -285,6 +286,27 @@ def _detect_tabular_payload(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                 "headers": ["Evento", "Início", "Fim"],
                 "rows": rows,
                 "emoji_header": "📅",
+            }
+        if tool == "knowledge.retrieve" or tool.endswith("knowledge.retrieve") or tool.endswith("retrieve_knowledge"):
+            chunks = result_data.get("results") or []
+            count = result_data.get("count", len(chunks))
+            if not chunks or count == 0:
+                continue
+            rows = []
+            for c in chunks[:5]:
+                source = str(
+                    c.get("source_title") or c.get("source") or c.get("metadata_filename") or "-"
+                )[:48]
+                excerpt = str(
+                    c.get("content") or c.get("text") or c.get("snippet") or ""
+                )[:120].replace("\n", " ")
+                score = f"{c.get('score', 0.0):.2f}" if c.get("score") is not None else "-"
+                rows.append([source, excerpt, score])
+            return {
+                "title": f"Conhecimento encontrado ({count} trechos)",
+                "headers": ["Fonte", "Trecho", "Score"],
+                "rows": rows,
+                "emoji_header": "📚",
             }
     return None
 

@@ -121,3 +121,76 @@ def test_render_report_produces_valid_png_bytes():
     )
     assert rendered["png_bytes"][:8] == b"\x89PNG\r\n\x1a\n"
     assert base64.b64decode(rendered["data_uri"].split(",", 1)[1])[:8] == b"\x89PNG\r\n\x1a\n"
+
+def test_detect_knowledge_retrieve_table():
+    """knowledge.retrieve RAG chunks viram tabela (Fase B.2 30/07)."""
+    result = {
+        "metadata": {
+            "tool_results": [
+                {"tool": "knowledge.retrieve", "result": {
+                    "scope": "private",
+                    "decision": "private",
+                    "count": 3,
+                    "results": [
+                        {
+                            "source_title": "cdc-portugues-2013.pdf",
+                            "content": "Art. 42 CDC: o consumidor tem direito a informacao adequada.",
+                            "score": 0.92,
+                        },
+                        {
+                            "source_title": "Edital Pregao.pdf",
+                            "content": "Objeto: aquicao de licencas de software.",
+                            "score": 0.81,
+                        },
+                        {
+                            "source_title": "Dissertacao.pdf",
+                            "content": "Estudo analisa impacto da IA generativa.",
+                            "score": 0.74,
+                        },
+                    ],
+                }},
+            ],
+        },
+    }
+    payload = _detect_tabular_payload(result)
+    assert payload is not None
+    assert payload["title"] == "Conhecimento encontrado (3 trechos)"
+    assert payload["headers"] == ["Fonte", "Trecho", "Score"]
+    assert payload["emoji_header"] == "\U0001F4DA"
+    assert len(payload["rows"]) == 3
+    assert payload["rows"][0][0] == "cdc-portugues-2013.pdf"
+    assert "Art. 42 CDC" in payload["rows"][0][1]
+    assert payload["rows"][0][2] == "0.92"
+
+
+def test_detect_knowledge_retrieve_empty_returns_none():
+    """RAG sem resultados NAO gera tabela."""
+    result = {
+        "metadata": {
+            "tool_results": [
+                {"tool": "knowledge.retrieve", "result": {
+                    "count": 0, "results": [],
+                }},
+            ],
+        },
+    }
+    assert _detect_tabular_payload(result) is None
+
+
+def test_detect_knowledge_retrieve_truncates_excerpt():
+    """Excerto longo e truncado em 120 chars (cell cap)."""
+    long_content = "a" * 200
+    result = {
+        "metadata": {
+            "tool_results": [
+                {"tool": "knowledge.retrieve", "result": {
+                    "count": 1,
+                    "results": [
+                        {"source_title": "doc.pdf", "content": long_content, "score": 0.5},
+                    ],
+                }},
+            ],
+        },
+    }
+    payload = _detect_tabular_payload(result)
+    assert payload["rows"][0][1] == ("a" * 120)
