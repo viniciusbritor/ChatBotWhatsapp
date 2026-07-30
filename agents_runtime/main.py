@@ -56,6 +56,8 @@ async def lifespan(app: FastAPI):
     """Application lifespan: init/cleanup."""
     logger.info(f"agents_runtime v{VERSION} starting (commit={COMMIT_SHA})")
 
+    await _validate_openai_key_on_startup()
+
     start_loader()
     logger.info("Agent loader started")
 
@@ -64,6 +66,34 @@ async def lifespan(app: FastAPI):
     await drain_indexing_tasks()
     stop_loader()
     logger.info("agents_runtime shutting down")
+
+
+async def _validate_openai_key_on_startup() -> None:
+    """PHASE 2 do loop RAG: valida OPENAI_API_KEY no boot.
+
+    Falha nao-crash: log de erro apenas. Se key invalida, RAG
+    indexing continuara falhando silenciosamente (ate Phase 4
+    partial success), mas pelo menos o erro fica visivel.
+    """
+    key = os.getenv("OPENAI_API_KEY", "")
+    if not key:
+        logger.error("OPENAI_API_KEY not set - RAG embeddings will fail")
+        return
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=key)
+        client.embeddings.create(
+            model="text-embedding-3-small",
+            input="ping",
+        )
+        logger.info("OPENAI_API_KEY valid (boot ping succeeded)")
+    except Exception as exc:
+        key_prefix = (key[:7] if key else "") + "***"
+        logger.error(
+            "OPENAI_API_KEY validation failed type=%s key_prefix=%s msg=%s",
+            type(exc).__name__, key_prefix, str(exc)[:100],
+        )
 
 
 app = FastAPI(
