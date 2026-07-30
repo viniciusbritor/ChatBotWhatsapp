@@ -154,8 +154,19 @@ def _get_firestore():
         return None
 
 
-async def embed_query(text: str) -> Optional[List[float]]:
-    """Embed a chunk of text via OpenAI. Used only by ingestion pipelines."""
+EMBEDDING_MAX_RETRIES = 3
+EMBEDDING_BACKOFF_SEC = [1, 2, 4]
+
+
+async def embed_query(text: str, attempt: int = 0) -> Optional[List[float]]:
+    """Embed a chunk of text via OpenAI. Used only by ingestion pipelines.
+
+    PHASE 3: retry com exponential backoff em RateLimitError.
+    - 1 retry: 1s
+    - 2 retries: 2s
+    - 3 retries: 4s
+    - Exausted: log error + return None
+    """
     clean_text = mask_pii(str(text or "")).strip()
     if not clean_text:
         return None
@@ -165,8 +176,17 @@ async def embed_query(text: str) -> Optional[List[float]]:
         try:
             import openai
             if isinstance(exc, openai.RateLimitError):
-                logger.warning(
-                    "embedding_rate_limit text_len=%d", len(text),
+                if attempt < EMBEDDING_MAX_RETRIES - 1:
+                    wait = EMBEDDING_BACKOFF_SEC[attempt]
+                    logger.info(
+                        "embedding_rate_limit_retry attempt=%d wait=%d text_len=%d",
+                        attempt + 1, wait, len(text),
+                    )
+                    await asyncio.sleep(wait)
+                    return await embed_query(text, attempt + 1)
+                logger.error(
+                    "embedding_rate_limit_exhausted retries=%d text_len=%d",
+                    EMBEDDING_MAX_RETRIES, len(text),
                 )
                 return None
             if isinstance(exc, openai.AuthenticationError):
@@ -176,7 +196,15 @@ async def embed_query(text: str) -> Optional[List[float]]:
                 )
                 return None
             if isinstance(exc, openai.APITimeoutError):
-                logger.warning("embedding_timeout text_len=%d", len(text))
+                if attempt < EMBEDDING_MAX_RETRIES - 1:
+                    wait = EMBEDDING_BACKOFF_SEC[attempt]
+                    logger.info(
+                        "embedding_timeout_retry attempt=%d wait=%d text_len=%d",
+                        attempt + 1, wait, len(text),
+                    )
+                    await asyncio.sleep(wait)
+                    return await embed_query(text, attempt + 1)
+                logger.warning("embedding_timeout_exhausted text_len=%d", len(text))
                 return None
         except ImportError:
             pass
