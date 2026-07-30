@@ -47,6 +47,9 @@ _indexing_tasks: set = set()
 MULTI_SPECIALIST_TIMEOUT_SEC = float(os.getenv("MULTI_SPECIALIST_TIMEOUT_SEC", "30"))
 PREFETCH_DRIVE_MULTI_TIMEOUT_SEC = float(os.getenv("PREFETCH_DRIVE_MULTI_TIMEOUT_SEC", "8"))
 
+LLM_MAX_TOKENS_MANAGER = int(os.getenv("LLM_MAX_TOKENS_MANAGER", "1500"))
+LLM_MAX_TOKENS_DEFAULT = int(os.getenv("LLM_MAX_TOKENS_DEFAULT", "500"))
+
 
 def _finish_indexing_task(task: asyncio.Task) -> None:
     _indexing_tasks.discard(task)
@@ -2417,7 +2420,7 @@ async def _execute_agent(
                     tool_executor=tool_executor,
                     model=fast_model,
                     temperature=0.7,
-                    max_tokens=1000,
+                    max_tokens=LLM_MAX_TOKENS_MANAGER,
                     thinking_disabled=not thinking,
                     max_tool_rounds=5,
                 )
@@ -2428,7 +2431,7 @@ async def _execute_agent(
                     user_prompt=user_prompt,
                     model=fast_model,
                     temperature=0.7,
-                    max_tokens=500,
+                    max_tokens=LLM_MAX_TOKENS_DEFAULT,
                     thinking_disabled=not thinking,
                 )
 
