@@ -2,6 +2,63 @@
 
 > Historico cronologico de decisoes tecnicas, alteracoes e bugs para evitar reincidencia.
 
+## 30/07/2026 — Fase PT3: Portal UI agradável + RAG visibilidade + Status DeepSeek-only
+
+### Contexto
+Usuario reportou tres sintomas via screenshots:
+1. Portal Agentes Omnichannel tinha UI basica e nao permitia editar agentes pela UI
+2. Aba "Conhecimento" listava documentos mas sem abrir/acessar o conteudo
+3. "Status operacional" mostrava `stt_primary: whisper-local` e `stt_fallback: gemini-2.5-flash`, incorretos pós Fase N (25/07/2026) que removeu o cascade e consolidou tudo em DeepSeek V4 Flash
+
+Foi aberto loop disciplinado `Analise -> Identificacao -> Plano -> Branch -> 4 fases resolutivas -> Smoke real -> Avaliacao final`. Branch de trabalho: `loop/portal-status-fixes-pt3` (partindo de `test`).
+
+### Entregas
+- **`core/module_ui.py`** — portal reescrito:
+  - Header sticky com badge "runtime OK" calculado via fetch
+  - CSS refinado (paleta neutral, shadows suaves, focus rings, darkmode-ready via `color-scheme: light`)
+  - `renderAgents()` agora tem botoes "Editar" e "Excluir"; modal `editAgentForm()` edita/atualiza via `POST /admin/agents`
+  - `renderKnowledge()` lista por source_title (uma linha por arquivo) com filtro client-side; clicar abre `viewKnowledgeDoc()` que mostra todos os chunks com class/group/theme
+  - `renderStatus()` agora puxa `/admin/status` reformatado com KPIs de LLM (provider, model, cascade, api_key_set), inventario de agentes e separacao clara STT vs LLM
+  - Suporte a modal generico (`showModal()`) com ESC + click-outside
+
+- **`main.py`** — endpoints reformatados:
+  - `GET /admin/status` agora retorna `llm_provider=deepseek-v4-flash`, `cascade=False`, `kpis` sem `stt_fallback`, e inventario de agentes via `build_agent_inventory()`
+  - `GET /admin/knowledge` agora AGRUPA por `source_title` (uma linha por arquivo, antes mostrava N linhas duplicadas por chunk)
+  - `GET /admin/knowledge/{source_title:path}` NOVO — retorna todos os chunks de um documento + metadados (klass/group/theme/chunk_index); 404 quando nao encontrado
+  - `datetime.utcnow()` -> `datetime.now(timezone.utc)` (eliminou DeprecationWarning)
+
+- **Tests** — `tests/test_module_ui_admin.py`:
+  - `TestRenderDashboard` (4 testes): HTML valido com handlers esperados
+  - `TestAdminStatusEndpoint` (2 testes): llm_provider=deepseek-v4-flash, sem stt_fallback legado, runtime_ok + agents_summary presentes
+  - `TestAdminAgentsEndpoints` (3 testes): POST upserts, GET 404, DELETE 500 on failure
+  - `TestAdminKnowledgeGrouping` (3 testes): agrupamento por source_title, detalhe retorna chunks ordenados, 404 quando ausente
+
+- **Smoke real** — `scripts/smoke_rag_real.py`:
+  - Indexa 3 documentos sinteticos (CDC, dissertacao, manual) num Firestore fake + embeddings deterministicos (hashlib)
+  - Mocka `_find_nearest` com stub que aplica `vector_distance` arbitrario para validar pipeline
+  - Exercita retrieve() com 4 queries (com e sem source_hint, com e sem match) — todas retornam chunks com class/group/theme
+  - Valida `/admin/knowledge` agrupado por source_title (3 grupos retornados, nao 5 chunks duplicados)
+  - Valida `/admin/knowledge/cdc-...pdf` (detalhe) com 2 chunks e metadados
+  - Valida `/admin/status` com deepseek-v4-flash e sem stt_fallback nos KPIs
+  - Valida `render_dashboard()` HTML com handlers de editar/ver/modal
+
+### Validacao
+| Suite | Antes | Depois |
+|---|---|---|
+| `tests/test_module_ui_admin.py` | (novo) | 12 passed |
+| `pytest -q tests/` (full) | 11 failed, 720 passed, 10 warnings | 11 failed, 732 passed, 10 warnings |
+
+**+12 testes passando, mesmas 11 falhas pre-existentes (langgraph nao instalado / google_drive docx / dissertacao_pdf_is_present), zero warnings novos.**
+
+### Pendencias externas NAO resolvidas neste loop (escopo do usuario)
+- Rotacao de credenciais (user-only, fora do escopo)
+- Drive scope rollback (requer re-consentimento pelo user)
+- OAuth Client setup manual no Google Cloud Console
+
+### Nao escopo deste patch (intencionalmente)
+- LangGraph ausente no venv-c (pre-existente, instalacao fora deste loop)
+- test_rag_embedding_persistence.py (depende de Firestore real)
+
 > **Documento mestre:** [`ARQUITETURA.md`](./ARQUITETURA.md) + [`HARNESS.md`](./HARNESS.md) + [`GUARDRAILS.md`](./GUARDRAILS.md). Historico abaixo.
 >
 > **Nota (29/07/2026):** referencias antigas a `PLAN_OMNICHANNEL_AGENTES.md` e `docs/fases/fase_*/` nao existem mais no repo (removidos em cleanup de 22/07/2026). Entradas mais novas (F4d.6+) continuam completas. Entradas antigas que listam paths inexistentes sao preservadas como historico.
