@@ -14,7 +14,7 @@ import hmac
 import logging
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import Any, Dict
 from fastapi import FastAPI, Request, HTTPException
@@ -743,16 +743,49 @@ async def admin_dashboard(request: Request):
 @app.get("/admin/status")
 async def admin_status():
     from core.audio_transcribe import fallback_stats
+    from core.agent_status import build_agent_inventory
 
+    api_key_set = False
+    try:
+        from core.llm_provider import LLMProvider
+
+        api_key_set = bool(LLMProvider().is_available())
+    except Exception:
+        api_key_set = False
+    inventory = build_agent_inventory()
+    counts = inventory.get("counts", {})
+    health_state = "ok"
+    if counts.get("healthy", 0) == 0 and counts.get("routable", 0) == 0:
+        health_state = "warn"
+    if counts.get("healthy", 0) == 0 and counts.get("routable", 0) > 0:
+        health_state = "warn"
+    kpis = [
+        {"label": "commit", "value": _short_sha(COMMIT_SHA)},
+        {"label": "deployed_at", "value": DEPLOYED_AT},
+        {"label": "llm_provider", "value": "deepseek-v4-flash", "sub": "sem cascade (Fase N 25/07/2026)"},
+        {"label": "llm_api_key", "value": "configurada" if api_key_set else "ausente"},
+        {"label": "agents_total", "value": counts.get("configured", 0), "sub": f"{counts.get('routable', 0)} roteaveis"},
+        {"label": "agents_healthy", "value": counts.get("healthy", 0), "sub": f"{counts.get('degraded', 0)} degradados"},
+        {"label": "in_flight", "value": counts.get("in_flight", 0), "sub": "execucoes em andamento"},
+    ]
     return JSONResponse(content={
-        "generated_at": datetime.utcnow().isoformat() + "Z",
-        "kpis": [
-            {"label": "commit", "value": _short_sha(COMMIT_SHA)},
-            {"label": "deployed_at", "value": DEPLOYED_AT},
-            {"label": "stt_primary", "value": "whisper-local"},
-            {"label": "stt_fallback", "value": "gemini-2.5-flash"},
-        ],
-        "stt_fallback": fallback_stats(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "runtime_ok": health_state == "ok" and api_key_set,
+        "health_state": health_state,
+        "kpis": kpis,
+        "llm": {
+            "provider": "deepseek",
+            "model": "deepseek-v4-flash",
+            "cascade": False,
+            "api_key_set": api_key_set,
+            "base_url_env": "DEEPSEEK_BASE_URL",
+            "note": "Fase N (25/07/2026) removeu o cascade MiniMax/Gemini para LLM. Apenas DeepSeek V4 Flash atende chat/completions+tool_calls.",
+        },
+        "stt": fallback_stats(),
+        "agents_summary": {
+            "counts": counts,
+            "generated_at": inventory.get("generated_at"),
+        },
     })
 
 
@@ -858,25 +891,131 @@ async def admin_knowledge_documents(request: Request):
         SHARED_COLLECTION,
     )
 
-    limit = min(int(request.query_params.get("limit", "10")), 50)
+    limit = min(int(request.query_params.get("limit", "50")), 200)
     db = _get_firestore_client()
     documents: list = []
+    grouped: Dict[str, Dict[str, Any]] = {}
     if db is not None:
-        for collection in (PRIVATE_COLLECTION, SHARED_COLLECTION, MEMORY_COLLECTION):
+        plain_pairs = (
+            (PRIVATE_COLLECTION + "-plain", PRIVATE_COLLECTION),
+            (SHARED_COLLECTION + "-plain", SHARED_COLLECTION),
+            (MEMORY_COLLECTION, MEMORY_COLLECTION),
+        )
+        for plain_collection, vector_collection in plain_pairs:
             try:
-                for doc in db.collection(collection).limit(limit).stream():
-                    data = doc.to_dict() or {}
-                    documents.append({
-                        "doc_id": doc.id,
-                        "title": data.get("source_title") or data.get("titulo") or doc.id,
-                        "text": (data.get("text_content") or data.get("conteudo") or data.get("text_masked") or "")[:500],
-                        "owner_id": data.get("owner_hash"),
-                        "collection": collection,
-                    })
+                stream = db.collection(plain_collection).limit(limit * 4).stream()
             except Exception as exc:
-                logger.warning("admin_knowledge_documents failed for %s: %s", collection, exc)
-    documents = documents[:limit]
-    return JSONResponse(content={"documents": documents, "limit": limit})
+                logger.warning("admin_knowledge_documents failed for %s: %s", plain_collection, exc)
+                continue
+            try:
+                for doc in stream:
+                    data = doc.to_dict() or {}
+                    source_title = data.get("source_title") or data.get("titulo") or doc.id
+                    klass = data.get("class") or data.get("category") or ""
+                    grp = data.get("group") or ""
+                    theme = data.get("theme") or ""
+                    owner_hash = data.get("owner_hash") or ""
+                    key = f"{plain_collection}::{source_title}"
+                    bucket = grouped.setdefault(key, {
+                        "doc_id": source_title,
+                        "title": source_title,
+                        "text": (data.get("text_content") or data.get("conteudo") or "")[:500],
+                        "owner_id": owner_hash[:12] if owner_hash else None,
+                        "collection": plain_collection,
+                        "vector_collection": vector_collection,
+                        "chunk_count": 0,
+                        "chunk_indices": [],
+                        "klass": klass,
+                        "group": grp,
+                        "theme": theme,
+                        "language": data.get("language", "pt-BR"),
+                        "created_at": data.get("created_at", ""),
+                        "source_url": data.get("source_url", ""),
+                    })
+                    bucket["chunk_count"] += 1
+                    idx = data.get("chunk_index")
+                    if isinstance(idx, int):
+                        bucket["chunk_indices"].append(idx)
+            except Exception as exc:
+                logger.warning("admin_knowledge_documents stream failed for %s: %s", plain_collection, exc)
+        documents = list(grouped.values())
+        documents.sort(key=lambda d: (d.get("created_at") or "", d.get("title") or ""))
+        documents = documents[:limit]
+        for doc in documents:
+            doc["chunk_indices"].sort()
+    return JSONResponse(content={"documents": documents, "limit": limit, "total_groups": len(grouped)})
+
+
+@app.get("/admin/knowledge/{source_title:path}")
+async def admin_knowledge_document_detail(source_title: str, request: Request):
+    """Return all chunks for a single document, identified by source_title."""
+    from agent_loader import _get_firestore_client
+    from core.rag import (
+        MEMORY_COLLECTION,
+        PRIVATE_COLLECTION,
+        SHARED_COLLECTION,
+    )
+
+    collection = request.query_params.get("collection") or PRIVATE_COLLECTION + "-plain"
+    db = _get_firestore_client()
+    chunks: list = []
+    metadata = {
+        "source_title": source_title,
+        "klass": "",
+        "group": "",
+        "theme": "",
+        "language": "pt-BR",
+        "owner_id": "",
+        "created_at": "",
+        "source_url": "",
+        "chunk_count": 0,
+        "vector_collection": "",
+    }
+    if db is not None:
+        try:
+            plain_refs = (
+                PRIVATE_COLLECTION + "-plain",
+                SHARED_COLLECTION + "-plain",
+                MEMORY_COLLECTION,
+            )
+            found_any = False
+            for plain_coll in plain_refs:
+                query = db.collection(plain_coll).where("source_title", "==", source_title)
+                for doc in query.stream():
+                    data = doc.to_dict() or {}
+                    found_any = True
+                    if not metadata["klass"]:
+                        metadata["klass"] = data.get("class") or data.get("category") or ""
+                    if not metadata["group"]:
+                        metadata["group"] = data.get("group") or ""
+                    if not metadata["theme"]:
+                        metadata["theme"] = data.get("theme") or ""
+                    metadata["owner_id"] = metadata["owner_id"] or (data.get("owner_hash") or "")[:12]
+                    metadata["created_at"] = metadata["created_at"] or data.get("created_at", "")
+                    metadata["source_url"] = metadata["source_url"] or data.get("source_url", "")
+                    metadata["language"] = data.get("language", metadata["language"])
+                    metadata["vector_collection"] = plain_coll.replace("-plain", "") if plain_coll.endswith("-plain") else plain_coll
+                    chunks.append({
+                        "chunk_index": data.get("chunk_index", len(chunks)),
+                        "text": data.get("text_content", "") or "",
+                        "chars": len(data.get("text_content", "") or ""),
+                        "chunk_id": doc.id,
+                    })
+            chunks.sort(key=lambda c: c.get("chunk_index", 0))
+            metadata["chunk_count"] = len(chunks)
+            if found_any:
+                metadata["title"] = source_title
+                metadata["collection"] = collection
+            else:
+                raise HTTPException(status_code=404, detail="document_not_found")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("admin_knowledge_document_detail failed for %s: %s", source_title, exc)
+            raise HTTPException(status_code=500, detail="rag_lookup_failed") from exc
+    else:
+        raise HTTPException(status_code=503, detail="firestore_unavailable")
+    return JSONResponse(content={"document": {**metadata, "chunks": chunks}})
 
 
 @app.get("/admin/agents")

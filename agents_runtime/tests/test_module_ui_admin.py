@@ -1,0 +1,224 @@
+"""Testes do portal Agentes Omnichannel e do endpoint /admin/status.
+
+Cobre:
+- render_dashboard() nao quebra com escaping
+- /admin/status retorna llm_provider=deepseek-v4-flash, sem fallback LLM
+- /admin/knowledge agrupa por source_title
+- /admin/knowledge/{source_title} retorna chunks + metadados
+- UI module embute botões Editar/Excluir para agentes
+- UI tem handler de modal para visualização de documento
+"""
+from __future__ import annotations
+
+import json
+import os
+from unittest.mock import patch
+
+
+os.environ.setdefault("GCP_PROJECT", "test-project")
+
+
+class _AuthFixture:
+    def setup_method(self, method):
+        from _pytest.monkeypatch import MonkeyPatch
+
+        self._mp = MonkeyPatch()
+        self._mp.setenv("AGENTS_RUNTIME_SA_TOKEN_SECRET", "test-sa-secret")
+
+    def teardown_method(self, method):
+        self._mp.undo()
+
+
+class TestRenderDashboard:
+    def setup_method(self):
+        from core.module_ui import render_dashboard
+
+        self.render_dashboard = render_dashboard
+
+    def test_returns_html_with_doctype(self):
+        html = self.render_dashboard("abc1234", "2026-07-30T00:00:00Z")
+        assert html.startswith("<!DOCTYPE html>")
+        assert "Agentes Omnichannel" in html
+        assert "abc1234" in html
+        assert "2026-07-30T00:00:00Z" in html
+
+    def test_has_agent_edit_button_handler(self):
+        html = self.render_dashboard("deadbee", "local")
+        assert "data-edit=" not in html or "editAgent" in html
+        assert "editAgentForm" in html
+        assert "deleteAgent" in html
+
+    def test_has_knowledge_view_handler(self):
+        html = self.render_dashboard("deadbee", "local")
+        assert "viewKnowledgeDoc" in html
+        assert "knowledge-search" in html
+
+    def test_has_status_section_reflecting_deepseek(self):
+        html = self.render_dashboard("deadbee", "local")
+        assert "deepseek-v4-flash" in html
+        assert 'id="runtime-badge"' in html
+
+
+class TestAdminStatusEndpoint(_AuthFixture):
+    def setup_method(self):
+        super().setup_method(None)
+        from main import app
+
+        self.client = __import__("fastapi.testclient", fromlist=["TestClient"]).TestClient(app)
+        self.headers = {"Authorization": "Bearer test-sa-secret"}
+
+    def test_admin_status_returns_deepseek_no_fallback(self):
+        with patch("main._short_sha", return_value="abc1234"):
+            resp = self.client.get("/admin/status", headers=self.headers)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        kpi_labels = {kpi["label"] for kpi in body.get("kpis", [])}
+        assert "stt_primary" not in kpi_labels
+        assert "stt_fallback" not in kpi_labels
+        assert "llm_provider" in kpi_labels
+        llm = body.get("llm", {})
+        assert llm.get("provider") == "deepseek"
+        assert llm.get("model") == "deepseek-v4-flash"
+        assert llm.get("cascade") is False
+
+    def test_admin_status_runtime_ok_default(self):
+        with patch("main._short_sha", return_value="abc1234"):
+            resp = self.client.get("/admin/status", headers=self.headers)
+        body = resp.json()
+        assert "runtime_ok" in body
+        assert "agents_summary" in body
+        assert "counts" in body["agents_summary"]
+
+
+class TestAdminAgentsEndpoints(_AuthFixture):
+    def setup_method(self):
+        super().setup_method(None)
+        from main import app
+
+        self.client = __import__("fastapi.testclient", fromlist=["TestClient"]).TestClient(app)
+        self.headers = {"Authorization": "Bearer test-sa-secret"}
+
+    def test_admin_agents_get_returns_404_when_missing(self):
+        with patch("agent_loader.get_agent", return_value=None):
+            resp = self.client.get("/admin/agents/unknown-id", headers=self.headers)
+        assert resp.status_code == 404
+
+    def test_admin_agents_post_upserts(self):
+        with patch("main.upsert_agent", return_value=True) as mock_upsert:
+            resp = self.client.post(
+                "/admin/agents",
+                json={"id": "agent-test-1", "name": "Test", "role": "specialist", "model": "deepseek-v4-flash"},
+                headers=self.headers,
+            )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["upserted"] is True
+        assert mock_upsert.call_count == 1
+
+    def test_admin_agents_delete_returns_500_on_failure(self):
+        with patch("main.delete_agent", return_value=False):
+            resp = self.client.delete("/admin/agents/agent-x", headers=self.headers)
+        assert resp.status_code == 500
+
+
+class TestAdminKnowledgeGrouping(_AuthFixture):
+    def setup_method(self):
+        super().setup_method(None)
+        from main import app
+
+        self.client = __import__("fastapi.testclient", fromlist=["TestClient"]).TestClient(app)
+        self.headers = {"Authorization": "Bearer test-sa-secret"}
+
+    def _fake_firestore_with_chunks(self, plain_collection):
+        class FakeDoc:
+            def __init__(self, doc_id, data):
+                self.id = doc_id
+                self._data = data
+
+            def to_dict(self):
+                return self._data
+
+        class FakeCollection:
+            def __init__(self, name, docs):
+                self._name = name
+                self._docs = list(docs)
+
+            def limit(self, n):
+                return self
+
+            def stream(self):
+                for doc in list(self._docs):
+                    yield doc
+
+            def where(self, field, op, value):
+                filtered = [doc for doc in self._docs if doc.to_dict().get(field) == value]
+                return FakeCollection(self._name, filtered)
+
+            def document(self, doc_id):
+                return self._docs[0] if self._docs else None
+
+        class FakeBatch:
+            def __init__(self):
+                self.ops = []
+
+            def set(self, ref, data, merge=False):
+                self.ops.append((ref, data))
+                return self
+
+            def commit(self):
+                return None
+
+        class FakeClient:
+            def __init__(self, by_collection):
+                self._by_collection = by_collection
+
+            def collection(self, name):
+                return FakeCollection(name, self._by_collection.get(name, []))
+
+        chunks = [
+            FakeDoc(f"sha-{i}", {
+                "source_title": "dissertacao.pdf",
+                "chunk_index": i,
+                "text_content": f"chunk {i} do documento",
+                "class": "documento_pessoal",
+                "group": "academico",
+                "theme": "machine_learning",
+                "owner_hash": "a" * 32,
+                "language": "pt-BR",
+                "created_at": "2026-07-30T00:00:00-03:00",
+            })
+            for i in range(3)
+        ]
+        client = FakeClient({plain_collection: chunks, plain_collection.replace("-plain", ""): []})
+        return client
+
+    def test_admin_knowledge_groups_by_source_title(self):
+        fake = self._fake_firestore_with_chunks("agent-knowledge-v2-plain")
+        with patch("agent_loader._get_firestore_client", return_value=fake):
+            resp = self.client.get("/admin/knowledge?limit=10", headers=self.headers)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        docs = body.get("documents", [])
+        assert len(docs) == 1
+        assert docs[0]["title"] == "dissertacao.pdf"
+        assert docs[0]["chunk_count"] == 3
+        assert docs[0]["klass"] == "documento_pessoal"
+        assert docs[0]["group"] == "academico"
+
+    def test_admin_knowledge_detail_returns_chunks(self):
+        fake = self._fake_firestore_with_chunks("agent-knowledge-v2-plain")
+        with patch("agent_loader._get_firestore_client", return_value=fake):
+            resp = self.client.get("/admin/knowledge/dissertacao.pdf", headers=self.headers)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        doc = body["document"]
+        assert doc["chunk_count"] == 3
+        assert len(doc["chunks"]) == 3
+        assert doc["chunks"][0]["chunk_index"] == 0
+        assert "chunk 0" in doc["chunks"][0]["text"]
+
+    def test_admin_knowledge_detail_404_when_missing(self):
+        fake = self._fake_firestore_with_chunks("agent-knowledge-v2-plain")
+        with patch("agent_loader._get_firestore_client", return_value=fake):
+            resp = self.client.get("/admin/knowledge/inexistente.pdf", headers=self.headers)
+        assert resp.status_code == 404
