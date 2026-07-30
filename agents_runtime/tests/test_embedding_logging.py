@@ -102,4 +102,5 @@ async def test_embed_documents_logs_partial_failure(caplog):
         and "failures=1" in r.message
         for r in caplog.records
     )
-    assert result is None
+    # Phase 4: partial success. 1 falha em 3 -> retorna 2 vectors.
+    assert result == [[0.1, 0.2, 0.3], [0.1, 0.2, 0.3]]
