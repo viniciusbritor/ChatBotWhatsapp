@@ -107,6 +107,17 @@ RAG_KEYWORDS_RAW = {
     "na sua memoria", "o que voce guardou", "o que voce armazenou",
     "o que voce memorizou", "recupere da base", "do que voce lembra",
     "lembre-se", "recorde",
+    "como memorizou", "como guardou", "como salvou",
+    "voce memorizou", "voce guardou", "voce salvou",
+    "vc memorizou", "vc guardou", "vc salvou",
+    "que guardou", "que salvou", "que memorizou",
+    "do que guardou", "do que salvou", "do que memorizou",
+    "qual arquivo", "qual doc", "que arquivo", "que doc",
+    "o arquivo que", "o doc que", "do arquivo", "do doc",
+    "sobre o arquivo", "sobre o doc", "no arquivo", "no doc",
+    "me fala sobre", "me mostra o", "me diga o",
+    "conteudo da introducao", "texto da introducao",
+    "introducao do", "conteudo do", "resumo do",
 }
 
 RAG_KEYWORDS = frozenset(_normalize(kw) for kw in RAG_KEYWORDS_RAW)
