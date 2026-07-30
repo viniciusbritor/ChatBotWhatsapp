@@ -969,6 +969,73 @@ async def admin_users_get(phone: str):
     return JSONResponse(content={"user": user})
 
 
+@app.post("/admin/users/{phone}/folder-permissions")
+async def admin_users_folder_permissions_grant(phone: str, request: Request):
+    """Grant (or blacklist) a folder permission for a user.
+
+    Body:
+        {"tool": "drive"|"gmail"|"calendar",
+         "pattern": "folder_id_or_email_or_*",
+         "scope": "whitelist"|"blacklist",
+         "created_by": "..."  (optional, defaults to admin-sa-token)}
+
+    Permissoes sao armazenadas em
+    usuarios/{phone}/folder_permissions/{permission_id}.
+    """
+    from core.folder_permissions import grant_folder_permission
+
+    body = await request.json()
+    tool = body.get("tool", "")
+    pattern = body.get("pattern", "")
+    scope = body.get("scope", "whitelist")
+    created_by = body.get("created_by", "admin-sa-token")
+    if not tool or not pattern:
+        raise HTTPException(
+            status_code=422, detail="tool e pattern obrigatorios",
+        )
+    try:
+        perm = grant_folder_permission(
+            phone=phone,
+            tool=tool,
+            pattern=pattern,
+            scope=scope,
+            created_by=created_by,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if perm is None:
+        raise HTTPException(
+            status_code=503, detail="firestore_unavailable",
+        )
+    return JSONResponse(content={"status": "ok", "permission": perm})
+
+
+@app.get("/admin/users/{phone}/folder-permissions")
+async def admin_users_folder_permissions_list(phone: str):
+    """Lista todas as permissoes do user."""
+    from core.folder_permissions import list_folder_permissions
+
+    return JSONResponse(
+        content={"phone": phone, "permissions": list_folder_permissions(phone)},
+    )
+
+
+@app.delete("/admin/users/{phone}/folder-permissions/{permission_id}")
+async def admin_users_folder_permissions_revoke(phone: str, permission_id: str):
+    """Revoga permissao por ID."""
+    from core.folder_permissions import revoke_folder_permission
+
+    ok = revoke_folder_permission(phone, permission_id)
+    if not ok:
+        raise HTTPException(
+            status_code=503,
+            detail="firestore_unavailable_or_not_found",
+        )
+    return JSONResponse(
+        content={"status": "ok", "phone": phone, "permission_id": permission_id},
+    )
+
+
 @app.get("/admin/groups")
 async def admin_groups_list(request: Request):
     """List groups where a phone is a member (for Portal)."""
