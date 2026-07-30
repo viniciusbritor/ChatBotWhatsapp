@@ -33,15 +33,18 @@ def test_parse_pdf_robust_uses_pypdf_first():
 
     pypdf_calls = []
 
-    def fake_pypdf(raw):
+    def fake_pypdf_with_tolerance(raw):
         pypdf_calls.append(len(raw))
-        return "texto do pypdf"
+        return ("texto do pypdf", 1, 1)
 
     def fake_pdfplumber(raw):
         return "texto do pdfplumber (NAO DEVE CHAMAR)"
 
-    with patch.object(pdf_extract, "_try_pypdf", new=fake_pypdf), \
-         patch.object(pdf_extract, "_try_pdfplumber", new=fake_pdfplumber):
+    with patch.object(
+        pdf_extract, "_try_pypdf_with_tolerance", new=fake_pypdf_with_tolerance,
+    ), patch.object(
+        pdf_extract, "_try_pdfplumber", new=fake_pdfplumber,
+    ):
         result = pdf_extract.parse_pdf_robust(b"fake pdf bytes")
 
     assert result == "texto do pypdf"
@@ -120,3 +123,96 @@ def test_parse_pdf_robust_returns_metadata():
     assert "file_size" in metadata
     assert "error_type" in metadata
     assert metadata["file_size"] == len(b"%PDF-1.4\nfake")
+
+
+def test_parse_pdf_robust_partial_extraction():
+    """Quando pypdf falha em uma pagina, retorna texto das paginas
+    anteriores e marca partial=True."""
+    from core import pdf_extract
+
+    def fake_pypdf_with_tolerance(raw):
+        return ("pagina 1\n\npagina 2\n\n", 2, 5)
+
+    with patch.object(
+        pdf_extract, "_try_pypdf_with_tolerance",
+        new=fake_pypdf_with_tolerance,
+    ):
+        text, metadata = pdf_extract.parse_pdf_robust(
+            b"corrupted pdf", return_metadata=True,
+        )
+
+    assert text == "pagina 1\n\npagina 2\n\n"
+    assert metadata["partial"] is True
+    assert metadata["pages_parsed"] == 2
+    assert metadata["pages_total"] == 5
+    assert metadata["parser"] == "pypdf"
+
+
+def test_parse_pdf_robust_complete_extraction_not_partial():
+    """Quando pypdf extrai TODAS as paginas com sucesso."""
+    from core import pdf_extract
+
+    def fake_pypdf_with_tolerance(raw):
+        return ("todas paginas", 5, 5)
+
+    with patch.object(
+        pdf_extract, "_try_pypdf_with_tolerance",
+        new=fake_pypdf_with_tolerance,
+    ):
+        text, metadata = pdf_extract.parse_pdf_robust(
+            b"valid pdf", return_metadata=True,
+        )
+
+    assert text == "todas paginas"
+    assert metadata["partial"] is False
+    assert metadata["pages_parsed"] == 5
+    assert metadata["pages_total"] == 5
+
+
+def test_parse_pdf_robust_partial_uses_fallback_when_empty():
+    """Quando pypdf (parcial) retorna vazio E pdfplumber tem texto,
+    cai para pdfplumber como fallback final."""
+    from core import pdf_extract
+
+    def fake_pypdf_with_tolerance(raw):
+        return ("", 0, 5)
+
+    def fake_pdfplumber(raw):
+        return "texto via pdfplumber"
+
+    with patch.object(
+        pdf_extract, "_try_pypdf_with_tolerance",
+        new=fake_pypdf_with_tolerance,
+    ), patch.object(
+        pdf_extract, "_try_pdfplumber", new=fake_pdfplumber,
+    ):
+        text, metadata = pdf_extract.parse_pdf_robust(
+            b"corrupted pdf", return_metadata=True,
+        )
+
+    assert text == "texto via pdfplumber"
+    assert metadata["parser"] == "pdfplumber"
+    assert metadata["partial"] is False
+
+
+def test_parse_pdf_robust_metadata_fields_complete():
+    """Metadata tem todos os campos esperados."""
+    from core import pdf_extract
+
+    def fake_pypdf_with_tolerance(raw):
+        return ("texto", 10, 10)
+
+    with patch.object(
+        pdf_extract, "_try_pypdf_with_tolerance",
+        new=fake_pypdf_with_tolerance,
+    ):
+        text, metadata = pdf_extract.parse_pdf_robust(
+            b"x" * 1024, return_metadata=True,
+        )
+
+    expected_fields = {
+        "parser", "file_size", "pages_total", "pages_parsed",
+        "error_type", "error_message", "partial",
+    }
+    assert set(metadata.keys()) == expected_fields
+    assert metadata["file_size"] == 1024

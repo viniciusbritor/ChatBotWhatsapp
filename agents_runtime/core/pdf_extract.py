@@ -28,11 +28,51 @@ logger = logging.getLogger(__name__)
 
 
 def _try_pypdf(raw: bytes) -> str:
+    """pypdf all-or-nothing. Captura log de aviso; pagina que falha
+    quebra o parser inteiro.
+
+    Para tolerancia a falha de uma unica pagina, veja
+    _try_pypdf_with_tolerance.
+    """
     from pypdf import PdfReader
 
     reader = PdfReader(io.BytesIO(raw))
     parts = [page.extract_text() or "" for page in reader.pages]
     return "\n".join(parts)
+
+
+def _try_pypdf_with_tolerance(raw: bytes) -> tuple[str, int, int]:
+    """Extrai texto pagina-a-pagina, retornando o que conseguir.
+
+    Returns:
+        (text, pages_parsed, pages_total)
+
+    Se a pagina 1 falha, retorna ("", 0, N). Se pagina N falha no
+    meio, retorna texto das paginas 1..N-1 concatenado.
+    """
+    from pypdf import PdfReader
+
+    reader = PdfReader(io.BytesIO(raw))
+    parts = []
+    pages_total = len(reader.pages)
+    pages_parsed = 0
+    for i, page in enumerate(reader.pages):
+        try:
+            txt = page.extract_text() or ""
+            parts.append(txt)
+            pages_parsed = i + 1
+        except Exception as exc:
+            logger.warning(
+                "pdf_extract page failed",
+                extra={
+                    "event_name": "pdf_extract_page_failed",
+                    "parser": "pypdf",
+                    "page_index": i,
+                    "error_type": type(exc).__name__,
+                },
+            )
+            break
+    return "\n".join(parts), pages_parsed, pages_total
 
 
 def _try_pdfplumber(raw: bytes) -> str:
@@ -57,10 +97,30 @@ def _try_pdfminer(raw: bytes) -> str:
 _PARSER_NAMES = ("pypdf", "pdfplumber", "pdfminer")
 
 
+def _count_pypdf_pages(raw: bytes) -> int:
+    try:
+        from pypdf import PdfReader
+
+        return len(PdfReader(io.BytesIO(raw)).pages)
+    except Exception:
+        return 0
+
+
+def _count_pdfplumber_pages(raw: bytes) -> int:
+    try:
+        import pdfplumber
+
+        with pdfplumber.open(io.BytesIO(raw)) as pdf:
+            return len(pdf.pages)
+    except Exception:
+        return 0
+
+
 def parse_pdf_robust(
     raw: bytes,
     *,
     return_metadata: bool = False,
+    allow_partial: bool = True,
 ) -> Any:
     """Tenta extrair texto do PDF com fallback entre parsers.
 
@@ -68,11 +128,14 @@ def parse_pdf_robust(
         raw: bytes do PDF
         return_metadata: se True, retorna (text, metadata_dict);
             se False, retorna apenas text (string).
+        allow_partial: se True, aceita texto parcial quando um
+            parser falha no meio (pypdf page-by-page tolerant).
+            Default True para maximizar recuperacao em PDFs malformados.
 
     Returns:
         - str: texto extraido (ou string vazia se todos os parsers falharem)
         - tuple: (text, metadata) com chaves: parser, file_size,
-          pages_total, pages_parsed, error_type, error_message
+          pages_total, pages_parsed, error_type, error_message, partial
 
     Logs estruturados em warn para cada falha de parser.
     """
@@ -83,36 +146,43 @@ def parse_pdf_robust(
         "pages_parsed": 0,
         "error_type": "",
         "error_message": "",
+        "partial": False,
     }
 
     text = ""
+
     for parser_name in _PARSER_NAMES:
-        parser_fn = globals()[f"_try_{parser_name}"]
-
-
-
         try:
+            if allow_partial and parser_name == "pypdf":
+                partial_text, parsed, total = _try_pypdf_with_tolerance(raw)
+                if partial_text:
+                    text = partial_text
+                    metadata["parser"] = parser_name
+                    metadata["pages_total"] = total
+                    metadata["pages_parsed"] = parsed
+                    metadata["partial"] = parsed < total
+                    if metadata["partial"]:
+                        logger.warning(
+                            "pdf_extract partial",
+                            extra={
+                                "event_name": "pdf_extract_partial",
+                                "parser": parser_name,
+                                "pages_parsed": parsed,
+                                "pages_total": total,
+                            },
+                        )
+                    break
+                continue
+
+            parser_fn = globals()[f"_try_{parser_name}"]
             text = parser_fn(raw)
             metadata["parser"] = parser_name
             if parser_name == "pypdf":
-                try:
-                    from pypdf import PdfReader
-
-                    metadata["pages_total"] = len(
-                        PdfReader(io.BytesIO(raw)).pages,
-                    )
-                    metadata["pages_parsed"] = metadata["pages_total"]
-                except Exception:
-                    pass
+                metadata["pages_total"] = _count_pypdf_pages(raw)
+                metadata["pages_parsed"] = metadata["pages_total"]
             elif parser_name == "pdfplumber":
-                try:
-                    import pdfplumber
-
-                    with pdfplumber.open(io.BytesIO(raw)) as pdf:
-                        metadata["pages_total"] = len(pdf.pages)
-                        metadata["pages_parsed"] = metadata["pages_total"]
-                except Exception:
-                    pass
+                metadata["pages_total"] = _count_pdfplumber_pages(raw)
+                metadata["pages_parsed"] = metadata["pages_total"]
             break
         except Exception as exc:
             metadata["error_type"] = type(exc).__name__
@@ -127,6 +197,31 @@ def parse_pdf_robust(
                 },
             )
             continue
+
+    if not text and allow_partial:
+        for parser_name in ("pypdf", "pdfplumber", "pdfminer"):
+            if parser_name == "pypdf":
+                continue
+            parser_fn = globals()[f"_try_{parser_name}"]
+            try:
+                text = parser_fn(raw)
+                if text:
+                    metadata["parser"] = parser_name
+                    metadata["error_type"] = ""
+                    if parser_name == "pdfplumber":
+                        metadata["pages_total"] = _count_pdfplumber_pages(raw)
+                        metadata["pages_parsed"] = metadata["pages_total"]
+                    logger.warning(
+                        "pdf_extract fallback used",
+                        extra={
+                            "event_name": "pdf_extract_fallback_used",
+                            "fallback_parser": parser_name,
+                            "file_size": metadata["file_size"],
+                        },
+                    )
+                    break
+            except Exception:
+                continue
 
     if return_metadata:
         return text, metadata
