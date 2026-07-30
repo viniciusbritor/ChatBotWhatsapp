@@ -546,7 +546,14 @@ async def _handle_attachment(
         )
         try:
             from agent_orchestration.knowledge_retriever import register_indexing
-            register_indexing(phone)
+            extra = payload.get("extra", {}) or {}
+            remote_jid = str(extra.get("remote_jid", ""))
+            if "@g.us" in remote_jid:
+                group_jid = remote_jid.split("@")[0] + "@g.us"
+                register_indexing(group_jid)
+                register_indexing(phone)
+            else:
+                register_indexing(phone)
         except Exception:
             pass
     elif status.startswith("drive_"):
@@ -1740,11 +1747,18 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
             ) or ""
         except Exception:
             recent_ctx = ""
+        extra = payload.get("extra", {}) or {}
+        remote_jid = str(extra.get("remote_jid", ""))
+        scope_key = (
+            remote_jid.split("@")[0] + "@g.us"
+            if "@g.us" in remote_jid
+            else payload.get("phone", "")
+        )
         try:
             intent["is_rag"] = await is_rag_query(
                 masked_text,
                 recent_context=recent_ctx,
-                phone=payload.get("phone", ""),
+                phone=scope_key,
             )
         except Exception:
             intent["is_rag"] = False

@@ -98,8 +98,6 @@ async def test_followup_greeting_is_not_rag():
 async def test_llm_tiebreaker_with_context(monkeypatch):
     """LLM tie-breaker recebe recent_context e retorna True
     para 'Sobre o que é esse documento?' apos indexing."""
-    from unittest.mock import AsyncMock
-
     from agent_orchestration.knowledge_retriever import is_rag_query
 
     fake_ctx = (
@@ -179,4 +177,96 @@ async def test_recent_indexing_does_not_affect_other_phone(monkeypatch):
     register_indexing(phone_a)
     assert await is_rag_query("oi", phone=phone_a) is True
     assert await is_rag_query("oi", phone=phone_b) is False
+
+
+@pytest.mark.asyncio
+async def test_busque_na_sua_base_is_rag():
+    """Keyword 'busque na sua base de conhecimento' (sugestao user 30/07)."""
+    assert await is_rag_query("busque na sua base de conhecimento sobre X") is True
+
+
+@pytest.mark.asyncio
+async def test_use_conhecimento_is_rag():
+    """Keyword 'use a base de conhecimento' (sugestao user 30/07)."""
+    assert await is_rag_query("use a base de conhecimento pra responder") is True
+
+
+@pytest.mark.asyncio
+async def test_o_que_voce_guardou_is_rag():
+    """Keyword 'o que voce guardou' (sugestao user 30/07)."""
+    assert await is_rag_query("o que voce guardou sobre vendas?") is True
+
+
+@pytest.mark.asyncio
+async def test_recupere_da_base_is_rag():
+    """Keyword 'recupere da base' (variante)."""
+    assert await is_rag_query("recupere da base o conteudo de 2024") is True
+
+
+@pytest.mark.asyncio
+async def test_recent_indexing_group_scope_forces_rag(monkeypatch):
+    """Qualquer membro do grupo pode consultar apos indexing.
+    Mesmo um phone NOVO (que nao upou o doc) deve virar RAG
+    enquanto o group_jid estiver recente."""
+    from unittest.mock import AsyncMock
+
+    from agent_orchestration.knowledge_retriever import (
+        _RECENT_INDEXING,
+        is_rag_query,
+        register_indexing,
+    )
+    _RECENT_INDEXING.clear()
+    monkeypatch.setattr(
+        "agent_orchestration.knowledge_retriever._looks_like_rag_query",
+        lambda t: False,
+    )
+    monkeypatch.setattr(
+        "agent_orchestration.knowledge_retriever._llm_is_rag_query",
+        AsyncMock(return_value=False),
+    )
+    group_jid = "120363012345678@g.us"
+    member_a = "+5511111111111"
+    member_b = "+5511222222222"
+    register_indexing(group_jid)
+    assert await is_rag_query("o que é isso?", phone=group_jid) is True
+    assert await is_rag_query("o que é isso?", phone=member_a) is False
+    assert await is_rag_query("o que é isso?", phone=member_b) is False
+
+
+@pytest.mark.asyncio
+async def test_recent_indexing_individual_does_not_affect_group(monkeypatch):
+    """Indexing de um phone NAO afeta outros phones (escopo 1:1)."""
+    from unittest.mock import AsyncMock
+
+    from agent_orchestration.knowledge_retriever import (
+        _RECENT_INDEXING,
+        is_rag_query,
+        register_indexing,
+    )
+    _RECENT_INDEXING.clear()
+    monkeypatch.setattr(
+        "agent_orchestration.knowledge_retriever._looks_like_rag_query",
+        lambda t: False,
+    )
+    monkeypatch.setattr(
+        "agent_orchestration.knowledge_retriever._llm_is_rag_query",
+        AsyncMock(return_value=False),
+    )
+    phone_individual = "+5511966830020"
+    phone_other = "+5511999999999"
+    register_indexing(phone_individual)
+    assert await is_rag_query("olá", phone=phone_individual) is True
+    assert await is_rag_query("olá", phone=phone_other) is False
+
+
+@pytest.mark.asyncio
+async def test_recent_indexing_window_default(monkeypatch):
+    """RECENT_INDEXING_WINDOW_SEC default deve ser 1800 (30min)."""
+    from agent_orchestration import knowledge_retriever
+
+    monkeypatch.setattr(
+        "agent_orchestration.knowledge_retriever.os.getenv",
+        lambda k, default=None: default,
+    )
+    assert knowledge_retriever.RECENT_INDEXING_WINDOW_SEC == 1800
 

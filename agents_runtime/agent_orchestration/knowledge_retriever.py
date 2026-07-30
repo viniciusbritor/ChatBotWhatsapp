@@ -101,6 +101,12 @@ RAG_KEYWORDS_RAW = {
     "quem é o autor", "qual o autor", "qual é o autor",
     "quem escreveu", "de quem é", "conteudo do",
     "conteudo da", "conteudo desse", "conteudo deste",
+    "busque na sua base", "busque na sua base de conhecimento",
+    "use conhecimento", "use a base de conhecimento",
+    "consulte a base", "pesquise na memoria",
+    "na sua memoria", "o que voce guardou", "o que voce armazenou",
+    "o que voce memorizou", "recupere da base", "do que voce lembra",
+    "lembre-se", "recorde",
 }
 
 RAG_KEYWORDS = frozenset(_normalize(kw) for kw in RAG_KEYWORDS_RAW)
@@ -112,26 +118,32 @@ QUESTION_KEYWORDS = {
 
 
 _RECENT_INDEXING: Dict[str, float] = {}
-RECENT_INDEXING_WINDOW_SEC = int(os.getenv("RECENT_INDEXING_WINDOW_SEC", "300"))
+RECENT_INDEXING_WINDOW_SEC = int(os.getenv("RECENT_INDEXING_WINDOW_SEC", "1800"))
 
 
-def register_indexing(phone: str) -> None:
-    """Marca que um documento foi indexado para este phone.
+def register_indexing(scope_key: str) -> None:
+    """Marca que um documento foi indexado para este scope.
 
-    Chamado pelo orchestrator apos sucesso de index_private_document
-    ou index_group_document. Mantido em memoria in-process para que
-    perguntas follow-up (<RECENT_INDEXING_WINDOW_SEC) sejam auto-RAG.
+    ``scope_key`` deve ser:
+    - phone (e.g. ``+5511966830020``) para conversa 1:1
+    - group_jid (e.g. ``120363...@g.us``) para conversa em grupo
+
+    No fluxo de grupo, o orchestrator registra TANTO o group_jid quanto
+    cada phone visto, para que qualquer membro possa consultar.
+
+    Janela definida por ``RECENT_INDEXING_WINDOW_SEC`` (default 1800s =
+    30min), configuravel via env var.
     """
-    if not phone:
+    if not scope_key:
         return
-    _RECENT_INDEXING[phone] = time.time()
+    _RECENT_INDEXING[scope_key] = time.time()
 
 
-def _had_recent_indexing(phone: str) -> bool:
-    """Retorna True se houve indexing para este phone nos ultimos N segundos."""
-    if not phone:
+def _had_recent_indexing(scope_key: str) -> bool:
+    """Retorna True se houve indexing para este scope nos ultimos N segundos."""
+    if not scope_key:
         return False
-    ts = _RECENT_INDEXING.get(phone)
+    ts = _RECENT_INDEXING.get(scope_key)
     if not ts:
         return False
     return (time.time() - ts) < RECENT_INDEXING_WINDOW_SEC
