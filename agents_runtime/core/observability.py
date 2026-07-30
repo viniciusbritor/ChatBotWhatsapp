@@ -27,7 +27,7 @@ import os
 import threading
 import time
 from contextlib import contextmanager
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List
 
 logger = logging.getLogger(__name__)
 
@@ -152,10 +152,14 @@ class LatencyTracker:
     def breakdown(self) -> Dict[str, Any]:
         if not self._enabled:
             return {}
+        from core.pricing import estimate_cost_usd
+
+        costs = self.costs()
         return {
             "total_ms": self.total_ms(),
             "stages": self.stages(),
-            "costs": self.costs(),
+            "costs": costs,
+            "cost_usd_estimated": estimate_cost_usd(costs),
         }
 
 
