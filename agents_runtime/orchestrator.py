@@ -2559,7 +2559,12 @@ def _error_response(status_code: int, error: str, message: str) -> Dict[str, Any
 
 
 async def _run_guard_graph(payload: Dict[str, Any], masked_text: str, intent: Dict[str, bool]) -> Dict[str, Any]:
-    """Run the LangGraph guard pipeline for a single turn.
+    """Run the guard pipeline for a single turn.
+
+    Fase A.2 (30/07/2026): substitui LangGraph StateGraph por chamada
+    direta aos nodes via ``run_guard_sync``. Mesma semantica, sem
+    overhead de CompiledStateGraph dispatch. Custo: ~-$0.10/mes
+    (menos CPU time em warm path).
 
     Returns a normalized decision dict with ``verdict`` (``allow`` /
     ``request_oauth`` / ``deny`` / ``noop``) and an optional ``reply``
@@ -2567,7 +2572,7 @@ async def _run_guard_graph(payload: Dict[str, Any], masked_text: str, intent: Di
     """
     try:
         from agent_orchestration.access_guardian import decide_guardian
-        from agent_orchestration.graph import build_graph
+        from agent_orchestration.graph import run_guard_sync
     except Exception as exc:
         logger.warning("agent_orchestration unavailable, skipping guard: %s", exc)
         return {"verdict": "noop", "trace": [], "reason": f"graph_unavailable:{exc}"}
@@ -2585,10 +2590,9 @@ async def _run_guard_graph(payload: Dict[str, Any], masked_text: str, intent: Di
     }
 
     try:
-        graph = build_graph()
-        final = await graph.ainvoke(initial_state) if hasattr(graph, "ainvoke") else graph.invoke(initial_state)
+        final = await run_guard_sync(initial_state)
     except Exception as exc:
-        logger.warning("guard graph execution failed: %s", exc)
+        logger.warning("guard sync execution failed: %s", exc)
         decision = decide_guardian(
             instance=payload.get("instance", ""),
             phone=payload.get("phone", ""),

@@ -384,6 +384,34 @@ def get_compiled_graph():
     return _compiled_graph
 
 
+async def run_guard_sync(initial_state: TurnState) -> TurnState:
+    """Same fluxo que ``run_turn`` mas sem LangGraph StateGraph.
+
+    O grafo compilado do LangGraph chama 5 nos sequencialmente:
+    jennifier -> classify_intent -> guardian -> (manager|reply) -> reply.
+
+    Este sync equivalente chama cada node diretamente via await.
+    Mantem a mesma semantica de trace + state.
+
+    Como o LangGraph ja executa nos sequencialmente em ainvoke(),
+    o ganho real e eliminar ~50ms de overhead do CompiledStateGraph
+    por turno (state dispatch, channel propagation). Sem mudanca de
+    comportamento observavel.
+
+    Usado por ``orchestrator._run_guard_graph`` desde 30/07/2026
+    (Fase A.2 do plano operacional).
+    """
+    state = dict(initial_state)
+    state = await jennifier_node(state)
+    state = await classify_intent_node(state)
+    state = await guard_node(state)
+    decision = state.get("guardian_decision") or {}
+    if decision.get("verdict") == "allow":
+        state = await manager_node(state)
+    state = await reply_node(state)
+    return state
+
+
 async def run_turn(initial_state: TurnState) -> TurnState:
     graph = get_compiled_graph()
     final = await graph.ainvoke(initial_state) if hasattr(graph, "ainvoke") else graph.invoke(initial_state)
