@@ -3,6 +3,11 @@
 > Documento persistente para retomada de sessão após restart da IDE.
 > Última atualização: 2026-07-30
 
+> **Fonte autoritativa de pendências** (ativas + histórico): este arquivo.
+> `docs/GUARDRAILS.md` §11 e `docs/ARQUITETURA.md` §11 foram reduzidos a
+> pointers para cá (commit batch dedup 30/07/2026). Pendências técnicas
+> só devem ser adicionadas aqui; não duplicar em outros docs.
+
 ## Resumo executivo
 
 **Branch atual:** `test`
@@ -173,6 +178,14 @@ FEATURE_FLAG_NAME = os.getenv("FEATURE_FLAG_NAME", "false").lower() == "true"
 | Runtime status vs pessoal | Média | Pendente Fase 5 |
 | OAuth + group multi-step | Baixa | Pendente Fase 5 |
 | Multi-intent write race | Alta (futuro) | Pendente Fase 4.1 |
+
+### Pendências técnicas legadas (carry-over pré-sessão)
+
+- [ ] **RAG backfill embeddings** sob o antigo `_owner_hash(phone)` (era `contatos/.../historico`).
+  Owner hash mudou para `sha256(phone_digits)[:32]` em migração F4'. Requer script
+  `scripts/backfill_owner_hash_embeddings.py` (não criado).
+- [ ] **`agents_runtime/README.md`** ainda menciona contagens antigas de testes/agentes.
+  Atualizar após Fase 0.5 estabilizar (próximo batch).
 
 ## Conta-gotas do que está em produção
 

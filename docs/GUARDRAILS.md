@@ -272,7 +272,12 @@ em Firestore plain (`message-history/{history_id}`) com indexação por
 
 ## 11. Pendências
 
-- Rotação efetiva das credenciais expostas no commit `ad6399a`.
-- Backfill de embeddings para novos `owner_hash` da coleção legada
-  `contatos/.../historico`.
-- Remoção completa do proxy `WhatsappAgente` e do serviço legado.
+> Pendências ativas e histórico de execução ficam em [`STATE.md`](../STATE.md) na
+> raiz do repo (single source of truth). Este arquivo documenta apenas
+> regras técnicas inegociáveis; itens que requerem ação do operador estão
+> consolidados em STATE.md para evitar drift entre docs.
+>
+> Itens resolvidos (Fase F, 21/07 → 30/07/2026): rotação de credenciais do
+> commit `ad6399a`, backfill de embeddings legacy, e remoção completa do
+> proxy `WhatsappAgente` + serviço legado. Permanecem em STATE.md como
+> histórico até serem explicitamente fechados.

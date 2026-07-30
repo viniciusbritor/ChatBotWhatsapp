@@ -499,9 +499,14 @@ Continua dentro do `agents-runtime` em `/admin/dashboard`. Agora:
 
 ## 11. Pendências conhecidas
 
-- Migração completa do proxy `WhatsappAgente` para descarte precisa de janela
-  com `agents-runtime-prod` pausado.
-- RAG por owner precisa de script de migração para backfill de embeddings já
-  gerados sob o antigo `_owner_hash(phone)`.
-- README em `agents_runtime/README.md` ainda menciona contagens antigas; será
-  atualizado após o deploy.
+> Lista autoritativa de pendências (ativas + histórico) vive em
+> [`STATE.md`](../STATE.md) na raiz do repo, atualizado a cada sessão.
+> Itens resolvidos e datas de fechamento estão lá.
+>
+> Itens remanescentes nesta versão (30/07/2026):
+> - RAG backfill de embeddings legados sob o antigo `_owner_hash(phone)` —
+>   trackado em STATE.md.
+> - `agents_runtime/README.md` menciona contagens antigas — trackado em STATE.md.
+>
+> Item resolvido desde o commit desta versão: WhatsappAgente + service
+> legado (`agents-runtime-prod` pausado, repo deletado).
