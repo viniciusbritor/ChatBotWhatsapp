@@ -89,11 +89,29 @@ class TestJennifierSystemPrompt:
         assert "nunca ironizar o usuario" in sp
 
     def test_version_incremented(self, jennifier_yaml):
-        assert jennifier_yaml.get("system_prompt_version") == 2
+        assert jennifier_yaml.get("system_prompt_version") == 3
 
     def test_includes_introspection_guidance(self, jennifier_yaml):
         sp = jennifier_yaml.get("system_prompt", "").lower()
         assert "quando perguntarem sobre sua propria arquitetura" in sp
+
+    def test_mentions_saudacao_brt(self, jennifier_yaml):
+        sp = jennifier_yaml.get("system_prompt", "").lower()
+        assert "saudacoes" in sp
+        assert "brt" in sp
+        assert "bom dia" in sp
+        assert "boa tarde" in sp
+        assert "boa noite" in sp
+
+    def test_mentions_pt_br_naturalidade(self, jennifier_yaml):
+        sp = jennifier_yaml.get("system_prompt", "").lower()
+        assert "pt-br" in sp or "portugues brasileiro" in sp
+        assert "naturalidade" in sp
+
+    def test_mentions_respostas_humanas(self, jennifier_yaml):
+        sp = jennifier_yaml.get("system_prompt", "").lower()
+        assert "respostas humanas" in sp
+        assert "curtas" in sp
 
 
 class TestRetrieverSystemPrompt:
