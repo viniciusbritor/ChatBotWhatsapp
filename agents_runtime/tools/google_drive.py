@@ -63,6 +63,7 @@ def _format_file(file: Dict[str, Any]) -> Dict[str, Any]:
 
 def _owner_guard(capability: str):
     from core.owner import deny_if_not_owner, resolve_owner
+    from core.owner_guard import check_folder_permission, post_filter_tool_result
 
     def decorator(func):
         @functools.wraps(func)
@@ -76,7 +77,11 @@ def _owner_guard(capability: str):
             denial = deny_if_not_owner(resolution, phone, capability)
             if denial is not None:
                 return denial
-            return await func(*args, **kwargs)
+            fp_denial = check_folder_permission(phone, capability, kwargs)
+            if fp_denial is not None:
+                return fp_denial
+            result = await func(*args, **kwargs)
+            return await post_filter_tool_result(phone, capability, result, kwargs)
         return wrapper
     return decorator
 
