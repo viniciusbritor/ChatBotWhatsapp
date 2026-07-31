@@ -31,8 +31,10 @@ from core.timezone import now_brt
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger("proactive_worker")
 
-WHATSAPP_AGENTE_URL = os.getenv("WHATSAPP_AGENTE_URL") or get_secret("WHATSAPP_AGENTE_URL")
-WHATSAPP_AGENTE_SA_TOKEN = os.getenv("AGENTS_RUNTIME_SA_TOKEN") or get_secret("AGENTS_RUNTIME_SA_TOKEN")
+# WhatsappAgente proxy removido em 23/07/2026; agora usamos Evolution API
+# direta (core.evolution_client.send_text). NAO HA mais dependencia em
+# whatsapp-agente-url nem em agents-runtime-sa-token nesta worker.
+# Removido em F6 (cleanup de PT6).
 
 PROACTIVE_RELEVANCE_MIN = 0.75
 MAX_PROACTIVE_PER_RUN = 5
@@ -140,39 +142,27 @@ def _get_contact_state(phone: str) -> Dict[str, Any]:
 
 
 async def send_proactive_message(phone: str, message: str, trigger: str, instance: str = "jennifer") -> bool:
-    """Send a proactive message via WhatsappAgente /send endpoint."""
+    """Send a proactive message via Evolution API (substituiu WhatsappAgente em 23/07/2026)."""
     if is_dry_run():
         logger.info(f"DRY-RUN: Would send to {phone}: {message[:60]}")
-        return False
-
-    if not WHATSAPP_AGENTE_URL or not WHATSAPP_AGENTE_SA_TOKEN:
-        logger.error("WhatsappAgente not configured")
         return False
 
     delay_ms = int(len(message.split()) * 600)
     delay_ms = min(delay_ms, 15000)
 
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                f"{WHATSAPP_AGENTE_URL.rstrip('/')}/send",
-                json={
-                    "phone": phone,
-                    "text": message,
-                    "instance": instance,
-                    "delay_ms": delay_ms,
-                },
-                headers={
-                    "Authorization": f"Bearer {WHATSAPP_AGENTE_SA_TOKEN}",
-                    "Content-Type": "application/json",
-                },
-            )
-            if resp.status_code == 200:
-                record_sent(phone)
-                logger.info(f"Proactive sent to {phone} (trigger={trigger})")
-                return True
-            logger.warning(f"Send failed: {resp.status_code}")
-            return False
+        from core import evolution_client as _evo
+
+        await _evo.send_text(
+            instance=instance,
+            phone=phone,
+            text=message,
+            delay_ms=delay_ms,
+            presence="composing",
+        )
+        record_sent(phone)
+        logger.info(f"Proactive sent to {phone} (trigger={trigger})")
+        return True
     except Exception as e:
         logger.error(f"Send exception: {e}")
         return False

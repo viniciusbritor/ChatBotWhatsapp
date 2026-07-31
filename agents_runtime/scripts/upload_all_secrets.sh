@@ -37,6 +37,7 @@ upload "google-oauth-token" "${GOOGLE_OAUTH_TOKEN_PATH}"
 upload "agents-runtime-sa-token" "${AGENTS_RUNTIME_SA_TOKEN:-$(openssl rand -hex 32)}"
 upload "whatsapp-agente-url" "${WHATSAPP_AGENTE_URL:-https://whatsapp-agente-test-XXX-uc.a.run.app}"
 upload "agents-runtime-url" "${AGENTS_RUNTIME_URL:-https://agents-runtime-test-XXX-uc.a.run.app}"
+# whatsapp-agente-url removido em F6 (PT6) - proxy morto desde 23/07/2026
 
 # 4. Evolution API (projeto whatsapp-server-fs)
 echo ""
