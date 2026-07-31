@@ -60,6 +60,103 @@ Loop PT6 em 4 frentes:
 
 **+40 testes, -3 falhas (testes flaky pré-existentes agora passam).**
 
+## 31/07/2026 — Regra Unificada de Acesso a Conhecimento + bug `is_drive` (keyword patch)
+
+### Contexto
+Usuario pediu:
+1. Atualizar `docs/ARQUITETURA.md`, `docs/HARNESS.md`, `docs/GUARDRAILS.md`
+   para resolver a dúvida sobre o acesso a base de conhecimento.
+2. Tratar como **bug real** a divergência entre o classificador largo
+   de `orchestrator.DRIVE_KEYWORDS` (372-380) e o classificador estrito
+   de `agent_orchestration.graph._keyword_classify` (PT8).
+3. Documentar a **regra simplificada** de acesso:
+   - "base de conhecimento" → Firestore Vector (leitura e escrita).
+   - "drive" / "gdrive" / "onedrive" → avaliar Drive; owner com
+     acesso (leitura e escrita).
+   - **Grupo**: base de conhecimento é comum; Drive/Gmail/Calendar
+     podem ser pessoais (consent via `pending_action`) ou do grupo.
+   - Qualquer outra coisa → `message-history` plain (chat memory).
+4. Smoke test **somente remoto** (Cloud Run test).
+
+### Mudancas principais
+
+- **`agents_runtime/orchestrator.py`** (BUGFIX): `DRIVE_KEYWORDS` foi
+  estreitado para conter apenas nomes de serviço de storage
+  (`drive`, `gdrive`, `onedrive`, `dropbox`, `google drive`,
+  `meu drive`, `no drive`, `no gdrive`, `salvar no drive`,
+  `salvar no gdrive`, `manda pra mim`, `envia pra mim`, `lista
+  os arquivos`, `lista os arquivos do drive`, `dentro desse drive`,
+  `nesse drive`, `dentro desse gdrive`, `nesse gdrive`, `dentro do
+  drive`). Tokens genéricos (`documento`, `pdf`, `docx`, `xlsx`,
+  `ata`, `arquivo`, `pasta`, `planilha`, `relatorio`, `minuta`,
+  `upload`, `leia o arquivo`, `leia a ata`, `abra o arquivo`)
+  ficaram em `DRIVE_KEYWORDS_REMOVED` (não usados) e continuam
+  cobertos por `attachment_save_kw` / `attachment_file_kw` quando
+  há anexo em processamento. Resultado: queries como "quais
+  documentos você tem na sua base de conhecimento?" agora acertam
+  `is_rag=True` em vez de cair em `manager-drive`.
+
+- **`docs/ARQUITETURA.md`** (documentação canônica):
+  - Cabeçalho com "Última revisão: 2026-07-31".
+  - **Nova §0.0.4** "Regra Unificada de Acesso a Conhecimento"
+    (Mermaid) — switch RAG vs Drive vs Chat + branch de grupo
+    (`pending_action group_consent` para capacidades pessoais).
+  - §0.1 passo 7: trocou "Owner Guard valida…" por `access_guardian`
+    com regra de grupo.
+  - §4 Componentes: incluí `agent-knowledge-router` (Fase G),
+    `agent-knowledge-retriever` (Fase H), `agent-categorizer`
+    (Fase F4d.6).
+  - §6 Coleções Firestore: parágrafo canônico do escopo
+    `owner_hash` (privado) vs `group_hash` (grupo), com regra
+    de `share_private_knowledge_in_group`.
+
+- **`docs/HARNESS.md`**:
+  - Cabeçalho com "Última revisão: 2026-07-31" + nota do patch de
+    keywords.
+  - Estrutura de Diretórios: incluído `agent_orchestration/`
+    (graph, jennifier, access_guardian, knowledge_router,
+    knowledge_retriever, categorizer).
+  - **Nova seção "Regra de Acesso a Conhecimento"** antes de
+    "Autenticação e Segredos": tabela canônica RAG / Drive / Chat
+    memory + regra de grupo + lista de env vars relacionadas +
+    keywords removidas.
+
+- **`docs/GUARDRAILS.md`**:
+  - Cabeçalho com "Última atualização: 2026-07-31".
+  - §1 Segurança: bullet do `access_guardian` reescrito para incluir
+    regra de grupo (`pending_action group_consent`).
+  - **Nova §8.1 "Regra de Acesso a Conhecimento (Unificada)"**:
+    switch por turno (excludente), patch de keywords, auditoria
+    de violação.
+  - §7 Firestore Vector: bullet reforçando que `agent-knowledge-v2`
+    vs `group-knowledge-v2` são coleções **separadas** com regras
+    de filtro distintas. Corrigido o bullet "Anexo de grupo
+    memorizado usa `collective-knowledge-v2`" (era o
+    comportamento antigo; agora é `group-knowledge-v2`).
+
+### Validacao
+
+| Suite | Antes | Depois |
+|---|---|---|
+| `tests/test_orchestrator.py` | (baseline) | passou |
+| `tests/test_orchestrator_multi_intent.py` | (baseline) | passou |
+| `tests/test_orchestrator_multi_agent.py` | (baseline) | passou |
+| `tests/test_agent_orchestration.py` | (baseline) | passou |
+| `tests/test_rag_routing_pt8.py` | (baseline) | passou |
+| `pytest -q tests/` (full) | 8 failed, 788 passed, 34 skipped | **8 failed, 788 passed, 34 skipped** (mesmas 8 falhas pré-existentes — lógica de retriever routing, não keywords) |
+
+**Zero regressão.** As 8 falhas pré-existentes precedem este patch
+(todas no script do retriever, sem relação com `DRIVE_KEYWORDS`).
+Track em STATE.md.
+
+### Pendencias externas
+- Smoke test em Cloud Run test contra 4 cenários (RAG / Drive /
+  Drive em grupo / Chat) — ver `scripts/smoke_access_rule.py`.
+- Quem tem o **acesso liberado** (proprietário da instância
+  `Jennifer`) já está pronto: o `access_guardian` retorna `allow`
+  direto em qualquer capability Google. Demais telefones recebem
+  `owner_only_capability` ou link OAuth.
+
 
 
 > Historico cronologico de decisoes tecnicas, alteracoes e bugs para evitar reincidencia.

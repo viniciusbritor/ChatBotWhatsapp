@@ -1,7 +1,7 @@
 # Guardrails e Regras Inegociáveis — ChatBotWhatsapp
 
 > Regras DURAS que todos os agentes IA e humanos devem obedecer neste projeto.
-> Última atualização: **2026-07-25**.
+> Última atualização: **2026-07-31**.
 
 ## 1. Segurança
 
@@ -41,7 +41,11 @@
   LangGraph (`agent_orchestration.graph`) antes de cada tool call. O guard
   determinístico `core.owner_guard` foi **descontinuado** — toda checagem de
   owner + OAuth + scopes agora flui pelo agente. Tools Google podem confiar
-  que o guard já autorizou.
+  que o guard já autorizou. Em **grupo**, capabilities pessoais do owner
+  (`is_drive`/`is_email`/`is_calendar`) só executam para membro confirmado
+  (`grupos/{jid}/membros/{phone}.confirmed=true`); caso contrário, o
+  orchestrator cria `pending_action group_consent` (TTL 300 s) antes de
+  bloquear a execução.
 
 ## 2. Privacidade (LGPD)
 
@@ -124,8 +128,8 @@ em Firestore plain (`message-history/{history_id}`) com indexação por
 - `scripts/ingest_owner_knowledge.py` e `scripts/ingest_collective_memory.py`,
   além do handler explícito de anexos, aplicam embedding + Firestore Vector.
 - Anexo individual memorizado usa `agent-knowledge-v2` e filtro por `owner_hash`.
-- Anexo de grupo memorizado usa `collective-knowledge-v2` com `group_hash`; não
-  usa o `owner_hash` como escopo de leitura.
+- Anexo de grupo memorizado usa `group-knowledge-v2` com `group_hash`;
+  leitura exige `phone` ser membro ativo (`grupos/{jid}/membros/{phone}.is_active=true`).
 - `search_conversation_memory()` lê **plain** Firestore filtrando
 
   `where("owner_hash", ==, _owner_hash(phone))` e ordena por
@@ -133,6 +137,15 @@ em Firestore plain (`message-history/{history_id}`) com indexação por
 - A coleção vetorial legada `conversation-memory-v2` não é mais
   alimentada em produção; pode ser removida após confirmação das novas
   gravações.
+- `agent-knowledge-v2` (escopo privado) e `group-knowledge-v2` (escopo
+  de grupo) são coleções **separadas** com regras de filtro
+  distintas:
+  - `agent-knowledge-v2`: `where owner_hash == owner_id(inbound)`.
+  - `group-knowledge-v2`: `where group_hash == sha256(group_jid)[:32]`
+    e exige `phone` constar em `grupos/{jid}/membros/{phone}.is_active=true`.
+  - Cruzar source privada → grupo exige `pending_action
+    share_private_knowledge_in_group` (TTL 300 s,
+    `PENDING_ACTION_TTL_SEC`).
 - `index_group_document` não usa teto rígido para chunks ou para o
   tamanho do texto. Acima dos tetos saudáveis (`RAG_GROUP_CHUNKS_SOFT_LIMIT=500`,
   `RAG_GROUP_CHARS_SOFT_LIMIT=1_000_000`), o retorno inclui `truncated=True`
@@ -236,6 +249,81 @@ em Firestore plain (`message-history/{history_id}`) com indexação por
 - Apenas o telefone do proprietário da instância pode chamar Gmail/Drive.
 - Revogação disponível via `POST /oauth/google` (re-login) ou remoção
   manual no Firestore `usuarios/{phone}`.
+
+## 9. Código e operação
+
+- Sem `$` solto em código, mensagens ou documentação (conflito LaTeX).
+- Sem comentários no código.
+- 5 tentativas por erro específico antes de parar e reportar.
+- Documentação canônica: somente `docs/` na raiz. `agents_runtime/docs/` é
+  histórico e será removido.
+- Hot-reload de `agents/skills/tools` em ≤ 2 min sem rebuild (polling
+  120 s).
+- `embedding_model` no documento identifica época; mudança exige
+  re-indexação completa.
+- `response_identity` externa é sempre Jennifer; IDs internos ficam apenas
+  na metadata protegida.
+- `pending_action` é obrigatório para confirmar consentimento.
+
+## 8.1. Regra de Acesso a Conhecimento (Unificada) — 31/07/2026
+
+**Canônico:** [`ARQUITETURA.md §0.0.4`](./ARQUITETURA.md#004-regra-unificada-de-acesso-a-conhecimento-31072026).
+
+A cada turno o `orchestrator._detect_intent()` aplica **uma única
+classificação** por keywords. O `_resolve_agents_for_intents` resolve
+o agente. O `access_guardian` valida owner + OAuth + scopes para
+capacidades Google. Em grupo, há regras de consent adicional.
+
+### Switch por turno (excludente)
+
+1. **RAG (base de conhecimento)** — se a mensagem contém keyword
+   RAG (`base de conhecimento`, `memorizou`, `quais documentos`,
+   `esse documento`, `knowledge base`, `qual arquivo`, `vc guardou`,
+   `o que você salvou`, `lembra disso`, etc.), o caminho é
+   `agent-knowledge-retriever`. Storage:
+   - privado → `agent-knowledge-v2` filtrado por `owner_hash`.
+   - grupo (membro) → `group-knowledge-v2` filtrado por `group_hash`.
+   - privado com hit em grupo → `pending_action
+     share_private_knowledge_in_group` (TTL 300 s) antes de compartilhar.
+2. **Drive** — se a mensagem contém keyword estritamente de storage
+   (`drive`, `gdrive`, `onedrive`, `dropbox`, `salvar no drive`,
+   `manda pra mim`, `guarda no drive`, `lista os arquivos do drive`,
+   `dentro desse drive`, `nesse drive`, etc.), o caminho é
+   `manager-drive` + `access_guardian`. Storage:
+   - privado (1:1) → Drive do owner (subject a scope `drive.read` ou
+     `drive.write`).
+   - grupo (membro confirmado) → Drive do owner ou pasta do grupo
+     (`grupos/{jid}.drive_folder_id`).
+   - grupo (membro não confirmado) → `pending_action group_consent`
+     (TTL 300 s) antes de bloquear.
+3. **Chat memory** — qualquer outra mensagem. Vai direto para
+   `jennifier` (LLM). O histórico fica em `message-history/{id}`
+   (Firestore **plain**, sem embedding) com `owner_hash` derivado.
+
+### Keyword patch (31/07/2026)
+
+`orchestrator.DRIVE_KEYWORDS` foi estreitado para conter apenas
+nomes de serviço de storage e expressões que **explicitam** o
+destino Drive. Isso evita conflito com o `agent-knowledge-retriever`:
+queries como "quais documentos você tem na sua base de
+conhecimento?" agora acertam `is_rag=True` em vez de cair
+erroneamente em `manager-drive`.
+
+Tokens genéricos (`documento`, `pdf`, `docx`, `xlsx`, `ata`,
+`arquivo`, `pasta`, `planilha`, `relatorio`, `minuta`, `upload`)
+foram movidos para `DRIVE_KEYWORDS_REMOVED` (não usados) e continuam
+cobertos por `attachment_save_kw` / `attachment_file_kw` quando há
+anexo em processamento.
+
+### Auditoria de violação
+
+- `python -m pytest -q tests/test_orchestrator.py
+  tests/test_agent_orchestration.py tests/test_rag_routing_pt8.py`
+  garante que a unidade de classificação (`_detect_intent` /
+  `classify_intent_node`) preserva a regra.
+- `scripts/smoke_access_rule.py` (manual, Cloud Run test) exercita
+  os 4 cenários ponta-a-ponta contra o `agents-runtime-test`
+  implantado.
 
 ## 9. Código e operação
 

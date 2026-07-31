@@ -2,6 +2,11 @@
 
 > **Ambiente Operacional:** Instrucoes para configurar, executar e depurar o modulo `omnichannel-agentes` + servico `agents_runtime`.
 
+> **Última revisão:** 2026-07-31. **Regra unificada de acesso a conhecimento**
+> (RAG vs Drive vs Chat memory, com branch de grupo) — ver
+> [`docs/ARQUITETURA.md §0.0.4`](./ARQUITETURA.md#004-regra-unificada-de-acesso-a-conhecimento-31072026)
+> e [`docs/GUARDRAILS.md`](./GUARDRAILS.md).
+
 > **Diagrama visual ponta a ponta:** [`ARQUITETURA.md`](./ARQUITETURA.md#0-diagrama-visual-ponta-a-ponta).
 > O diagrama mostra o caminho `WhatsApp → Evolution → Cloud Run →
 > Pub/Sub → Orchestrator → Evolution → resposta` com Firestore plain
@@ -21,6 +26,18 @@
 > mestre; `access_guardian` e o subagente que valida owner + OAuth + scopes
 > antes de cada tool Google. Tools Google podem confiar que o guard já
 > autorizou. O guard determinístico `core.owner_guard` foi descontinuado.
+
+> **Importante — Patch de keywords 31/07/2026:** `orchestrator.DRIVE_KEYWORDS`
+> foi estreitado para conter apenas nomes de serviço de storage
+> (`drive`, `gdrive`, `onedrive`, `dropbox`, `google drive`, `meu drive`,
+> `no drive`, `salvar no drive`, `manda pra mim`, etc.) e expressões
+> que **explicitam** o destino Drive. Tokens genéricos (`documento`,
+> `pdf`, `docx`, `xlsx`, `ata`, `arquivo`, `pasta`, `planilha`,
+> `relatorio`, `minuta`, `upload`) ficaram em `DRIVE_KEYWORDS_REMOVED`
+> (não usados) e continuam cobertos por `attachment_save_kw` /
+> `attachment_file_kw` quando há anexo. Resultado: queries como "quais
+> documentos você tem na sua base de conhecimento?" agora acertam
+> `is_rag=True` em vez de cair em `manager-drive`.
 
 ## GCP Project & Recursos
 
@@ -298,6 +315,13 @@ ChatBotWhatsapp/
     ├── main.py                        # webhook / /pubsub/push / /admin/*
     ├── orchestrator.py                # roteamento Jennifer + tool loop legacy
     ├── agent_loader.py                # snapshot Firestore
+    ├── agent_orchestration/           # grafo LangGraph + subagentes (Fase H+)
+    │   ├── graph.py                   # StateGraph: jennifier -> classify -> guardian -> manager -> reply
+    │   ├── jennifier.py               # identidade + system prompt do mestre
+    │   ├── access_guardian.py         # decide owner + OAuth + scopes
+    │   ├── knowledge_router.py        # (Fase G) skill de anexo por MIME + keywords
+    │   ├── knowledge_retriever.py     # (Fase H) decide escopo RAG + retorna chunks
+    │   └── categorizer.py             # (Fase F4d.6) class/group/theme via LLM
     ├── langchain_adapter/             # wrapper estável (Fase M)
     │   ├── __init__.py
     │   └── tools.py                   # @tool wrapper (LangChain 1.x)
@@ -311,10 +335,10 @@ ChatBotWhatsapp/
     │   ├── evolution_webhook.py        # extrator canonico
     │   ├── message_ledger.py           # idempotencia Firestore
     │   ├── pubsub_dispatcher.py        # lease + retry transitorio
-    │   ├── pubsub_publisher.py         # publish chatbotwhatsapp-messages
-    │   ├── pubsub_consumer.py          # shim de compatibilidade
-    │   ├── audio_transcribe.py         # Whisper + Gemini fallback
-    │   ├── owner.py / owner_guard.py  # guard Gmail/Drive/Calendar
+    │   ├── pubsub_publisher.py        # publish chatbotwhatsapp-messages
+    │   ├── pubsub_consumer.py        # shim de compatibilidade
+    │   ├── audio_transcribe.py        # Whisper + Gemini fallback
+    │   ├── owner.py                   # resolucao owner (access_guardian valida escopos)
     │   ├── module_ui.py                # painel /admin/dashboard
     │   ├── rag.py                      # embeddings OpenAI
     │   ├── llm_provider.py
@@ -538,13 +562,78 @@ cd agents_runtime
 pytest -q                                  # backend
 ```
 
+## Regra de Acesso a Conhecimento (31/07/2026)
+
+> **Canônico:** [`docs/ARQUITETURA.md §0.0.4`](./ARQUITETURA.md#004-regra-unificada-de-acesso-a-conhecimento-31072026)
+> e [`docs/GUARDRAILS.md`](./GUARDRAILS.md). O runtime decide **uma
+> única camada por turno** com base em keywords. Não há fallback neste
+> switch: cada caminho é excludente.
+
+### Switch por turno
+
+| User disse | Camada | Storage / Endpoint | Quem decide |
+|---|---|---|---|
+| "base de conhecimento", "memorizou", "qual arquivo", "esse documento", "knowledge base", "vc guardou", "o que você salvou" | **RAG** | `agent-knowledge-v2` (privado, `owner_hash`) ou `group-knowledge-v2` (grupo, `group_hash`) | `agent-knowledge-retriever` (Fase H) |
+| "drive", "gdrive", "onedrive", "dropbox", "salvar no drive", "manda pra mim", "guarda no drive", "lista os arquivos do drive" | **Drive** | Google Drive via OAuth per-user | `manager-drive` + `access_guardian` |
+| Qualquer outra coisa (saudação, comandos, status, agente info) | **Chat memory** | `message-history/{id}` (Firestore plain, sem embedding) | `jennifier` (LLM direto) |
+
+### Regra de grupo (branch)
+
+- **RAG do grupo** = `group-knowledge-v2`, filtro `group_hash`. Acesso
+  negado se o telefone não for membro (`!_is_user_member`).
+- **Drive/Gmail/Calendar pessoais do owner** em grupo = `pending_action
+  group_consent` (TTL 300 s) antes de devolver conteúdo. Membro
+  confirmado segue direto.
+- **Drive do grupo** (pasta dedicada com `drive_folder_id`) = escopo
+  compartilhado, sem consent adicional. Configurado via
+  `tools/group.set_group_drive_folder`.
+
+### Smoke test (somente remoto)
+
+```bash
+# Cloud Run test (depois do deploy via trigger push em test)
+python agents_runtime/scripts/smoke_access_rule.py
+```
+
+Roda 4 cenários contra o serviço implantado e loga `intent` resolvido
++ `agent_id` escolhido. **Não roda em CI** — foi feito para validação
+manual contra o `agents-runtime-test`.
+
+### Variáveis de ambiente relacionadas
+
+Já em `agents_runtime/.env.runtime.test.yaml` (HARNESS §"Variaveis
+de Ambiente"):
+
+- `RAG_RETRIEVE_K=10` e `RAG_RETRIEVE_MIN_SCORE=0.7` (Fase F4d.6).
+- `RAG_PRIVATE_CHUNKS_SOFT_LIMIT=500` e `RAG_PRIVATE_CHARS_SOFT_LIMIT=1000000`.
+- `RAG_GROUP_CHUNKS_SOFT_LIMIT=500` e `RAG_GROUP_CHARS_SOFT_LIMIT=1000000`.
+- `RECENT_INDEXING_WINDOW_SEC=1800` (Fase H — força `is_rag=True` por
+  30 min após indexing).
+
+### Keywords removidas de `DRIVE_KEYWORDS` em 31/07/2026
+
+Tokens que viraram `DRIVE_KEYWORDS_REMOVED` (não usados mais como
+keyword de Drive):
+
+```
+documento, documentos, arquivo, arquivos, pasta, upload,
+omnichannel, atividades, baixar, encontrar arquivo, meus
+arquivos, meus documentos, buscar arquivo, procurar
+documento, ata, minuta, relatorio, apresentação, apresentacao,
+docx, pdf, xlsx, planilha, leia o arquivo, leia a ata, abra o
+arquivo.
+```
+
+Eles são cobertos por `attachment_save_kw` / `attachment_file_kw`
+quando há anexo em processamento. Para anexos sem texto explícito
+("memorizar", "guardar"), o `agent-knowledge-router` decide via
+MIME + tie-breaker LLM.
+
 ## Autenticação e Segredos
 
 - **Local dev:** `.env` (gitignored) + fallback para `secrets_manager.py`
 - **Cloud Run:** `--set-secrets` em `cloudbuild.yaml` referencia segredos do Secret Manager
-- **Nunca:** hardcoded keys em código (regra global + GUARDRAILS)
-
-### Lista de secrets ativos (23/07/2026)
+- **Nunca:** hardcoded keys em código (regra global + GUARDRAILS)### Lista de secrets ativos (23/07/2026)
 
 | Secret | Consumer | Status |
 |---|---|---|

@@ -1,10 +1,12 @@
 # Arquitetura — ChatBotWhatsapp (Agentes Omnichannel)
 
-> Última revisão: **2026-07-23** — diagrama visual completo do caminho
+> Última revisão: **2026-07-31** — diagrama visual completo do caminho
 > ponta-a-ponta (WhatsApp → resposta) com Firestore plain para
 > histórico de chat, Firestore Vector para documentos e anexos memorizados
 > com escopo individual ou de grupo, e grafo
 > **LangGraph** para a orquestração Jennifer → Access Guardian → Manager.
+> **Regra unificada de acesso a conhecimento** (RAG vs Drive vs Chat
+> memory, com branch de grupo) documentada em §0.0.4.
 > Ver `docs/DIARIO_BORDO.md` para o histórico completo do dia.
 
 ## 0. Diagrama visual (ponta a ponta)
@@ -261,7 +263,73 @@ flowchart LR
     class ACK paral
 ```
 
-### 0.0.1. Grafo LangGraph (Fase H)
+### 0.0.4. Regra Unificada de Acesso a Conhecimento (31/07/2026)
+
+```mermaid
+flowchart TD
+    U["user: mensagem"] --> K{"keywords?"}
+    K -->|"base de conhecimento,<br/>memorizou, esse documento,<br/>qual arquivo, what did you save"| RAG["agent-knowledge-retriever"]
+    K -->|"drive, gdrive, onedrive, dropbox,<br/>salvar no drive, manda pra mim"| DRV["manager-drive + access_guardian"]
+    K -->|outras| CHAT["jennifier (LLM) +<br/>message-history plain"]
+
+    RAG --> RAGP{"escopo?"}
+    RAGP -->|"privado (1:1)"| RAGP1["agent-knowledge-v2<br/>filtro owner_hash"]
+    RAGP -->|"grupo (membro)"| RAGG["group-knowledge-v2<br/>filtro group_hash"]
+    RAGP -->|"grupo + sem hits privados"| RAGX["pending_action<br/>share_private_knowledge_in_group"]
+
+    DRV --> DRVG{"escopo?"}
+    DRVG -->|"privado (1:1)"| DRVP["manager-drive<br/>+ access_guardian allow"]
+    DRVG -->|"grupo + owner confirmou"| DRVG1["manager-drive<br/>+ access_guardian allow"]
+    DRVG -->|"grupo + owner NAO confirmou<br/>OR membro NAO confirmado"| DRVX["pending_action<br/>group_consent (TTL 300s)"]
+
+    CHAT --> MEM["message-history/{id}<br/>Firestore plain, owner_hash"]
+
+    classDef rag fill:#d9ead3,stroke:#38761d,color:#000
+    classDef drive fill:#fff2cc,stroke:#bf9000,color:#000
+    classDef chat fill:#cfe2f3,stroke:#1f6feb,color:#000
+    classDef pend fill:#f4cccc,stroke:#cc0000,color:#000
+    class RAG,RAGP,RAGP1,RAGG rag
+    class DRV,DRVG,DRVP,DRVG1 drive
+    class CHAT,MEM chat
+    class RAGX,DRVX pend
+```
+
+**Como funciona**: a cada turno, o `orchestrator.py::_detect_intent()`
+aplica 3 listas de keywords (estritas, pós-patch 31/07/2026) e marca
+`is_rag`, `is_drive` ou nenhum dos dois. O `_resolve_agents_for_intents`
+decide o agente; o `access_guardian` valida owner+OAuth+scopes quando
+envolve Google (Drive/Gmail/Calendar).
+
+| Camada | Trigger | Storage | Agente |
+|---|---|---|---|
+| **RAG** | "base de conhecimento", "memorizou", "esse documento", "qual arquivo", "knowledge base", "vc guardou" | `agent-knowledge-v2` (1:1, `owner_hash`) ou `group-knowledge-v2` (grupo, `group_hash`) | `agent-knowledge-retriever` |
+| **Drive** | "drive", "gdrive", "onedrive", "dropbox", "salvar no drive", "manda pra mim", "guarda no drive" | Google Drive via OAuth per-user | `manager-drive` + `access_guardian` |
+| **Chat memory** | qualquer outra mensagem (saudação, comandos, status, agente info) | `message-history` (Firestore **plain**, sem embedding) | `jennifier` (LLM direto) |
+
+**No grupo (regra de consent)**:
+- RAG do grupo = `group-knowledge-v2`, filtro `group_hash`. Acesso
+  negado se o telefone não for membro do grupo.
+- Drive/Gmail/Calendar **pessoais** em grupo = `pending_action
+  group_consent` (TTL 300s) antes de devolver conteúdo. Membro
+  confirmado segue direto.
+- Drive do **grupo** (pasta dedicada) = escopo compartilhado, sem
+  consent adicional.
+
+**Keyword patch (31/07/2026)**: `orchestrator.DRIVE_KEYWORDS` foi
+estreitado para conter **apenas** nomes de serviço de storage
+(`drive`, `gdrive`, `onedrive`, `dropbox`, `google drive`, `meu drive`,
+`no drive`, `salvar no drive`, `manda pra mim`, etc.) e expressões
+que **explicitam** o destino Drive (`dentro desse drive`, `nesse
+drive`, `lista os arquivos do drive`). Tokens genéricos
+(`documento`, `pdf`, `docx`, `xlsx`, `ata`, `arquivo`, `pasta`,
+`planilha`, `relatorio`, `minuta`, `upload`) ficaram em
+`DRIVE_KEYWORDS_REMOVED` (não usados) e continuam cobertos pelo
+`attachment_save_kw` / `attachment_file_kw` quando o handler de
+anexo é acionado. Resultado: queries como "quais documentos você
+tem na sua base de conhecimento?" agora acertam `is_rag=True` em
+vez de cair em `manager-drive`.
+
+
 
 ```mermaid
 flowchart LR
@@ -285,7 +353,7 @@ flowchart LR
 | 4 | `webhook` | Publica em `chatbotwhatsapp-messages` e devolve `200 OK` imediatamente. |
 | 5 | `push` | `ledger.claim` — pega lease de 120 s. |
 | 6 | `orchestrator` | Detecta intenção, escolhe agente principal, prefetch Calendar/Email/Drive. |
-| 7 | `tools` | Owner Guard valida que o telefone é o `owner_phone` da conta antes de chamar Gmail/Drive/Calendar. |
+| 7 | `access_guardian` | Subagente do grafo LangGraph que valida owner (`phone == owner_phone` da instância) + token OAuth per-user + scopes Google (`drive.read` / `drive.write` / `calendar` / `gmail`). Em grupo, pessoal (`is_drive`/`is_email`/`is_calendar`) de owner não confirmado dispara `pending_action group_consent` (TTL 300 s). |
 | 8 | `orchestrator` | Persistência plain (`message-history/{id}`) com `owner_hash` derivado. |
 | 9 | `orchestrator` | LLM único DeepSeek V4 Flash via DeepAgents (harness LangGraph). Mascaramento PII. |
 | 10 | `pubsub` | `send_text` na Evolution → resposta + tick azul. |
@@ -368,17 +436,20 @@ flowchart LR
 | Componente | Responsabilidade |
 | --- | --- |
 | `main.py` | FastAPI, lifecycle, endpoints `/webhook`, `/pubsub/push`, `/chat`, `/admin/*`. |
-| `orchestrator.py` | Detecção de intenção, roteamento para capabilities, prefetch Calendar/Email/Drive, indexação RAG, integração com `_run_guard_graph`. |
-| `agent_orchestration/jennifier.py` | Definição do agente mestre Jennifer (system prompt, modelo M2.7-highspeed, fallback Gemini). |
-| `agent_orchestration/access_guardian.py` | Decisão não-determinística de owner + OAuth + scopes (`decide_guardian`). |
-| `agent_orchestration/graph.py` | Grafo LangGraph `StateGraph`: jennifier → classify → guardian → manager → reply. |
+| `orchestrator.py` | Detecção de intenção (RAG / Drive / Calendar / Email / Chat), roteamento para capabilities, prefetch Calendar/Email/Drive, indexação RAG, integração com `_run_guard_graph`. Keywords de Drive são estritas (Fase 31/07/2026). |
+| `agent_orchestration/jennifier.py` | Definição do agente mestre Jennifer (system prompt, personalidade levemente irônica, modelo único DeepSeek V4 Flash). |
+| `agent_orchestration/access_guardian.py` | Decisão determinística de owner + OAuth + scopes (`decide_guardian`). É o subagente do grafo que roda **antes** de qualquer tool Google. |
+| `agent_orchestration/graph.py` | Grafo LangGraph `StateGraph`: jennifier → classify → guardian → manager → reply. Classificação de intent com tie-breaker LLM. |
+| `agent_orchestration/knowledge_router.py` | (Fase G) Decide skill de memória do anexo (PDF, DOCX, XLSX, text, drive) por MIME + keywords + tie-breaker DeepSeek V4 Flash. |
+| `agent_orchestration/knowledge_retriever.py` | (Fase H) Decide tema RAG (scope privado vs grupo), aplica escopo, retorna chunks acima de `RAG_RETRIEVE_MIN_SCORE` (default 0.7). Cruzar privado → grupo cria `pending_action share_private_knowledge_in_group`. |
+| `agent_orchestration/categorizer.py` | (Fase F4d.6) Classifica cada anexo em `{class, group, theme}` via DeepSeek V4 Flash antes da persistência. Fallback heurístico sem LLM. |
 | `agent_loader.py` | Polling 120 s para `agents`, `skills`, `tools` e snapshot atômico. |
 | `core.message_ledger` | Ledger Firestore para idempotência transacional de mensagens. |
 | `core.pubsub_dispatcher` | Lease, retry-control e terminalidade por mensagem. |
 | `core.evolution_client` | `send_text` e `mark_messages_read` na Evolution v2. |
 | `core.audio_transcribe` | Wrapper Whisper com fallback controlado para Gemini 2.5 Flash. |
 | `core.owner` | Resolução do proprietário da instância Evolution. |
-| `tools/google_*` | Integrações Google com escopos mínimos. A checagem de owner foi centralizada no `access_guardian` (Fase H). |
+| `tools/google_*` | Integrações Google com escopos mínimos. A checagem de owner foi centralizada no `access_guardian` (Fase H). Decorador legada `@_owner_guard` removida. |
 | `core.rag` | Embeddings OpenAI e busca vetorial filtrada por `owner_hash`. |
 | `core.module_ui` | Plano de controle HTML renderizado em `/admin/dashboard`. |
 | `scripts/ingest_owner_knowledge.py` | Ingestão de livros/editais em GCS para a coleção do proprietário. |
@@ -433,9 +504,20 @@ Camadas:
 
 ### Base de conhecimento (Firestore Vector, embeddings OpenAI)
 - `agent-knowledge-v2` — livros/editais por proprietário (`owner_hash`).
+  Escopo **privado** (1:1). Toda leitura filtra `owner_hash == owner_id(inbound)`.
+- `group-knowledge-v2` — memórias de grupo (`group_hash`). Escopo
+  **compartilhado** dentro de um WhatsApp group. Acesso negado se o
+  telefone não constar em `grupos/{jid}/membros/{phone}` com `is_active`.
+  Cruzar source privada → grupo exige `pending_action
+  share_private_knowledge_in_group` (TTL 300 s).
 - `collective-knowledge-v2` — memórias coletivas configuradas pelo
   operador via `scripts/ingest_collective_memory.py`.
 - `public-knowledge-v2` — base pública sem `owner_hash`.
+
+**Regra de acesso (31/07/2026)**: a base de conhecimento RAG é o destino
+default do user quando ele menciona "base de conhecimento", "memorizou",
+"qual arquivo", "esse documento" etc. (`agent-knowledge-retriever`). Não
+vai para Drive nem responde com Google. Ver §0.0.4.
 
 ### Configuração carregada pelo `agent_loader`
 - `agents`, `skills`, `tools`, `config/*`.

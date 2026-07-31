@@ -370,11 +370,22 @@ CALENDAR_KEYWORDS = [
     "semana que vem", "proxima semana", "agenda de hoje",
 ]
 DRIVE_KEYWORDS = [
-    "drive", "gdrive", "documento", "documentos", "arquivo", "arquivos",
+    "drive", "gdrive", "onedrive", "dropbox", "google drive",
+    "meu drive", "no drive", "no gdrive", "meu gdrive",
+    "salvar no drive", "salvar no gdrive", "salva no drive",
+    "guardar no drive", "guarda no drive", "quero no meu drive",
+    "quero no gdrive", "manda pra mim", "envia pra mim",
+    "lista os arquivos", "liste os arquivos", "lista de arquivos",
+    "mostrar arquivos", "lista os arquivos do drive",
+    "ache a ata", "procure a ata", "buscar arquivos",
+    "dentro desse drive", "nesse drive", "dentro desse gdrive",
+    "nesse gdrive", "dentro do drive",
+]
+DRIVE_KEYWORDS_REMOVED = [
+    "documento", "documentos", "arquivo", "arquivos",
     "pasta", "upload", "omnichannel", "atividades", "baixar",
     "encontrar arquivo", "meus arquivos", "meus documentos",
-    "buscar arquivo", "procurar documento", "lista de arquivos",
-    "mostrar arquivos", "ata", "minuta", "relatorio",
+    "buscar arquivo", "procurar documento", "ata", "minuta", "relatorio",
     "apresentação", "apresentacao", "docx", "pdf", "xlsx", "planilha",
     "leia o arquivo", "leia a ata", "abra o arquivo",
 ]
