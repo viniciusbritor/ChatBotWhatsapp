@@ -3,7 +3,7 @@ steps:
     args:
       - "build"
       - "-f"
-      - "agents_runtime/Dockerfile.reindex"
+      - "Dockerfile.reindex"
       - "-t"
       - "gcr.io/$PROJECT_ID/agents-runtime-reindex:$BUILD_ID"
       - "-t"
