@@ -3020,3 +3020,36 @@ por estagio e sem custo de tokens.
   existentes (urllib, requests, httpx, google-cloud) e desenhar
   wrapper com timeout default 30s.
 
+## 30/07/2026 — Fase PT7: RAG retrieval fix (índices vetoriais faltantes)
+
+User reportou que após pedir "guardar CDC capítulo 1" e depois "resumo
+do conteudo armazenado", o bot disse ter memorizado 2 trechos mas nao
+retornava nada. Loop disciplinado investigar -> planejar -> resolver ->
+branch -> 4 fases resolutivas -> tests + deploy.
+
+**Causa raiz** (logs Cloud Run):
+```
+Private vector search failed: 400 Missing vector index configuration
+```
+
+A retrieval `search_legal_knowledge()` em `core/rag.py` aplica filtros
+na ordem embedding_model+embedding_dim+schema_version+owner_hash+
+[source_title|class]+vector_embedding. Os indices vetoriais no Firestore
+tinham `__name__` no meio da chain, que NAO combina com a query.
+Resultado: 400 do Firestore Vector para qualquer retrieval com
+`source_title` ou `class` no filtro.
+
+**Acoes**:
+- F4-A: Criar 2 novos indices vetoriais para `agent-knowledge-v2` no Firestore (state=READY em ~5min)
+- F4-B: Limpar 1331 docs da base de conhecimento (script `clear_knowledge_base.py`)
+- F4-C: Chunking CDC verificado: 2188 chars → 2 chunks (1181 + 1185)
+- F4-D: Script `reindex_golden_set.py` criado (requer `OPENAI_API_KEY` real em prod)
+- F5: 11 testes novos em `test_rag_pt7.py` (suite 762 passed, +11 vs baseline)
+- F6: Push + Cloud Build deploy
+
+**Decisao para o user**: re-mandar CDC.pdf pelo WhatsApp após o deploy.
+O bot agora vai salvar com embeddings OpenAI reais e o retrieval vai
+funcionar com os novos indices.
+
+
+
