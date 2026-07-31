@@ -1,0 +1,7 @@
+FROM gcr.io/coherence-ominichannel-fs/agents-runtime:52a4df2d-fec3-42a3-a1e8-e1540c2db382
+
+COPY GoldenSet/ /app/GoldenSet/
+
+WORKDIR /app
+
+CMD ["python", "-m", "scripts.reindex_golden_set"]

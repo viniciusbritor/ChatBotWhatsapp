@@ -1,0 +1,28 @@
+steps:
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "build"
+      - "-f"
+      - "agents_runtime/Dockerfile.reindex"
+      - "-t"
+      - "gcr.io/$PROJECT_ID/agents-runtime-reindex:$BUILD_ID"
+      - "-t"
+      - "gcr.io/$PROJECT_ID/agents-runtime-reindex:latest"
+      - "."
+
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "push"
+      - "gcr.io/$PROJECT_ID/agents-runtime-reindex:$BUILD_ID"
+
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "push"
+      - "gcr.io/$PROJECT_ID/agents-runtime-reindex:latest"
+
+images:
+  - "gcr.io/$PROJECT_ID/agents-runtime-reindex:$BUILD_ID"
+  - "gcr.io/$PROJECT_ID/agents-runtime-reindex:latest"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
