@@ -243,6 +243,9 @@ FEATURE_FLAG_NAME = os.getenv("FEATURE_FLAG_NAME", "false").lower() == "true"
   `scripts/backfill_owner_hash_embeddings.py` (não criado).
 - [ ] **`agents_runtime/README.md`** ainda menciona contagens antigas de testes/agentes.
   Atualizar após Fase 0.5 estabilizar (próximo batch).
+- ~~[x] **Scripts órfãos versionados** (cleanup 31/07/2026)~~ — **RESOLVIDO**: 17 arquivos
+  (`create_contact*`, `verify_contact*`, `google_oauth_v*`, `seed_codigo_penal*`, `migrate_rag_v2`)
+  removidos. Zero referências em runtime/tests/docs.
 
 ## Conta-gotas do que está em produção
 

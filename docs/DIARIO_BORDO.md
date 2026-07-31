@@ -1,6 +1,53 @@
 # Diário de Bordo — ChatBotWhatsapp
 
-## 30/07/2026 — Fase PT6: TASK B RAG enforcement + Portal Onda A+B + Loading fix + WhatsappAgente cleanup
+## 31/07/2026 — Cleanup scripts órfãos (chore)
+
+### Contexto
+Inventário READ-ONLY detectou 17 scripts órfãos que não são referenciados
+em nenhum `.py` de runtime, test ou docs. Genealogia: cada um é uma
+iteração experimental pré-Fase D (OAuth per-user consolidou o caminho
+canônico).
+
+### Inventário removido
+
+- `agents_runtime/create_contact.py` + v2/v3/v4 (4)
+- `agents_runtime/verify_contact.py` + v2 (2)
+- `agents_runtime/scripts/google_oauth_final.py`
+- `agents_runtime/scripts/google_oauth_https.py`
+- `agents_runtime/scripts/google_oauth_interactive.py`
+- `agents_runtime/scripts/google_oauth_runner.py`
+- `agents_runtime/scripts/google_oauth_v2.py`
+- `agents_runtime/scripts/google_oauth_v2_client.py`
+- `agents_runtime/scripts/google_oauth_v3.py`
+- `agents_runtime/scripts/migrate_rag_v2.py` (único caller eram os
+  3 `seed_codigo_penal*`)
+- `agents_runtime/scripts/seed_codigo_penal.py` + v2/v3 (3)
+
+### Critério de remoção
+
+Cada arquivo passou por:
+1. `grep` em `agents_runtime/**/*.py` (runtime + tests + scripts) — 0
+   matches externos (auto-referência em si mesmo não conta).
+2. `grep` em `docs/*.md` — 0 matches.
+3. `git log --all --diff-filter=A` para confirmar origem
+   experimental (todos criados antes da Fase D 21/07/2026).
+
+### Validação
+
+- Working tree: 17 arquivos a menos (1 commit chore).
+- Push para `origin/test` dispara build automático.
+- CI esperado: SUCCESS (zero impacto em runtime, tests ou
+  collection indexes).
+- Suite local antes do push: `pytest -q tests/test_orchestrator.py
+  tests/test_agent_orchestration.py tests/test_rag_routing_pt8.py
+  tests/test_orchestrator_multi_intent.py` → 136 passed (mesma
+  baseline da última sexta).
+
+### Risco
+
+Zero. Reversibilidade trivial via `git revert`.
+
+
 
 ### Contexto
 Loop PT6 em 4 frentes:
