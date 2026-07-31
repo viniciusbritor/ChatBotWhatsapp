@@ -118,6 +118,10 @@ RAG_KEYWORDS_RAW = {
     "me fala sobre", "me mostra o", "me diga o",
     "conteudo da introducao", "texto da introducao",
     "introducao do", "conteudo do", "resumo do",
+    # PT8: queries genericas sobre 'documentos' (sem keyword de Drive)
+    "quais documentos", "lista documentos", "lista os documentos",
+    "meus documentos", "seus documentos", "todos os documentos",
+    "documentos salvos", "documentos memorizados", "documentos indexados",
 }
 
 RAG_KEYWORDS = frozenset(_normalize(kw) for kw in RAG_KEYWORDS_RAW)

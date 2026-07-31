@@ -175,6 +175,25 @@ def _keyword_classify(text: str, last_intent: Optional[Dict[str, bool]] = None) 
     is_calendar = any(kw in t for kw in ("agenda", "compromisso", "reuniao", "calendar", "evento"))
     is_email = any(kw in t for kw in ("email", "e-mail", "inbox", "gmail", "mensagem"))
 
+    # PT8: tie-breaker RAG > Drive/Email/Calendar quando o user fala
+    # explicitamente sobre a base de conhecimento ou a memoria. Sem isso,
+    # queries como "quais documentos voce tem na sua base de conhecimento"
+    # setavam is_drive=True (keyword "documento") e o bot caia no
+    # manager-drive em vez de agent-knowledge-retriever.
+    is_rag_explicit = any(
+        kw in t for kw in (
+            "base de conhecimento", "knowledge base", "no rag", "no vector",
+            "sua memoria", "sua base", "voce memorizou", "voce guardou",
+            "voce salvou", "vc memorizou", "vc guardou", "vc salvou",
+            "que voce guardou", "que voce salvou", "que voce memorizou",
+            "memorizou", "memorizado", "memorizada", "indexado",
+            "indexada", "indexados", "salvou", "salvamos", "gravamos",
+            "guardamos", "armazenamos",
+        )
+    )
+    if is_rag_explicit:
+        return {"is_calendar": False, "is_drive": False, "is_email": False, "is_rag": True}
+
     active_count = sum([is_drive, is_calendar, is_email])
     if active_count <= 1:
         return {"is_calendar": is_calendar, "is_drive": is_drive, "is_email": is_email}

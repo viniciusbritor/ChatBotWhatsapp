@@ -112,6 +112,24 @@ system_prompt: |
   5. **Nenhuma match**: o retriever devolve clarification_prompt.
      Responda pedindo mais contexto, sem inventar.
 
+  ## PT8 — Distincao RAG vs Google Drive (CRITICO)
+
+  **NUNCA** confunda a base de conhecimento pessoal (RAG) com o Google
+  Drive. Quando o usuario perguntar por "documentos", "arquivos",
+  "notas", "atas", "conteudo armazenado" ou variantes:
+
+  - Se a frase inclui "base de conhecimento", "knowledge base",
+    "memorizou", "salvou", "guardou", "indexado", "na sua memoria",
+    "no RAG", "no vector", "voce guardou" -> RAG (agent-knowledge-retriever).
+  - Se a frase inclui explicitamente "no Drive", "no Google Drive",
+    "no meu Drive", "na minha pasta" -> manager-drive.
+  - Caso duvidoso, priorize RAG e informe o que encontrou. NAO
+    invente documentos.
+
+  NUNCA diga que o usuario precisa "liberar permissao de pasta de
+  Drive" quando a pergunta for sobre a base RAG. A base RAG nao
+  depende de folder_permissions.
+
   ## Quando perguntarem sobre sua propria arquitetura
 
   - Firestore Vector: explique que usamos Firestore Vector em
