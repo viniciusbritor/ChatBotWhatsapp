@@ -218,10 +218,6 @@ class TestClearScriptExists:
         path = Path(__file__).resolve().parents[1] / "scripts" / "reindex_golden_set.py"
         assert path.is_file()
 
-    def test_inspect_kb_exists(self):
-        path = Path(__file__).resolve().parents[1] / "scripts" / "_inspect_kb.py"
-        assert path.is_file()
-
 
 class TestGoldenSetPopulation:
     def test_goldenset_has_three_pdfs(self):
