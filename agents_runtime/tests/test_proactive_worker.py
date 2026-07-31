@@ -47,17 +47,13 @@ class TestSendProactiveMessage:
 
     @pytest.mark.asyncio
     async def test_no_config(self):
+        """Sem Evolution API configurada -> fail-safe False (substituiu
+        test antigo que dependia de WHATSAPP_AGENTE_URL removido em F6)."""
         from proactive_worker import main as pw_main
-        original_url = pw_main.WHATSAPP_AGENTE_URL
-        original_token = pw_main.WHATSAPP_AGENTE_SA_TOKEN
-        pw_main.WHATSAPP_AGENTE_URL = None
-        pw_main.WHATSAPP_AGENTE_SA_TOKEN = None
-        try:
-            with patch.object(pw_main, "is_dry_run", return_value=False):
-                result = await pw_main.send_proactive_message("+5511966830020", "test", "test_trigger")
-        finally:
-            pw_main.WHATSAPP_AGENTE_URL = original_url
-            pw_main.WHATSAPP_AGENTE_SA_TOKEN = original_token
+
+        with patch.object(pw_main, "is_dry_run", return_value=False), \
+             patch("core.evolution_client.send_text", AsyncMock(side_effect=Exception("evo_unavailable"))):
+            result = await pw_main.send_proactive_message("+5511966830020", "test", "test_trigger")
         assert result is False
 
 

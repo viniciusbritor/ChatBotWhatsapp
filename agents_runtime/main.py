@@ -710,7 +710,7 @@ def _set_session_cookie(response: Response, token: str) -> None:
         secure=True,
         samesite="none",
         path="/",
-        max_age=3600,
+        max_age=43200,  # 12h
     )
 
 
@@ -735,9 +735,54 @@ async def admin_dashboard(request: Request):
     if not token:
         token = request.query_params.get("token", "")
     response = HTMLResponse(content=render_dashboard(COMMIT_SHA, DEPLOYED_AT))
+    # Anti-cache headers para Portal sempre servir versao nova
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
     if token:
         _set_session_cookie(response, token)
     return response
+
+
+@app.get("/admin/ping")
+async def admin_ping():
+    """Health-check rapido para o Portal e Cloud Scheduler warm-up.
+
+    NAO toca Firestore, NAO chama LLM, NAO faz criptografia. Resposta
+    em <50ms tipicamente. Use para:
+    1. Portal detectar se runtime esta online (badge "runtime OK")
+    2. Cloud Scheduler cron (a cada 5min) manter container warm
+    """
+    return JSONResponse(content={
+        "pong": True,
+        "commit": COMMIT_SHA,
+        "deployed_at": DEPLOYED_AT,
+        "version": VERSION,
+        "ts": datetime.now(timezone.utc).isoformat(),
+    })
+
+
+@app.post("/admin/cache/invalidate")
+async def admin_cache_invalidate(request: Request):
+    """Invalida caches in-process (agent_loader + folder_permissions)."""
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    phone = body.get("phone") if isinstance(body, dict) else None
+    if phone:
+        from core.folder_permissions import force_reload_cache
+        force_reload_cache(phone)
+        return JSONResponse(content={"status": "ok", "scope": "phone", "phone": phone})
+    from agent_loader import force_reload
+    from core.folder_permissions import force_reload_cache as fp_reload
+    try:
+        force_reload()
+    except Exception:
+        pass
+    fp_reload(None)
+    return JSONResponse(content={"status": "ok", "scope": "all"})
 
 
 @app.get("/admin/status")

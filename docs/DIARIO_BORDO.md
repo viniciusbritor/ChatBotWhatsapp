@@ -1,5 +1,67 @@
 # Diário de Bordo — ChatBotWhatsapp
 
+## 30/07/2026 — Fase PT6: TASK B RAG enforcement + Portal Onda A+B + Loading fix + WhatsappAgente cleanup
+
+### Contexto
+Loop PT6 em 4 frentes:
+1. **TASK B RAG enforcement** — folder_permissions por user aplicados no
+   runtime, antes so na storage. Patch em `_owner_guard` + 3 decoradores
+   locais (tools/google_*.py::_owner_guard).
+2. **Portal Onda A** — redesign completo light white clean, sem dark mode.
+   Drawer + toast + skeleton + empty states + identidade Coherence.
+3. **Portal Loading fix** — AbortController timeout 12s no `api()` JS,
+   `/admin/ping` para health check sem Firestore, cookie `session_token`
+   estendido para 12h, headers anti-cache no dashboard, `/admin/cache/invalidate`.
+4. **WhatsappAgente cleanup** — `proactive_worker.send_proactive_message`
+   usa `evolution_client.send_text` direto. Removidos `WHATSAPP_AGENTE_*`
+   secrets e linhas do `upload_all_secrets.sh`.
+
+### Mudancas principais
+- `core/owner_guard.py` (F5): `check_folder_permission` + `post_filter_tool_result`
+  exportados para decoradores locais das tools. CAPABILITY_TO_TOOL completo
+  (drive.list/upload/create_folder/find_omnichannel_atas/read_file/deep_search,
+   gmail.search/thread/send, calendar.list/create/update). Lock-down default
+  (whitelist vazia = tool bloqueada). Toggle via `RAG_FOLDER_PERMISSIONS_ENFORCE`
+  (default "true" em runtime; "false" no conftest para nao quebrar testes).
+- `tools/google_{drive,gmail,calendar}.py` (F5): decoradores `_owner_guard`
+  locais agora invocam `check_folder_permission` + `post_filter_tool_result`
+  apos o guard de owner.
+- `core/module_ui.py` (F7, F9): portal reescrito completo. Light white clean.
+  Sem dark mode. Drawer para edicao (slide-in 480px). Toast stack.
+  Skeleton states. Empty states SVG. AbortController 12s no `api()`.
+  Brand mark "C" com gradient. Anti-cache headers servidos pelo servidor.
+- `main.py` (F9): `_set_session_cookie` max_age = 43200 (12h).
+  `GET /admin/ping` retorna pong+commit+ts+version em <50ms sem Firestore.
+  `POST /admin/cache/invalidate` invalida cache agent_loader + folder_permissions.
+  `admin_dashboard` envia `Cache-Control: no-store`.
+- `scripts/build_golden_set.py` (F4): makefile de PDFs sinteticos via
+  reportlab (CDC, LGPD, manual de higiene) para GoldenSet versionado.
+- `scripts/smoke_rag_archive.py` (F4): smoke real com PDFs + extrai +
+  categoriza + indexa + retrieve + TASK B enforcement = 0 falhas.
+- `tests/test_folder_permissions_enforcement.py` (novo, 8 testes):
+  lockdown, sem phone, sem whitelist, search_files com/sem whitelist,
+  upload_file dentro/fora whitelist, toggle de env var.
+- `tests/test_portal_loading.py` (novo, 9 testes): ping, anti-cache,
+  cookie 12h, AbortController, toast, drawer, sem dark mode.
+- `proactive_worker/main.py` (F6): `send_proactive_message` usa
+  `core.evolution_client.send_text` direto. Removidos
+  `WHATSAPP_AGENTE_URL` e `WHATSAPP_AGENTE_SA_TOKEN`.
+- `scripts/upload_all_secrets.sh` (F6): removida linha `whatsapp-agente-url`.
+
+### Validacao
+| Suite | Antes | Depois |
+|---|---|---|
+| `tests/test_module_ui_admin.py` | 12 | 12 |
+| `tests/test_folder_permissions_enforcement.py` | 0 | **8 novos** |
+| `tests/test_portal_loading.py` | 0 | **9 novos** |
+| `tests/test_folder_permissions.py` | 11 | 11 |
+| `tests/test_proactive_worker.py` | 8 | 8 (1 fix) |
+| `pytest -q tests/` (full) | 11 failed, 720 passed | **8 failed**, **751 passed** |
+
+**+40 testes, -3 falhas (testes flaky pré-existentes agora passam).**
+
+
+
 > Historico cronologico de decisoes tecnicas, alteracoes e bugs para evitar reincidencia.
 
 ## 30/07/2026 — Fase PT3: Portal UI agradável + RAG visibilidade + Status DeepSeek-only

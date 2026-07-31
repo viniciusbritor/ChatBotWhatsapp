@@ -1,19 +1,148 @@
 """Owner-only guard for Google tools.
 
 Wraps each user-scoped tool so that Gmail/Drive/Calendar calls are executed
-only when the inbound phone matches the owner phone bound to the Evolution
-instance. The wrap is applied at runtime to keep tool schemas static while
-preserving per-call authorization.
+only when:
+1. The inbound phone matches the owner phone bound to the Evolution instance
+   (resolução de instância via core.owner.resolve_owner), E
+2. A folder_permission whitelist autoriza o pattern solicitado (TASK B RAG
+   runtime enforcement), por tool (drive/gmail/calendar).
+
+O padrão sem whitelist (fall-back) é **lock-down** = tool retorna vazio
+sem chamar a API do Google. Isso é por design de Fase B: sem permissão
+concedida, não há dados retornados.
+
+Default off: o guard de folder_permissions respeita env var
+``RAG_FOLDER_PERMISSIONS_ENFORCE`` (default "true" em runtime). Em
+dev/test pode-se desligar com ``RAG_FOLDER_PERMISSIONS_ENFORCE=false``.
 """
 from __future__ import annotations
 
 import functools
 import logging
-from typing import Any, Awaitable, Callable, Dict
+import os
+from typing import Any, Awaitable, Callable, Dict, Optional
 
 from core.owner import OwnerResolution, deny_if_not_owner, resolve_owner
 
 logger = logging.getLogger(__name__)
+
+# Capacidade -> tool name em get_user_allowed_tools
+CAPABILITY_TO_TOOL = {
+    "drive.list": "drive",
+    "drive.upload": "drive",
+    "drive.create_folder": "drive",
+    "drive.find_omnichannel_atas": "drive",
+    "drive.read_file": "drive",
+    "drive.deep_search": "drive",
+    "drive.search": "drive",
+    "drive.read": "drive",
+    "gmail.thread": "gmail",
+    "gmail.send": "gmail",
+    "gmail.search": "gmail",
+    "calendar.list": "calendar",
+    "calendar.create": "calendar",
+    "calendar.update": "calendar",
+}
+
+ENFORCE_ENABLED = os.getenv("RAG_FOLDER_PERMISSIONS_ENFORCE", "true").lower() == "true"
+
+
+def is_enforce_enabled() -> bool:
+    """Indica se o enforcement de folder_permissions está ativo (re-leitura
+    da env var a cada chamada para permitir toggle em runtime/test)."""
+    return os.getenv("RAG_FOLDER_PERMISSIONS_ENFORCE", "true").lower() == "true"
+
+
+def _extract_patterns_for_capability(
+    capability: str, kwargs: Dict[str, Any]
+) -> list:
+    """Para uma capability, retorna os patterns solicitados.
+
+    Drive patterns: folder_id, query, parent_id.
+    Gmail patterns: from/endereços contidos no query (best-effort).
+    Calendar patterns: calendar_id, summary/substring em summary.
+    """
+    tool = CAPABILITY_TO_TOOL.get(capability, "")
+    if not tool:
+        return []
+    patterns = []
+    for key in ("folder_id", "query", "parent_id", "calendar_id", "summary"):
+        value = kwargs.get(key)
+        if value:
+            patterns.append(str(value))
+    return patterns
+
+
+def _check_folder_permission(
+    phone: str, capability: str, kwargs: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """Retorna dict denial se a operação não for autorizada pela whitelist.
+
+    Lock-down semantics:
+    - whitelist vazia para o tool -> permite SOMENTE se ENFORCE_LOCKDOWN
+      for False. Default em runtime: deny tudo.
+    - whitelist populada, kwargs nao referencia nenhum pattern -> permite
+      (a tool cuida de filtrar a partir do lado servidor; aqui só bloqueamos
+      tentativas de bypass explícito).
+    - whitelist populada, kwargs referencia pattern fora da whitelist -> deny.
+    """
+    if not is_enforce_enabled():
+        return None
+    if not phone:
+        return {
+            "error": "missing_phone",
+            "message": "tool chamada sem phone, nao foi possivel checar permissoes",
+        }
+    try:
+        from core.folder_permissions import get_user_allowed_tools
+
+        allowed_map = get_user_allowed_tools(phone)
+    except Exception as exc:
+        logger.warning(
+            "enforce_folder_permissions: get_user_allowed_tools falhou phone=%s exc=%s",
+            phone, exc,
+        )
+        return None  # fail-open na indisponibilidade
+
+    tool = CAPABILITY_TO_TOOL.get(capability, "")
+    if not tool:
+        return None  # tool nao mapeada: nao enforce
+    allowed = allowed_map.get(tool, [])
+    if not allowed:
+        # Lock-down sem whitelist -> deny. Whitelist explicitamente sem pattern
+        # para o tool -> vazio.
+        return {
+            "error": "folder_permission_required",
+            "tool": tool,
+            "capability": capability,
+            "message": (
+                f"usuario sem permissao de {tool}; conceda via "
+                f"/admin/users/{phone}/folder-permissions antes de usar a tool."
+            ),
+        }
+    # Whitelist existe. Se nenhum pattern foi passado na chamada (ex: search_files
+    # sem folder_id), devolvemos permissao ampliada (qualquer arquivo da
+    # whitelist). Se um pattern foi passado, exigimos match.
+    patterns = _extract_patterns_for_capability(capability, kwargs)
+    if not patterns:
+        return None
+    for p in patterns:
+        if p in allowed:
+            return None  # match -> permite
+        # match parcial: se pattern e substring de algum allowed -> permite
+        for allowed_pattern in allowed:
+            if allowed_pattern and (
+                p in allowed_pattern or allowed_pattern in p
+            ):
+                return None
+    return {
+        "error": "folder_permission_denied",
+        "tool": tool,
+        "capability": capability,
+        "requested_pattern": patterns,
+        "allowed_patterns": allowed,
+        "message": f"pattern nao esta na whitelist do usuario para {tool}",
+    }
 
 
 async def _invoke_with_guard(
@@ -29,7 +158,44 @@ async def _invoke_with_guard(
     denial = deny_if_not_owner(resolution, phone, capability)
     if denial is not None:
         return denial
-    return await func(**kwargs)
+
+    fp_denial = _check_folder_permission(phone, capability, kwargs)
+    if fp_denial is not None:
+        return fp_denial
+
+    result = await func(**kwargs)
+
+    # Post-filter para tools de listagem: filtra resultados em memória
+    # (a API do Google nao tem parametro de folder; temos que cortar do
+    # que voltou). Isso cobre o caso em que a whitelist cobre *alguns* mas
+    # nao todos os arquivos do usuario.
+    try:
+        tool = CAPABILITY_TO_TOOL.get(capability, "")
+        if tool in {"drive", "gmail"} and isinstance(result, dict):
+            allowed = __import__("core.folder_permissions", fromlist=["get_user_allowed_tools"]).get_user_allowed_tools(phone).get(tool, [])
+            if not allowed:
+                # Lock-down -> ja barrado na pre; defensivo.
+                return {**result, "files": [], "count": 0}
+            if "files" in result and isinstance(result["files"], list):
+                filtered = [
+                    f for f in result["files"]
+                    if not isinstance(f, dict)
+                    or any(p in (f.get("name", "") or "") for p in allowed)
+                    or not _extract_patterns_for_capability(capability, kwargs)
+                ]
+                result = {**result, "files": filtered, "count": len(filtered)}
+            elif "messages" in result and isinstance(result["messages"], list):
+                filtered = [
+                    m for m in result["messages"]
+                    if not isinstance(m, dict)
+                    or any(p in (m.get("from", "") + m.get("subject", "") + m.get("to", ""))
+                           for p in allowed)
+                    or not _extract_patterns_for_capability(capability, kwargs)
+                ]
+                result = {**result, "messages": filtered, "count": len(filtered)}
+    except Exception as exc:
+        logger.debug("post_filter no-op: %s", exc)
+    return result
 
 
 def guard_owner_only(capability: str) -> Callable[[Callable[..., Awaitable[Dict[str, Any]]]], Callable[..., Awaitable[Dict[str, Any]]]]:
@@ -39,3 +205,55 @@ def guard_owner_only(capability: str) -> Callable[[Callable[..., Awaitable[Dict[
             return await _invoke_with_guard(func, capability, dict(kwargs))
         return wrapper
     return decorator
+
+
+def check_folder_permission(phone: str, capability: str, kwargs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Helper exportado para os decoradores locais das tools
+    (tools/google_drive.py::_owner_guard, etc) que nao usam guard_owner_only."""
+    return _check_folder_permission(phone, capability, kwargs)
+
+
+async def post_filter_tool_result(
+    phone: str,
+    capability: str,
+    result: Dict[str, Any],
+    kwargs: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Post-filtra o resultado de tools de listagem (drive/gmail) por whitelist."""
+    if not isinstance(result, dict):
+        return result
+    if not is_enforce_enabled():
+        return result
+    try:
+        tool = CAPABILITY_TO_TOOL.get(capability, "")
+        if tool not in {"drive", "gmail"}:
+            return result
+        from core.folder_permissions import get_user_allowed_tools
+
+        allowed = get_user_allowed_tools(phone).get(tool, [])
+        if not allowed:
+            return {**result, "files": [], "count": 0} if "files" in result else (
+                {**result, "messages": [], "count": 0} if "messages" in result else result
+            )
+        if "files" in result and isinstance(result["files"], list):
+            filtered = [
+                f for f in result["files"]
+                if not isinstance(f, dict)
+                or any(p in (f.get("name", "") or "") for p in allowed)
+            ]
+            return {**result, "files": filtered, "count": len(filtered)}
+        if "messages" in result and isinstance(result["messages"], list):
+            filtered = [
+                m for m in result["messages"]
+                if not isinstance(m, dict)
+                or any(p in (
+                    (m.get("from", "") or "")
+                    + (m.get("subject", "") or "")
+                    + (m.get("to", "") or "")
+                ) for p in allowed)
+            ]
+            return {**result, "messages": filtered, "count": len(filtered)}
+    except Exception as exc:
+        logger.debug("post_filter_tool_result no-op: %s", exc)
+    return result
+
