@@ -1,6 +1,75 @@
 # Diário de Bordo — ChatBotWhatsapp
 
-## 31/07/2026 v2 — RAG refactor: adaptive min_score + UX clarification_prompt + diag
+## 01/08/2026 — 3 commits: fix webhook (participant) + fix retriever (user.phone) + feat group-rag (default group)
+
+### Contexto
+User reportou que Jennifer respondeu 'sua base esta vazia' apos
+pergunta RAG valida ('Faca uma consulta na sua base de conhecimento')
+no WhatsApp, apesar de ter 7 docs salvos. Investigacao revelou
+**dois bugs independentes** que afetavam caminhos diferentes.
+
+### Bug #1 — `evolution_webhook.py:75` (grupo: phone = group_id)
+Em conversa de GRUPO, o codigo fazia `phone = remoteJid.split('@')[0]`
+que retornava o **group_id** ('120363') em vez do user_phone.
+A Evolution API v2.3.7 envia o user_phone em `data.key.participant`.
+Resultado: `_is_user_member(db, group_jid, phone)` consultava
+`membros/{group_id}` (doc inexistente) -> `False`. RAG pessoal
+em grupo sempre retornava 0 hits.
+
+### Bug #2 — `knowledge_retriever.py::_extract_phone` (privado: phone = '')
+Em conversa PRIVADA via DeepAgents harness, o envelope chega como
+`{user: {phone: '...'}}` (state interno do LangGraph). `_extract_phone`
+lia soh a raiz -> retornava '' (vazio). `_owner_hash('') =
+sha256('')[:32] = e3b0c44298fc1c149afbf4c8996fb924` (hash de string
+vazia). `find_nearest` buscava com owner_hash inexistente -> 0 hits.
+
+Confirmado com smoke real (logs Cloud Run):
+- `tool_result tool=knowledge.retrieve ... owner_hash=e3b0c44...`
+  -> hash da string vazia, batendo o sintoma.
+
+### Mudancas
+
+- **Commit 1** `fix(webhook)`: `evolution_webhook.py:75` agora usa
+  `key.participant` quando `remoteJid` tem `@g.us`. Fallback
+  para `remoteJid.split('@')[0]` se participant ausente. Anotado
+  em `envelope.extra.phone_source` para debug. 4 tests ajustados
+  ou novos em `tests/test_evolution_webhook.py`.
+
+- **Commit 2** `fix(retriever)`: `_extract_phone` aceita 3 paths
+  (raiz -> `user.phone` -> vazio com log warning). 5 tests em
+  `TestExtractPhone`. Eliminou o efeito visivel: Jennifer cita
+  os 7 docs quando perguntada no privado.
+
+- **Commit 3** `feat(group-rag)`: prompt do `manager-group-rag`
+  instrui default=group ao anexar em grupo. Comandos explicitos
+  do user ('deixe publico', 'compartilhe com qualquer pessoa',
+  'publique isso', 'para todos os usuarios', 'fora do grupo')
+  viram visibility=public. 9 tests em `tests/test_group_rag_default.py`.
+
+### Validacao
+- `pytest -q tests/` -> 813 passed, 34 skipped (zero regressao).
+- Suite crescida: 796 -> 813 (+17 tests novos).
+- Cada commit individualmente: suite completa continuan passing.
+
+### Comportamento esperado pos-deploy
+| Cenario | Antes | Depois |
+|---|---|---|
+| User privado: 'lista o que tem na base' | 'sua base vazia' | 'tem 7 docs: cdc-capitulo-1, lgpd-capitulo-1, ...' |
+| User privado: 'qual a lei do CDC?' | 0 hits | top score 0.55, cita doc |
+| User em grupo: 'tem doc no grupo?' | denied (not_member) | Lista docs do grupo |
+| User em grupo anexa PDF | pergunta visibilidade | Salva como group sem perguntar |
+| User em grupo: 'deixa publico esse doc' | Tinha que confirmar | Vira public |
+
+### Documentos atualizados
+- `GUARDRAILS.md` §1: nota sobre origem de phone em grupo.
+- `GUARDRAILS.md` §8.2 (novo): regra de visibilidade de anexo em grupo.
+- DIARIO_BORDO.md: esta entrada.
+
+### Reversao
+- Cada commit eh reversivel isoladamente via `git revert <sha>`.
+- Os 3 patches sao aditivos (fallback chain, default change). Sem breaking.
+
+
 
 ### Contexto
 Jennifer retornou "Nao encontrei nada" para queries RAG legitimas

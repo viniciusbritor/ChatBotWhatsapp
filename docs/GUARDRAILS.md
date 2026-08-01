@@ -46,6 +46,14 @@
   (`grupos/{jid}/membros/{phone}.confirmed=true`); caso contrário, o
   orchestrator cria `pending_action group_consent` (TTL 300 s) antes de
   bloquear a execução.
+- **Origem do `phone` em grupo**: a Evolution API v2.3.7 envia o
+  phone do user individual em `data.key.participant` em conversa
+  de grupo. O `core/evolution_webhook.py::extract_envelope()`
+  extrai esse campo quando `remoteJid` tem `@g.us` (patch 01/08/2026,
+  `fix(webhook)`). Fallback para `remoteJid.split('@')[0]` quando
+  `participant` ausente. Em conversa privada, phone vem
+  diretamente de `remoteJid`. Anotado em `envelope.extra.phone_source`
+  para debug (`"participant"` ou `"remote_jid"`).
 
 ## 2. Privacidade (LGPD)
 
@@ -342,6 +350,33 @@ anexo em processamento.
 - `scripts/smoke_access_rule.py` (manual, Cloud Run test) exercita
   os 4 cenários ponta-a-ponta contra o `agents-runtime-test`
   implantado.
+
+## 8.2. Visibilidade de anexo em grupo — 01/08/2026
+
+Quando o `manager-group-rag` indexa um anexo (PDF/DOCX/XLSX) recebido
+dentro de um grupo, a `visibility` é **automática**:
+
+| Cenário | visibility | Quem tem acesso |
+|---|---|---|
+| Anexo em grupo, sem comando explícito de publicar | **`group`** (default) | Só membros do grupo (`grupos/{jid}/membros/{phone}.is_active=true`) |
+| Anexo em grupo, user pede explicitamente `"deixe publico"` / `"compartilhe com qualquer pessoa"` / `"publique isso"` / `"para todos os usuários"` / `"fora do grupo"` | **`public`** | Qualquer pessoa com acesso ao Firestore do projeto (cross-user leak aceito) |
+| Anexo em privado, user pede para salvar | **`private`** (equivale a `agent-knowledge-v2` sem `visibility`) | Só o próprio user |
+
+**Justificativa:** quando o user anexa algo em grupo, o contexto
+já é o grupo. Perguntar "membros ou público?" a cada anexo quebra
+o fluxo da conversa. O **fail-safe é privacidade**: ambiguidade
+mantém `group`.
+
+**Cross-group leakage:** impossível. `tools.group._group_hash(group_jid)`
+filtra por grupo específico. Mesmo user em grupos A e B vê docs apenas
+do grupo onde perguntou.
+
+**Não confundir com** `confirmed` (campo separado em
+`grupos/{jid}/membros/{phone}.confirmed`). Esse campo é gate
+explícito para capacidades pessoais do owner (Drive/Gmail/Calendar)
+em grupo. Não afeta RAG.
+
+
 
 ## 9. Código e operação
 
