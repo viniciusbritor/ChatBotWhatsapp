@@ -372,6 +372,14 @@ def _extract_phone(envelope: Optional[Dict[str, Any]]) -> str:
         phone = str(user.get("phone") or "")
         if phone:
             return phone
+    # Patch 02/08/2026: formato flat do DeepAgents state v2 (atual 0.6.12)
+    # tem user_phone na raiz, nao em user.phone.
+    phone = str(envelope.get("user_phone") or "")
+    if phone:
+        return phone
+    phone = str(envelope.get("sender_phone") or "")
+    if phone:
+        return phone
     logger.warning("extract_phone_empty envelope_keys=%s", list(envelope.keys())[:8])
     return ""
 
