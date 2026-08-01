@@ -519,6 +519,21 @@ default do user quando ele menciona "base de conhecimento", "memorizou",
 "qual arquivo", "esse documento" etc. (`agent-knowledge-retriever`). Não
 vai para Drive nem responde com Google. Ver §0.0.4.
 
+**Retrieval adaptive floor (31/07 v2)**: embeddings OpenAI 1536d em
+chunks do `reindex_golden_set.py` (CDC/LGPD/Higiene, ~3KB) costumam
+ter cosine similarity 0.4-0.65. O threshold `RAG_RETRIEVE_MIN_SCORE=0.7`
+era alto demais e truncava queries legítimas para 0 hits. Fix:
+`core/rag.py::search_legal_knowledge` aplica `ADAPTIVE_FLOOR=0.3` —
+matches entre 0.3 e o `min_score` são entregues com warning
+`retrieval_low_confidence`. Abaixo de 0.3 ainda são descartados.
+Quando TODOS os candidates têm score < 0.3, log estruturado
+`retrieval_zero_hits` salva top-3 preview com snippet.
+
+**UX da `clarification_prompt` (31/07 v2)**: a mensagem retornada
+quando retrieval é zero agora lista `source_title` conhecidos do
+owner. `scripts/diag_rag_query.py` é o helper de diagnóstico
+(read-only, manual).
+
 ### Configuração carregada pelo `agent_loader`
 - `agents`, `skills`, `tools`, `config/*`.
 - `apelidos_custom/{owner_hash}` — consentimento de apelidos.

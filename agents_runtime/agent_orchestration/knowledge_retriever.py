@@ -277,6 +277,69 @@ def _is_user_member(db, group_jid: str, phone: str) -> bool:
     return False
 
 
+async def _list_known_sources(phone: str, limit: int = 10) -> List[str]:
+    """Return distinct ``source_title`` do owner em ``agent-knowledge-v2``.
+
+    Usado pela UX da ``clarification_prompt`` para orientar o user
+    a buscar dentro de algo que ele DE FATO tem na base. Best-effort:
+    se o Firestore esta offline, devolve [].
+    """
+    try:
+        from core.rag import PRIVATE_COLLECTION, _owner_hash
+
+        db_ref = None
+        try:
+            from core.rag import _get_firestore
+            db_ref = _get_firestore()
+        except Exception:
+            db_ref = None
+        if db_ref is None:
+            return []
+
+        owner_hash = _owner_hash(phone)
+        titles: List[str] = []
+        seen = set()
+
+        def fetch():
+            return list(
+                db_ref.collection(PRIVATE_COLLECTION)
+                .where("owner_hash", "==", owner_hash)
+                .limit(200)
+                .stream()
+            )
+
+        import asyncio as _asyncio
+        docs = await _asyncio.to_thread(fetch)
+        for doc in docs:
+            data = doc.to_dict() or {}
+            title = data.get("source_title") or ""
+            if title and title not in seen:
+                seen.add(title)
+                titles.append(title)
+                if len(titles) >= limit:
+                    break
+        return titles
+    except Exception:
+        return []
+
+
+def _build_clarification_prompt(known_sources: List[str], query: str) -> str:
+    """Mensagem de clarification quando retrieval retorna 0 hits.
+
+    Lista os ``source_title`` conhecidos do owner se houver, dando
+    ao user uma ancora concreta para refinar a busca.
+    """
+    base = "N\u00e3o encontrei nada sobre isso no que memorizei at\u00e9 agora."
+    if known_sources:
+        lista = ", ".join(f"'{t}'" for t in known_sources[:8])
+        return (
+            f"{base} Voc\u00ea tem esses documentos salvos na sua base: {lista}. "
+            "Quer tentar uma busca mais espec\u00edfica, citando o nome do "
+            "arquivo ou outro termo?"
+        )
+    return f"{base} Quer me dar mais detalhes ou outro termo?"
+
+
 def _extract_group_jid(envelope: Dict[str, Any]) -> str:
     extra = envelope.get("extra", {}) or {}
     remote_jid = str(extra.get("remote_jid", ""))
@@ -724,9 +787,8 @@ async def retrieve(
                 "count": 0,
                 "needs_share_prompt": False,
                 "needs_clarification": True,
-                "clarification_prompt": (
-                    "Não encontrei nada sobre isso no que memorizei. "
-                    "Quer me dar mais detalhes ou outro termo?"
+                "clarification_prompt": _build_clarification_prompt(
+                    await _list_known_sources(phone), query
                 ),
                 "share_pending_action": None,
                 "reason": "no_matches",
@@ -765,9 +827,8 @@ async def retrieve(
             "count": 0,
             "needs_share_prompt": False,
             "needs_clarification": True,
-            "clarification_prompt": (
-                "Não encontrei nada sobre isso no que memorizei. "
-                "Quer me dar mais detalhes ou outro termo?"
+            "clarification_prompt": _build_clarification_prompt(
+                await _list_known_sources(phone), query
             ),
             "share_pending_action": None,
             "reason": "no_matches",

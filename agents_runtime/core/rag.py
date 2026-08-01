@@ -710,11 +710,15 @@ async def search_legal_knowledge(
             k,
             _vector_filters(_owner_hash(phone), extra_filters or None),
         )
+        ADAPTIVE_FLOOR = 0.3
+        ADAPTIVE_DELIVER = max(min_score - 0.2, 0.3)
         chunks = []
+        scores = []
         for document in documents:
             data = document.to_dict()
             score = _score_document(document, data)
-            if score < min_score:
+            scores.append(score)
+            if score < min_score and score < ADAPTIVE_FLOOR:
                 continue
             chunks.append(
                 {
@@ -730,10 +734,38 @@ async def search_legal_knowledge(
                     "created_at": data.get("created_at", ""),
                 }
             )
+            if len(chunks) >= k:
+                break
+        top_score = scores[0] if scores else 0.0
+        if chunks and chunks[0]["score"] < min_score:
+            logger.info(
+                "retrieval_low_confidence owner_hash=%s top_score=%.3f min_score=%.3f delivered=%d",
+                _owner_hash(phone), top_score, min_score, len(chunks),
+            )
+        if not chunks and scores:
+            top_preview = []
+            for document, score in list(zip(documents, scores))[:3]:
+                data = document.to_dict() or {}
+                top_preview.append(
+                    {
+                        "score": round(score, 3),
+                        "source": data.get("source_title", ""),
+                        "snippet": (data.get("text_content", "") or "")[:100],
+                    }
+                )
+            logger.info(
+                "retrieval_zero_hits owner_hash=%s query_preview=%s top_preview=%s",
+                _owner_hash(phone),
+                mask_pii(query)[:120],
+                top_preview,
+            )
         return {
             "results": chunks,
             "query": mask_pii(query),
             "owner_hash": _owner_hash(phone),
+            "min_score": min_score,
+            "adaptive_floor": ADAPTIVE_FLOOR,
+            "top_score": round(top_score, 3) if top_score else 0.0,
             "filters": {
                 "source_title": source_title,
                 "class": class_,

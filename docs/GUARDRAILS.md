@@ -182,6 +182,24 @@ em Firestore plain (`message-history/{history_id}`) com indexação por
   `source_title` e `class` quando a query ou o historico sugerem.
   Quando nada bate, devolve `needs_clarification=True` em vez de
   alucinar.
+- **Adaptive floor (Fase 31/07 v2)**: embeddings OpenAI 1536d em
+  chunks de 3KB costumam dar cosine similarity 0.4-0.65 (abaixo
+  do `min_score=0.7`). O `search_legal_knowledge` agora aplica
+  um `ADAPTIVE_FLOOR=0.3`: matches entre 0.3 e o `min_score` sao
+  entregues com warning estruturado (`retrieval_low_confidence`).
+  Abaixo de 0.3 ainda sao descartados. Justificativa: o golden
+  set sintetico (CDC/LGPD/Higiene) tem densidade semantica baixa,
+  e o threshold alto estava truncando queries legitimas para 0
+  hits. Log `retrieval_zero_hits` captura top-3 candidates quando
+  TUDO falha (< floor).
+- **UX da `clarification_prompt` (Fase 31/07 v2)**: quando o retrieval
+  retorna 0 hits, a mensagem agora lista os `source_title`
+  conhecidos do owner (`Voce tem esses documentos salvos: ...`).
+  Implementado em
+  `agent_orchestration/knowledge_retriever.py::_list_known_sources` +
+  `_build_clarification_prompt`. Helper de diagnostico:
+  `scripts/diag_rag_query.py` (rode com `min_score=0.0` para
+  inspecionar todos os candidates e seus scores).
 - **Composite indexes (Fase F4d.6)**: 3 indices em `firestore.indexes.json`
   (raiz do repo) deployados pelo Cloud Build. Nenhum dos 3 filtra
   cross-collection: apenas `agent-knowledge-v2`.

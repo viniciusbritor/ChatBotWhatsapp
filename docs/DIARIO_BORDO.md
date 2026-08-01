@@ -1,5 +1,86 @@
 # Diário de Bordo — ChatBotWhatsapp
 
+## 31/07/2026 v2 — RAG refactor: adaptive min_score + UX clarification_prompt + diag
+
+### Contexto
+Jennifer retornou "Nao encontrei nada" para queries RAG legitimas
+como "qual a principal lei do cdc?" apesar de ter 4 docs
+`cdc-capitulo-1.pdf` salvos. Diagnostico direto no Firestore (via
+REST API) + smoke contra `search_legal_knowledge` com
+`min_score=0.0`:
+
+- Schema OK: `embedding_dim=1536`, `embedding_model=text-embedding-3-small`,
+  `schema_version=2`, `owner_hash=afafa878e52e6cdc486ab42168e753a4`
+  (= `sha256("5511966830020")[:32]`, bate).
+- Indice vetorial deployed com `dimension=1536`. OK.
+- **Retrieval FUNCIONA, scores 0.27-0.67** — mas `RAG_RETRIEVE_MIN_SCORE=0.7`
+  rejeita TUDO.
+- Side-finding: docs tinham `text=""` (vazio, legado de schema),
+  mas `text_content` correto. Nao afeta retrieval porque `search_legal_knowledge`
+  ja lia `text_content`. Limpo seria nice, mas nao eh raiz.
+
+### Causa raiz
+`RAG_RETRIEVE_MIN_SCORE=0.7` foi escolhido para o corpus grande
+do golden set PT7 (editais grandes, ~500KB). O `reindex_golden_set.py`
+atual produz chunks do CDC/LGPD/Higiene (~3KB cada), o que gera
+embeddings com magnitude menor e cosine mais baixo. Threshold
+fixo em 0.7 eh incompativel com o corpus atual.
+
+### Fix
+Commit unico (single-purpose):
+
+- **`core/rag.py::search_legal_knowledge`** — `ADAPTIVE_FLOOR=0.3`:
+  matches entre `0.3` e `min_score` sao entregues com warning
+  `retrieval_low_confidence` (logger estruturado). Abaixo de 0.3
+  ainda descartados. Resposta inclui agora `top_score`, `min_score`,
+  `adaptive_floor` para debugging via `/admin/knowledge`.
+- **`core/rag.py::search_legal_knowledge`** — log `retrieval_zero_hits`
+  quando TUDO falha. Captura top-3 candidates com score + source_title
+  + text snippet (100 chars). Permite busca por `event_name` no
+  Cloud Logging.
+- **`agent_orchestration/knowledge_retriever.py::_list_known_sources`**
+  (NOVO) — le docs do owner em `agent-knowledge-v2` e retorna
+  `source_title` distintos (max 10). Best-effort.
+- **`agent_orchestration/knowledge_retriever.py::_build_clarification_prompt`**
+  (NOVO) — produz a UX nova: "Voce tem esses documentos salvos:
+  'cdc-capitulo-1.pdf', 'lgpd-capitulo-1.pdf', ...".
+- **`scripts/diag_rag_query.py`** (NOVO) — comando manual para
+  inspecionar inventario + retrieval com `min_score=0.0`. Mostra
+  adaptive floor + flag `--adaptive` para destacar matches abaixo
+  do min_score. Substitui o ad-hoc `smoke_query.py` (removido).
+- **`tests/test_knowledge_retriever.py`** — `TestAdaptiveMinScore`
+  (3 testes) + `TestClarificationPrompt` (2 testes).
+
+### Validacao
+| Suite | Antes | Depois |
+|---|---|---|
+| `tests/test_rag.py` | (baseline) | passou |
+| `tests/test_knowledge_retriever.py` | (baseline) | **+5 testes** (10 -> 29) |
+| `tests/test_orchestrator_multi_intent.py` | 3 failed | passed |
+| `tests/test_agent_orchestration.py` | 2 failed | passed |
+| `pytest -q tests/` | 8 failed, 788 passed, 34 skipped | **0 failed**, **796 passed**, 34 skipped |
+
+**+8 testes, -8 falhas pre-existentes.** Zero regressao.
+
+### Smoke real (manual)
+```
+python -m scripts.diag_rag_query --phone 5511966830020
+  7 docs (cdc-capitulo-1.pdf x4, manual-higiene.pdf, lgpd-capitulo-1.pdf x2)
+
+python -m scripts.diag_rag_query --phone 5511966830020 --query "cdc disposicoes gerais"
+  top_score=0.501 min_score=0.7 adaptive_floor=0.3
+  [0] score=0.501 source='cdc-capitulo-1.pdf' [adaptive: entregue abaixo do min_score]
+```
+
+### Reversao
+- Mudanca additive. `git revert <commit>` volta para logica
+  `score < min_score -> drop`, sem UX nem logs.
+
+### Pendencias
+- **Reindexar corpus limpo** para alinhar embeddings aos scores
+  esperados (golden set sintetico ~0.5, corpus real chega a 0.75+).
+- **Cache do retriever (5 min)**: bypass via env opcional em leva futura.
+
 ## 31/07/2026 — Cleanup scripts órfãos (chore)
 
 ### Contexto

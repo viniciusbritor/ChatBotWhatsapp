@@ -276,6 +276,171 @@ class TestRetrievalMetrics:
         assert abs(s["avg_score"] - 0.7) < 1e-9
 
 
+class TestAdaptiveMinScore:
+    """Valida o adaptive threshold em core/rag.py::search_legal_knowledge.
+
+    Producao (Fase F4d.6) usa RAG_RETRIEVE_MIN_SCORE=0.7 mas scores
+    reais de docs pequenos ficam em 0.4-0.65. Sem o floor, queries
+    legitimas como "qual a principal lei do cdc?" (top=0.55) sao
+    truncadas para 0 hits.
+    """
+
+    @pytest.mark.asyncio
+    async def test_adaptive_delivers_below_min_score_when_floor_reached(self):
+        """Doc com score 0.5 deve ser entregue mesmo com min_score=0.7."""
+        from core.rag import search_legal_knowledge
+
+        fake_doc = _make_fake_doc(
+            doc_id="d1",
+            source_title="cdc.pdf",
+            score=0.5,
+            text_content="Disposicoes gerais do CDC",
+        )
+
+        with patch("core.rag._get_firestore", return_value=MagicMock()):
+            with patch("core.rag.embed_query", AsyncMock(return_value=[0.0] * 1536)):
+                with patch("core.rag._find_nearest", AsyncMock(return_value=[fake_doc])):
+                    with patch("core.rag._vector_filters", return_value=None):
+                        result = await search_legal_knowledge(
+                            phone="5511966830020",
+                            query="cdc disposicoes gerais",
+                            k=5,
+                            min_score=0.7,
+                        )
+
+        assert len(result["results"]) >= 1
+        assert result["results"][0]["source"] == "cdc.pdf"
+        assert result["results"][0]["score"] == 0.5
+        assert result["top_score"] == pytest.approx(0.5, abs=0.01)
+        assert result["adaptive_floor"] == 0.3
+        assert result["min_score"] == 0.7
+
+    @pytest.mark.asyncio
+    async def test_adaptive_skips_below_floor(self):
+        """Doc com score 0.2 (abaixo do floor) NAO deve ser entregue."""
+        from core.rag import search_legal_knowledge
+
+        fake_doc = _make_fake_doc(
+            doc_id="d1",
+            source_title="ruido.pdf",
+            score=0.2,
+            text_content="texto completamente irrelevante",
+        )
+
+        with patch("core.rag._get_firestore", return_value=MagicMock()):
+            with patch("core.rag.embed_query", AsyncMock(return_value=[0.0] * 1536)):
+                with patch("core.rag._find_nearest", AsyncMock(return_value=[fake_doc])):
+                    with patch("core.rag._vector_filters", return_value=None):
+                        result = await search_legal_knowledge(
+                            phone="5511966830020",
+                            query="cdc",
+                            k=5,
+                            min_score=0.7,
+                        )
+
+        assert result["results"] == []
+        assert result["top_score"] == pytest.approx(0.2, abs=0.01)
+
+    @pytest.mark.asyncio
+    async def test_adaptive_keeps_top_match_respecting_floor(self):
+        """Top-3 com mix de scores: top=0.5 mantido, 0.4 mantido, 0.1 descartado."""
+        from core.rag import search_legal_knowledge
+
+        docs = [
+            _make_fake_doc(
+                doc_id=f"d{i}",
+                source_title=f"doc{i}.pdf",
+                score=score,
+                text_content=f"chunk {i}",
+            )
+            for i, score in enumerate([0.5, 0.4, 0.1, 0.05])
+        ]
+
+        with patch("core.rag._get_firestore", return_value=MagicMock()):
+            with patch("core.rag.embed_query", AsyncMock(return_value=[0.0] * 1536)):
+                with patch("core.rag._find_nearest", AsyncMock(return_value=docs)):
+                    with patch("core.rag._vector_filters", return_value=None):
+                        result = await search_legal_knowledge(
+                            phone="5511966830020",
+                            query="cdc",
+                            k=5,
+                            min_score=0.7,
+                        )
+
+        scores_kept = [c["score"] for c in result["results"]]
+        assert 0.5 in scores_kept
+        assert 0.4 in scores_kept
+        assert 0.1 not in scores_kept
+        assert 0.05 not in scores_kept
+        assert result["top_score"] == 0.5
+
+
+def _make_fake_doc(
+    doc_id: str,
+    source_title: str,
+    score: float,
+    text_content: str,
+):
+    class _FakeDoc:
+        def __init__(self, doc_id, fields, distance):
+            self.id = doc_id
+            self._fields = fields
+
+        def to_dict(self):
+            return self._fields
+
+    return _FakeDoc(
+        doc_id=doc_id,
+        fields={
+            "source_title": source_title,
+            "text_content": text_content,
+            "class": "legal",
+            "group": "legislacao",
+            "theme": "cdc",
+            "vector_distance": 1.0 - score,
+        },
+        distance=1.0 - score,
+    )
+
+
+def _mock_firestore():
+    """Stub para ``_get_firestore``: retorna um marker nao-None."""
+
+    def _stub():
+        return MagicMock()
+
+    return _stub
+
+
+class TestClarificationPrompt:
+    """UX: clarification_prompt lista source_title conhecidos do owner."""
+
+    def test_prompt_lists_known_sources(self):
+        from agent_orchestration.knowledge_retriever import (
+            _build_clarification_prompt,
+        )
+
+        prompt = _build_clarification_prompt(
+            ["cdc-capitulo-1.pdf", "lgpd-capitulo-1.pdf"],
+            "edital",
+        )
+        assert "cdc-capitulo-1.pdf" in prompt
+        assert "lgpd-capitulo-1.pdf" in prompt
+        assert "N\u00e3o encontrei" in prompt
+        # Mensagem deve orientar o user a refinar (mencionar termo/arquivo).
+        assert "busca" in prompt.lower() or "arquivo" in prompt.lower() or "termo" in prompt.lower()
+
+    def test_prompt_fallback_when_empty(self):
+        from agent_orchestration.knowledge_retriever import (
+            _build_clarification_prompt,
+        )
+
+        prompt = _build_clarification_prompt([], "qualquer coisa")
+        assert "Voc\u00ea tem esses documentos" not in prompt
+        assert "N\u00e3o encontrei" in prompt
+        assert "mais detalhes" in prompt or "outro termo" in prompt
+
+
 class TestRerank:
     @pytest.mark.asyncio
     async def test_rerank_skips_when_no_api_key(self):
