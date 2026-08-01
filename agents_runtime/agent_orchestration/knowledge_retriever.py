@@ -348,8 +348,32 @@ def _extract_group_jid(envelope: Dict[str, Any]) -> str:
     return ""
 
 
-def _extract_phone(envelope: Dict[str, Any]) -> str:
-    return str(envelope.get("phone", "") or "")
+def _extract_phone(envelope: Optional[Dict[str, Any]]) -> str:
+    """Extrai o phone do user a partir do envelope.
+
+    Aceita 3 formatos (em ordem de precedencia):
+    1. webhook canonico: envelope["phone"]
+    2. DeepAgents state: envelope["user"]["phone"]
+    3. vazio (sinal de bug ou envelope malformado).
+
+    Patch 01/08/2026: fallback adicionado para o formato interno
+    do DeepAgents harness (que monta o state do LangGraph com
+    user aninhado). Sem fallback, _owner_hash("") virava hash de
+    string vazia e o find_nearest buscava owner_hash inexistente
+    no Firestore -> 0 hits para todo RAG privado via DeepAgents.
+    """
+    if not envelope or not isinstance(envelope, dict):
+        return ""
+    phone = str(envelope.get("phone") or "")
+    if phone:
+        return phone
+    user = envelope.get("user")
+    if isinstance(user, dict):
+        phone = str(user.get("phone") or "")
+        if phone:
+            return phone
+    logger.warning("extract_phone_empty envelope_keys=%s", list(envelope.keys())[:8])
+    return ""
 
 
 _DOC_HINT = re.compile(

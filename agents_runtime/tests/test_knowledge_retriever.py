@@ -441,6 +441,72 @@ class TestClarificationPrompt:
         assert "mais detalhes" in prompt or "outro termo" in prompt
 
 
+class TestExtractPhone:
+    """Cobre os 3 formatos de envelope que o retriever recebe:
+
+    1. webhook canonico (orchestrator direto): envelope["phone"]
+    2. DeepAgents state (via tool de LangChain): envelope["user"]["phone"]
+    3. vazio (sinal de bug no caller)
+
+    Patch 01/08/2026: o caminho #2 era ignorado, causando
+    _owner_hash("") = hash de string vazia -> find_nearest sem
+    owner_match -> 0 hits para qualquer RAG privado via
+    DeepAgents (incluindo conversas privadas normais).
+    """
+
+    def test_extract_phone_root_canonical(self):
+        """Path #1: envelope chega direto do orchestrator com phone na raiz."""
+        from agent_orchestration.knowledge_retriever import _extract_phone
+
+        envelope = {"phone": "5511966830020", "remote_jid": "...@s.whatsapp.net"}
+        assert _extract_phone(envelope) == "5511966830020"
+
+    def test_extract_phone_user_nested_deepagents(self):
+        """Path #2 (BUG): DeepAgents injetou phone em envelope.user.phone."""
+        from agent_orchestration.knowledge_retriever import _extract_phone
+
+        envelope = {
+            "user": {
+                "name": "Vinicius Rocha",
+                "phone": "5511966830020",
+                "first_name": "Vinicius",
+            },
+            "message": "...",
+        }
+        assert _extract_phone(envelope) == "5511966830020"
+
+    def test_extract_phone_root_wins_over_user(self):
+        """Path #1 tem prioridade sobre #2 (telefone direto e' mais confiavel)."""
+        from agent_orchestration.knowledge_retriever import _extract_phone
+
+        envelope = {
+            "phone": "5511966830020",
+            "user": {"phone": "5544444444444"},
+        }
+        assert _extract_phone(envelope) == "5511966830020"
+
+    def test_extract_phone_missing_logs_warning(self):
+        """Path #3: envelope sem phone em lugar nenhum -> log warning."""
+        from agent_orchestration import knowledge_retriever
+
+        envelope = {"user": {"name": "Vini"}, "message": "..."}  # sem phone
+        with patch.object(knowledge_retriever.logger, "warning") as mock_warn:
+            result = knowledge_retriever._extract_phone(envelope)
+        assert result == ""
+        mock_warn.assert_called_once()
+        # verifica que a mensagem de warn cita as chaves disponiveis
+        assert "extract_phone_empty" in mock_warn.call_args.args[0]
+        assert "envelope_keys" in mock_warn.call_args.args[0]
+
+    def test_extract_phone_none_or_empty_input(self):
+        """Path #3 edge case: envelope None ou vazio."""
+        from agent_orchestration.knowledge_retriever import _extract_phone
+
+        assert _extract_phone(None) == ""
+        assert _extract_phone({}) == ""
+        assert _extract_phone("") == ""
+
+
 class TestRerank:
     @pytest.mark.asyncio
     async def test_rerank_skips_when_no_api_key(self):
