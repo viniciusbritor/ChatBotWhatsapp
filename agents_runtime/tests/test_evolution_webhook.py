@@ -122,9 +122,62 @@ def test_extract_group_message():
     envelope = extract_envelope(SAMPLE_GROUP_PAYLOAD)
     assert envelope is not None
     assert envelope["extra"]["is_group"] is True
-    assert envelope["phone"] == "120363"
+    # Patch 01/08/2026: phone em grupo vem do key.participant, nao do remoteJid.
+    assert envelope["phone"] == "5511966830020"
     assert envelope["remote_jid"] == "120363@g.us"
     assert envelope["text"] == "Bom dia grupo"
+    assert envelope["extra"]["phone_source"] == "participant"
+
+
+def test_extract_group_phone_uses_participant_not_remotejid():
+    """Regression: phone em grupo deve vir do participant, nao do group_id.
+
+    Antes do fix (01/08/2026), o codigo pegava `remoteJid.split('@')[0]`
+    que em grupo retornava o group_id ('120363') em vez do user_phone.
+    Consequencia: _owner_hash ficava errado, RAG pessoal nunca encontrava,
+    e _is_user_member retornava False para todos.
+    """
+    envelope = extract_envelope(SAMPLE_GROUP_PAYLOAD)
+    assert envelope is not None
+    # phone do user, NAO do grupo
+    assert envelope["phone"] == "5511966830020"
+    assert envelope["phone"] != "120363"
+    # group_jid preservado em remote_jid (nao foi perdido)
+    assert envelope["remote_jid"].endswith("@g.us")
+
+
+def test_extract_group_falls_back_to_remotejid_when_participant_missing():
+    """Se a Evolution API nao mandar `participant` (improvavel em v2.3.7),
+    faz fallback para `remoteJid` (comportamento antigo, evita None).
+    """
+    payload = {
+        "event": "MESSAGES_UPSERT",
+        "instance": "jennifer",
+        "data": {
+            "key": {
+                "remoteJid": "120363@g.us",
+                "fromMe": False,
+                "id": "NO_PARTICIPANT_001",
+                # sem participant
+            },
+            "pushName": "Vini",
+            "message": {"conversation": "sem participant"},
+            "messageType": "conversation",
+        },
+    }
+    envelope = extract_envelope(payload)
+    assert envelope is not None
+    # Fallback: usa remoteJid (group_id) em vez de quebrar.
+    assert envelope["phone"] == "120363"
+    assert envelope["extra"]["phone_source"] == "remote_jid"
+
+
+def test_extract_private_phone_source_is_remotejid():
+    """Em privado (sem @g.us), phone vem sempre de remoteJid."""
+    envelope = extract_envelope(SAMPLE_TEXT_PAYLOAD)
+    assert envelope is not None
+    assert envelope["extra"]["phone_source"] == "remote_jid"
+    assert envelope["phone"] == "5511966830020"
 
 
 def test_filter_fromMe():
@@ -340,8 +393,10 @@ def test_extract_document_group_with_caption_fallback():
     assert envelope["extra"]["has_document"] is True
     assert envelope["extra"]["doc_file_name"] == "ata_reuniao.pdf"
     assert envelope["extra"]["is_group"] is True
-    assert envelope["phone"] == "120363"
+    # Patch 01/08/2026: phone em grupo vem do key.participant.
+    assert envelope["phone"] == "5511966830020"
     assert envelope["remote_jid"] == "120363@g.us"
+    assert envelope["extra"]["phone_source"] == "participant"
 
 
 def test_extract_document_text_falls_back_to_filename_when_no_caption():

@@ -72,19 +72,28 @@ def extract_envelope(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if "@broadcast" in remote_jid:
         return None
 
-    phone = remote_jid.split("@", 1)[0]
+    is_group = "@g.us" in remote_jid
+    participant_jid = str(key.get("participant") or message.get("participant") or "")
+
+    # Em GRUPO, o phone vem do participant (user individual). Em PRIVADO,
+    # do remoteJid. Fallback para remoteJid se participant ausente.
+    if is_group and participant_jid and "@" in participant_jid:
+        phone = participant_jid.split("@", 1)[0]
+        phone_source = "participant"
+    else:
+        phone = remote_jid.split("@", 1)[0]
+        phone_source = "remote_jid"
     if not phone or not phone[0].isdigit():
         return None
 
     message_id = str(key.get("id") or message.get("id") or "")
     sender_name = str(data.get("pushName") or "")
 
-    is_group = "@g.us" in remote_jid
-
     text = ""
     extra: Dict[str, Any] = {
         "is_group": is_group,
         "raw_message_type": str(data.get("messageType") or ""),
+        "phone_source": phone_source,
     }
 
     if "conversation" in message and isinstance(message["conversation"], str):
