@@ -377,7 +377,6 @@ DRIVE_KEYWORDS = [
     "quero no gdrive", "manda pra mim", "envia pra mim",
     "lista os arquivos", "liste os arquivos", "lista de arquivos",
     "mostrar arquivos", "lista os arquivos do drive",
-    "ache a ata", "procure a ata", "buscar arquivos",
     "dentro desse drive", "nesse drive", "dentro desse gdrive",
     "nesse gdrive", "dentro do drive",
 ]
@@ -385,9 +384,10 @@ DRIVE_KEYWORDS_REMOVED = [
     "documento", "documentos", "arquivo", "arquivos",
     "pasta", "upload", "omnichannel", "atividades", "baixar",
     "encontrar arquivo", "meus arquivos", "meus documentos",
-    "buscar arquivo", "procurar documento", "ata", "minuta", "relatorio",
+    "buscar arquivo", "buscar arquivos", "procurar documento", "ata", "minuta", "relatorio",
     "apresentação", "apresentacao", "docx", "pdf", "xlsx", "planilha",
     "leia o arquivo", "leia a ata", "abra o arquivo",
+    "ache a ata", "procure a ata",
 ]
 EMAIL_KEYWORDS = [
     "email", "e-mail", "emails", "e-mails",
@@ -1891,8 +1891,6 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
         return await _finalize_orchestration(
             payload, masked_text, sender_name, result, path, cache_key
         )
-
-    specialist_id = _resolve_agent_for_intent(intent, instance)
 
     if _is_personal_intent(intent) and _is_group_message(payload):
         group_jid = extra.get("remote_jid", "") or _extract_group_jid(payload)

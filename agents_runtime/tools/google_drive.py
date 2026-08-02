@@ -276,6 +276,7 @@ async def find_omnichannel_atas_folder(phone: str, instance: str = "") -> Dict[s
         return {"error": "failed to create Atas folder"}
     except HttpError as e:
         logger.error(f"Drive find_omnichannel_atas_folder error: {e}")
+        return {"error": str(e)}
 
 
 _MAX_EXTRACT_CHARS = 12000  # ~2000 palavras / ~8 paginas, cobrem 95% dos casos
