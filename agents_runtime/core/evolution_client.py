@@ -186,7 +186,11 @@ async def send_image(
 ) -> Dict[str, Any]:
     """Send an image attachment to WhatsApp via Evolution API.
 
-    Uses multipart/form-data on POST /message/sendImage/{instance}.
+    Uses JSON body on POST /message/sendMedia/{instance} com
+    mediatype='image' e media em base64 inline. O endpoint antigo
+    /message/sendImage/{instance} foi removido na Evolution API
+    atual (retorna 404).
+
     The image preview is shown inline by WhatsApp clients; the bot
     can pair this with ``send_text`` for a caption, or pass an
     explicit ``caption`` to inline a short description.
@@ -211,22 +215,24 @@ async def send_image(
     base_url, api_key = _config()
     instance = _resolve_instance_name() if instance.lower() == (os.getenv("INSTANCE") or "jennifer").lower() else instance
     logger.debug("evolution_send_image instance=%s phone=%s bytes=%d", instance, phone, len(image_bytes))
-    files = {
-        "file": (filename, image_bytes, mime_type),
-    }
-    data = {
+    import base64 as _b64
+    payload = {
         "number": _target(phone, remote_jid),
-        "delay": max(0, min(int(delay_ms), 15000)),
-        "presence": presence,
+        "mediatype": "image",
+        "media": _b64.b64encode(image_bytes).decode("ascii"),
+        "fileName": filename,
     }
+    if delay_ms:
+        payload["delay"] = max(0, min(int(delay_ms), 15000))
+    if presence:
+        payload["presence"] = presence
     if caption:
-        data["caption"] = caption[:1024]
+        payload["caption"] = caption[:1024]
     async with httpx.AsyncClient(timeout=_request_timeout(30)) as client:
         response = await client.post(
-            f"{base_url}/message/sendImage/{instance}",
-            data=data,
-            files=files,
-            headers={"apikey": api_key},
+            f"{base_url}/message/sendMedia/{instance}",
+            json=payload,
+            headers={"apikey": api_key, "Content-Type": "application/json"},
         )
     if response.status_code >= 400:
         raise EvolutionDeliveryError(
