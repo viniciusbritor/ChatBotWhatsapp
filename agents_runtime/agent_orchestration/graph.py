@@ -299,6 +299,8 @@ async def guard_node(state: TurnState) -> TurnState:
 
 
 def _pick_capability(intent: Dict[str, bool]) -> Optional[str]:
+    if intent.get("is_rag"):
+        return "knowledge.retrieve"
     if intent.get("is_drive"):
         return "drive.search_files"
     if intent.get("is_email"):

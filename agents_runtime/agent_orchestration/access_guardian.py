@@ -40,6 +40,7 @@ ALLOWED_CAPABILITIES = {
     "drive.write",
     "calendar.read",
     "calendar.write",
+    "knowledge.retrieve",
 }
 
 CAPABILITY_SCOPE_MAP = {
@@ -137,6 +138,16 @@ def decide_guardian(
             instance=instance,
             phone=phone,
             reason="not_owner",
+        )
+
+    if cap == "knowledge.retrieve":
+        return GuardianDecision(
+            verdict="allow",
+            capability=capability,
+            instance=instance,
+            phone=phone,
+            reason="rag_no_oauth_required",
+            granted_scopes=[],
         )
 
     if not token_data:

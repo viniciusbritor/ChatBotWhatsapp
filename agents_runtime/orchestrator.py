@@ -2632,6 +2632,8 @@ async def _run_guard_graph(payload: Dict[str, Any], masked_text: str, intent: Di
 
 
 def _intent_to_capability(intent: Dict[str, bool]) -> str:
+    if intent.get("is_rag"):
+        return "knowledge.retrieve"
     if intent.get("is_calendar"):
         return "calendar.list_events"
     if intent.get("is_email"):
