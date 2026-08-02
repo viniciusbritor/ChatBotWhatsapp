@@ -188,11 +188,25 @@ def _keyword_classify(text: str, last_intent: Optional[Dict[str, bool]] = None) 
             "que voce guardou", "que voce salvou", "que voce memorizou",
             "memorizou", "memorizado", "memorizada", "indexado",
             "indexada", "indexados", "salvou", "salvamos", "gravamos",
-            "guardamos", "armazenamos",
+            "guardamos", "armazenamos", "vc tem na base", "voce tem na base",
+            "seus documentos", "meus documentos", "documentos salvos",
+            "documentos indexados", "arquivos salvos",
         )
     )
     if is_rag_explicit:
         return {"is_calendar": False, "is_drive": False, "is_email": False, "is_rag": True}
+
+    # B2: se last_intent era RAG, "esse documento", "esse arquivo", "esse pdf"
+    # referem-se a base de conhecimento, nao ao Drive
+    if last_intent and last_intent.get("is_rag"):
+        has_doc_ref = any(kw in t for kw in ("esse documento", "esse arquivo", "esse pdf",
+                                               "desse documento", "desse arquivo", "nesse documento",
+                                               "nesse arquivo", "o documento", "o arquivo",
+                                               "do documento", "do arquivo"))
+        if has_doc_ref:
+            is_drive = False
+            is_calendar = False
+            is_email = False
 
     active_count = sum([is_drive, is_calendar, is_email])
     if active_count <= 1:
