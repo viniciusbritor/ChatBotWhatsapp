@@ -33,11 +33,13 @@ def _get_credentials(phone: str) -> Credentials:
     logic and persists the rotated token back to Firestore.
     """
     if not phone:
+        logger.error("calendar_oauth_missing phone=empty")
         raise RuntimeError("phone_required_for_calendar_oauth")
     from core.oauth_per_user import get_user_credentials
 
     creds = get_user_credentials(phone)
     if creds is None:
+        logger.error("calendar_oauth_missing phone=%s", phone)
         raise RuntimeError("user_google_oauth_required")
     return creds
 

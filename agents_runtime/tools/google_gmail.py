@@ -28,11 +28,13 @@ _gmail_services: Dict[str, Any] = {}
 def _get_credentials(phone: str) -> Credentials:
     """Load Google OAuth credentials for the given user (per-user, Fase D)."""
     if not phone:
+        logger.error("gmail_oauth_missing phone=empty")
         raise RuntimeError("phone_required_for_gmail_oauth")
     from core.oauth_per_user import get_user_credentials
 
     creds = get_user_credentials(phone)
     if creds is None:
+        logger.error("gmail_oauth_missing phone=%s", phone)
         raise RuntimeError("user_google_oauth_required")
     return creds
 
