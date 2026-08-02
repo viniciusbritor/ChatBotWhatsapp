@@ -208,3 +208,110 @@ def _cleanup_agents_cache():
     agents.reset_cache()
     yield
     agents.reset_cache()
+
+
+class TestManagerPromptsAntiHallucination:
+    """Garante que os prompts dos 3 managers Google (calendar/email/drive)
+    seguem as regras anti-alucinacao de UI admin (bug 01/08/2026).
+
+    O bug original era: o prompt de manager-drive dizia 'NUNCA diga que
+    esta sem acesso' enquanto o codigo retornava 'folder_permission_required'
+    com URL /admin/users/.../folder-permissions. A LLM inventava uma UI
+    'Admin > Usuarios > Permissoes' que nao existe. Estes testes
+    protegem contra a regressao.
+    """
+    # Substrings proibidas NAO podem aparecer FORA de uma guarda
+    # 'NAO ...' / 'NUNCA ...'. Ou seja: o prompt pode MENCIONAR a string
+    # para ENSINAR a LLM a nao usa-la, mas nao pode usa-la em user-facing.
+    NEGATIVE_GUARDS = (
+        "NAO invente URLs internas",
+        "NAO invente caminhos de menu",
+        "NAO exponha termos tecnicos",
+        "NUNCA diga",
+    )
+
+    @pytest.mark.parametrize("manager_id", [
+        "manager-calendar",
+        "manager-email",
+        "manager-drive",
+    ])
+    def test_prompt_has_explicit_negation_guards(self, manager_id):
+        """Prompt deve conter guardas explicitas 'NAO/NUNCA' sobre
+        alucinacao de UI admin. Sem essas guardas, o bug volta."""
+        from deepagent_layer.agents import MANAGER_PROMPTS
+        prompt = MANAGER_PROMPTS[manager_id]
+        # Todos os 3 managers devem ter o bloco [ERRO DE PERMISSAO]
+        assert "[ERRO DE PERMISSAO]" in prompt, (
+            f"{manager_id} must have an explicit [ERRO DE PERMISSAO] block "
+            f"to prevent admin UI hallucination"
+        )
+        assert "NAO invente URLs internas" in prompt
+        assert "NAO invente caminhos de menu" in prompt
+        assert "NAO exponha termos tecnicos" in prompt
+
+    @pytest.mark.parametrize("manager_id", [
+        "manager-calendar",
+        "manager-email",
+        "manager-drive",
+    ])
+    def test_recognizes_permission_error_codes(self, manager_id):
+        """Prompt deve instruir a LLM a reconhecer os codigos reais de erro."""
+        from deepagent_layer.agents import MANAGER_PROMPTS
+        prompt = MANAGER_PROMPTS[manager_id]
+        for token in ("folder_permission_required", "scope_missing", "oauth_missing"):
+            assert token in prompt, (
+                f"{manager_id} prompt must mention {token!r} so LLM "
+                f"recognizes the real tool error code."
+            )
+
+    @pytest.mark.parametrize("manager_id", [
+        "manager-calendar",
+        "manager-email",
+        "manager-drive",
+    ])
+    def test_points_to_real_portal_url(self, manager_id):
+        """Prompt deve apontar para o Portal Coherence real (nao inventar URL)."""
+        from deepagent_layer.agents import MANAGER_PROMPTS
+        prompt = MANAGER_PROMPTS[manager_id]
+        assert "Portal" in prompt
+        assert "coherence" in prompt.lower()
+
+    @pytest.mark.parametrize("manager_id", [
+        "manager-calendar",
+        "manager-email",
+        "manager-drive",
+    ])
+    def test_no_positive_use_of_admin_urls(self, manager_id):
+        """Prompt NAO deve usar /admin/... em contexto positivo (so em NAO/NUNCA)."""
+        from deepagent_layer.agents import MANAGER_PROMPTS
+        prompt = MANAGER_PROMPTS[manager_id]
+        # Remove todos os trechos 'NAO ...' ou 'NUNCA ...' e checa se sobra
+        # algum /admin/ em contexto positivo.
+        sanitized = prompt
+        for guard in self.NEGATIVE_GUARDS:
+            # remove sentences starting with guard
+            import re
+            sanitized = re.sub(
+                rf"{guard}[^.]*\.",
+                "",
+                sanitized,
+            )
+        # Se sobrou /admin/ no texto sanitizado, e uso positivo
+        assert "/admin/" not in sanitized, (
+            f"{manager_id} prompt uses /admin/ in POSITIVE context "
+            f"(outside NAO/NUNCA guards). Bot may leak admin URLs to users."
+        )
+        # E nao pode ter a frase literal "Admin > Usuarios" como instrucao
+        assert "Admin > Usuarios" not in prompt or \
+               "NAO invente caminhos de menu ('Admin > Usuarios > Permissoes')" in prompt, (
+            f"{manager_id} prompt mentions 'Admin > Usuarios' as instruction "
+            f"instead of as anti-hallucination warning."
+        )
+
+    def test_legacy_drive_prompt_contradiction_removed(self):
+        """manager-drive NAO deve mais ter a frase antiga 'voce SEMPRE tem acesso'
+        que conflitava com erros reais de permissao."""
+        from deepagent_layer.agents import MANAGER_PROMPTS
+        prompt = MANAGER_PROMPTS["manager-drive"]
+        assert "voce SEMPRE tem acesso" not in prompt
+        assert "NUNCA diga 'estou sem acesso ao Drive'" not in prompt
