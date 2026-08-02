@@ -14,12 +14,20 @@ concedida, não há dados retornados.
 Default off: o guard de folder_permissions respeita env var
 ``RAG_FOLDER_PERMISSIONS_ENFORCE`` (default "true" em runtime). Em
 dev/test pode-se desligar com ``RAG_FOLDER_PERMISSIONS_ENFORCE=false``.
+
+Owner bypass (Fase 01/08/2026): o owner da instance (já validado por
+``deny_if_not_owner``) tem acesso total aos próprios dados sem precisar
+de grants em folder_permissions. TASK B continua valendo para
+non-owners (preparação para multi-user futuro). Resolve o bug onde TASK B
+bloqueava o owner porque whitelist estava vazia — agora tools não podem
+falhar para o owner.
 """
 from __future__ import annotations
 
 import functools
 import logging
 import os
+import re
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from core.owner import OwnerResolution, deny_if_not_owner, resolve_owner
@@ -85,6 +93,12 @@ def _check_folder_permission(
       (a tool cuida de filtrar a partir do lado servidor; aqui só bloqueamos
       tentativas de bypass explícito).
     - whitelist populada, kwargs referencia pattern fora da whitelist -> deny.
+
+    Owner bypass (01/08/2026): o caller ``_invoke_with_guard`` já validou
+    que o phone é o owner da instance via ``deny_if_not_owner``. Quando o
+    bypass está ativo, retornamos ``None`` (allow) sem consultar Firestore,
+    eliminando o vetor de falha onde folder_permissions vazio bloqueia o
+    owner. TASK B continua valendo para non-owners (preparação multi-user).
     """
     if not is_enforce_enabled():
         return None
@@ -93,6 +107,29 @@ def _check_folder_permission(
             "error": "missing_phone",
             "message": "tool chamada sem phone, nao foi possivel checar permissoes",
         }
+
+    # Owner bypass: phone que resolve para owner da instance recebe allow
+    # sem consultar folder_permissions. Dupla validação: deny_if_not_owner
+    # no caller (_invoke_with_guard) já confirmou owner.
+    instance = str(kwargs.get("instance", "") or kwargs.get("_instance", ""))
+    if instance:
+        try:
+            resolution = resolve_owner(instance, fallback_phone=phone)
+            if resolution is not None:
+                digits = re.sub(r"\D", "", phone or "")
+                if digits and any(digits == c for c in resolution.owner_candidates):
+                    logger.info(
+                        "owner_bypass_folder_permission phone=%s capability=%s instance=%s",
+                        phone, capability, instance,
+                    )
+                    return None  # allow
+        except Exception as exc:
+            # Fail-open: se nao conseguir resolver owner, segue com check
+            # normal (defesa em profundidade).
+            logger.debug(
+                "owner_bypass_check_failed phone=%s exc=%s", phone, exc,
+            )
+
     try:
         from core.folder_permissions import get_user_allowed_tools
 

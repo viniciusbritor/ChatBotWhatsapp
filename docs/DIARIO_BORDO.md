@@ -1,5 +1,51 @@
 # Diário de Bordo — ChatBotWhatsapp
 
+## 01/08/2026 (continuação) — Owner bypass em TASK B + Evolution reset
+
+### Contexto
+Após o Fix manager-prompt-hallucination (commit 06808cc), usuário
+indicou que "as tools NAO podem falhar" — band-aid de prompt nao era
+suficiente. TASK B enforcement tem lock-down default que bloqueia
+tools quando folder_permissions esta vazio, mesmo para o owner.
+
+Em paralelo, instancia Evolution "Jennifer" perdeu conexao com WhatsApp
+(22:14 BRT, disconnection_reason="device_removed" tipo conflict). Rate
+limit do WhatsApp bloqueou tentativas subsequentes ("Tente novamente
+mais tarde"). Bot ficou offline ate reconexao.
+
+### Mudanca
+- `core/owner_guard.py::_check_folder_permission`: bypass para owner.
+  Se `phone` resolve para owner da instance via `resolve_owner`,
+  retorna `None` (allow) sem consultar Firestore. Dupla validacao:
+  `deny_if_not_owner` no caller `_invoke_with_guard` ja confirmou
+  owner. TASK B continua valendo para non-owners (preparacao multi-user).
+- `tests/test_owner_guard.py` (novo, 6 classes, 21 testes): bypass ativo
+  para 13 capabilities Google; bypass nao chama get_user_allowed_tools;
+  bypass funciona com phone em formatos variados; non-owner continua
+  bloqueado; bypass desativado por RAG_FOLDER_PERMISSIONS_ENFORCE=false;
+  resolve_owner exception -> fail-open para check normal.
+
+### Por que Opcao 2 e nao 1/3/4
+- Opcao 1 (auto-grant): adiciona Firestore round-trip + precisa LGPD
+- Opcao 3 (fail-open): reverte TASK B — perda de investimento Fase B
+- Opcao 4 (service-account): requer reconfiguracao Google Workspace
+
+### Operacional — Evolution reset
+- DELETE /instance/logout/Jennifer (parar loop que piorava rate limit)
+- DELETE /instance/Jennifer (limpar sessao)
+- Espera 30-60min (rate limit expirar)
+- POST /instance/create com mesma config
+- POST /webhook/set/Jennifer (mesma URL Cloud Run)
+- GET /instance/connect/Jennifer (gerar QR)
+- User escaneia
+- GET /instance/connectionState/Jennifer (validar state=open)
+
+### Validacao
+- Suite: tests/test_owner_guard.py + tests/test_folder_permissions.py + tests/test_orchestrator.py + tests/test_deepagent_layer.py + tests/test_google_*.py -> 177 passed
+- Logs Cloud Run: 0 folder_permission_required para owner apos deploy
+- Evolution: connectionState=open apos QR escaneado
+- Webhook: POST /webhook 200 OK chegando no Cloud Run
+
 ## 01/08/2026 — 3 commits: fix webhook (participant) + fix retriever (user.phone) + feat group-rag (default group)
 
 ### Contexto
