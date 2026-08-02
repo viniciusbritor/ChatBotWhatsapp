@@ -7,9 +7,9 @@ import os
 import re
 import secrets
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
-from core.timezone import BRT, now_brt
+from core.timezone import now_brt
 
 import requests
 from google.oauth2.credentials import Credentials

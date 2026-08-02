@@ -14,11 +14,9 @@ Uso (Cloud Run Job):
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 import os
 import sys
-from pathlib import Path
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

@@ -8,7 +8,7 @@ Functions:
 """
 import os
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Dict, Any
 from core.timezone import now_brt
 

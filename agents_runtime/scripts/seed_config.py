@@ -1,4 +1,3 @@
-from core.timezone import now_brt
 """Seed config/, new agents, and new skills into Firestore (upsert mode)."""
 import os
 import sys

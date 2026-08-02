@@ -7,8 +7,6 @@ Verifies that:
 """
 import asyncio
 import logging
-import os
-import sys
 
 logging.basicConfig(level=logging.INFO)
 

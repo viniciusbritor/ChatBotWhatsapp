@@ -2,7 +2,6 @@
 
 Used by agent_loader.seed_default_data() on first startup.
 """
-from datetime import datetime, timedelta, timezone
 from core.timezone import now_brt
 
 def _now_iso():

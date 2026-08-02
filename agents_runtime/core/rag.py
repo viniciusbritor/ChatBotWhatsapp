@@ -711,7 +711,6 @@ async def search_legal_knowledge(
             _vector_filters(_owner_hash(phone), extra_filters or None),
         )
         ADAPTIVE_FLOOR = 0.3
-        ADAPTIVE_DELIVER = max(min_score - 0.2, 0.3)
         chunks = []
         scores = []
         for document in documents:

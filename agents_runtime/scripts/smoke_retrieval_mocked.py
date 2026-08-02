@@ -7,8 +7,6 @@ Verifies:
 """
 import asyncio
 import logging
-import os
-import sys
 
 logging.basicConfig(level=logging.INFO)
 
@@ -17,8 +15,7 @@ PHONE = "5511966830020"
 
 
 async def main_async() -> None:
-    from unittest.mock import AsyncMock, MagicMock, patch
-    from google.cloud import firestore
+    from unittest.mock import patch
 
     # Mock OpenAI embedding to return a deterministic vector based on text length
     async def fake_embed(text):

@@ -289,7 +289,7 @@ async def task_b_enforcement(client, phone, taxonomy_by_title):
             return {"id": "new", "name": self.body.get("name"), "mimeType": "application/pdf"}
 
     with patch("tools.google_drive._get_service", return_value=_FakeDriveService()):
-        from tools.google_drive import search_files, upload_file, list_folder
+        from tools.google_drive import search_files, upload_file
 
         # E1: lock-down sem whitelist -> error
         r = await search_files(phone="5511966830020", query="")
@@ -333,7 +333,7 @@ async def run_smoke() -> int:
         return 1
     pdfs = sorted(GOLDENSET_DIR.glob("*.pdf"))
     if not pdfs:
-        print(f"[ERRO] Nenhum PDF em GoldenSet. Rode: python -m scripts.build_golden_set")
+        print("[ERRO] Nenhum PDF em GoldenSet. Rode: python -m scripts.build_golden_set")
         return 1
     print(f"[0] PDFs encontrados: {[p.name for p in pdfs]}")
 

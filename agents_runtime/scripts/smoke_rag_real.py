@@ -21,7 +21,6 @@ import asyncio
 import logging
 import os
 import sys
-from pathlib import Path
 from unittest.mock import patch
 
 logging.basicConfig(level=logging.INFO)
@@ -119,19 +118,18 @@ class _FirestoreCollection:
 
     def where(self, *args, **kwargs):
         field = None
-        op = "=="
+        op = "=="  # noqa: F841
         value = None
         if args:
             field = args[0]
             if len(args) >= 2:
-                op = args[1]
+                _op = args[1]  # noqa: F841
             if len(args) >= 3:
                 value = args[2]
         if kwargs.get("filter") is not None:
             fil = kwargs["filter"]
             if hasattr(fil, "field") and hasattr(fil, "op_string"):
                 field = fil.field
-                op = fil.op_string
                 value = fil.value
         filtered = [d for d in self._docs if d.to_dict().get(field) == value]
         return _FirestoreCollection(self._name, filtered)
@@ -311,7 +309,7 @@ async def run_smoke() -> int:
         else:
             print("  OK: detalhe retornou chunks")
 
-    print(f"\n=== /admin/status (LLM unico) ===")
+    print("\n=== /admin/status (LLM unico) ===")
     with patch("main._short_sha", return_value="abc1234"):
         resp = test_api.get("/admin/status", headers=headers)
     body = resp.json()
@@ -329,7 +327,7 @@ async def run_smoke() -> int:
     else:
         print("  OK: kpis sem stt_fallback (limpos)")
 
-    print(f"\n=== /admin/agents UI helpers (render_dashboard) ===")
+    print("\n=== /admin/agents UI helpers (render_dashboard) ===")
     from core.module_ui import render_dashboard
     html = render_dashboard("abc1234", "2026-07-30T00:00:00Z")
     has_edit = "editAgentForm" in html and "data-edit=" in html or 'data-delete=' in html
@@ -349,7 +347,7 @@ def _fake_find_nearest(db, collection_name, query_vector, limit, filters=None):
     """Stub deterministico: retorna todos os docs do Firestore fake com
     score artificial. Suficiente para validar pipeline sem Firestore real."""
     try:
-        coll = db.collection(collection_name)
+        db.collection(collection_name)
     except Exception:
         return []
     target = collection_name

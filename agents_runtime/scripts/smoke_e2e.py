@@ -126,7 +126,8 @@ async def _check_retrieval_logic() -> Dict[str, Any]:
     def _fake_get_firestore_member(*args, **kwargs):
         class _Member:
             exists = True
-            to_dict = lambda self: {"is_active": True}
+            def to_dict(self):
+                return {"is_active": True}
         return _Member()
 
     with patch("core.rag._get_firestore", return_value=database), \

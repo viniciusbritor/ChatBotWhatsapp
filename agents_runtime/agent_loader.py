@@ -3,10 +3,9 @@ import os
 import time
 import logging
 import threading
-from datetime import datetime
 from typing import Dict, Any, Optional, List
 
-from core.timezone import BRT, now_brt
+from core.timezone import now_brt
 
 logger = logging.getLogger(__name__)
 

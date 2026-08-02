@@ -19,7 +19,7 @@ import os
 import threading
 import time
 from collections import defaultdict, deque
-from typing import Deque, Dict, Tuple
+from typing import Deque, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 

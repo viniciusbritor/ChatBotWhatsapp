@@ -10,12 +10,11 @@ import os
 import sys
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Optional, Dict, Any, List
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import httpx
 
 from core.llm_provider import LLMProvider, LLMError
 from core.proactive_gate import (
@@ -25,7 +24,6 @@ from core.proactive_gate import (
     is_prohibited_template,
 )
 from tools.google_calendar import list_events
-from core.secrets import get_secret
 from core.timezone import now_brt
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))

@@ -212,7 +212,6 @@ def render_table_png(
     )
 
     y = padding_px + title_height + padding_px // 2
-    header_y = y
     col_w = (max_width_px - 2 * padding_px) // col_count
     for i in range(col_count):
         x = padding_px + i * col_w + 8

@@ -6,8 +6,6 @@ Run via: python scripts/backfill_categorizer.py
 import asyncio
 import hashlib
 import logging
-import os
-import sys
 from collections import defaultdict
 from typing import Any, Dict
 

@@ -1,6 +1,4 @@
-import hashlib
 import subprocess
-import os
 
 # Token ASCII puro (sem BOM)
 clean_token = "764db1dde013737b2abf60d683f2e2d1a22dd709c864b600de25eedf7bb75a60"

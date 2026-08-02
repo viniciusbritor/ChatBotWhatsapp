@@ -2,7 +2,6 @@ import argparse
 import asyncio
 import os
 import sys
-from datetime import datetime, timezone, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("GCP_PROJECT", "coherence-ominichannel-fs")

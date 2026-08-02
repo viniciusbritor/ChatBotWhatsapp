@@ -36,7 +36,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import datetime
 import io
 import json
 import logging
@@ -52,7 +51,6 @@ from google.cloud import storage  # type: ignore  # noqa: E402
 
 from core.masker import mask_pii  # noqa: E402
 from core.rag import (  # noqa: E402
-from core.timezone import now_brt
     EMBEDDING_DIM,
     EMBEDDING_MODEL,
     PRIVATE_COLLECTION,
@@ -60,6 +58,7 @@ from core.timezone import now_brt
     _chunk_text,
     embed_documents,
 )
+from core.timezone import now_brt  # noqa: E402
 
 
 logger = logging.getLogger("ingest_collective_memory")
@@ -175,7 +174,7 @@ async def _run(args: argparse.Namespace) -> int:
 
     if args.inline:
         text = args.title_payload or ""
-        title = args.title
+        title_text = args.title  # noqa: F841
     else:
         text = _extract_text(args.bucket, args.object)
 

@@ -3,11 +3,11 @@ import hashlib
 import logging
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.masker import mask_pii
-from core.timezone import BRT, now_brt, to_brt
+from core.timezone import BRT, now_brt
 
 logger = logging.getLogger(__name__)
 

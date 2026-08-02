@@ -10,7 +10,7 @@ import os
 import sys
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Optional, Dict, Any, List
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -96,9 +96,9 @@ async def find_recent_meetings(phone: str) -> List[Dict[str, Any]]:
     """Find meetings that ended 30±10 minutes ago for the given user."""
     now = now_brt()
     brt_offset = timedelta(hours=-3)
-    now_brt = now + brt_offset
-    window_start_brt = now_brt - timedelta(minutes=ATA_LOOKBACK_MIN + ATA_LOOKBACK_WINDOW_MIN)
-    window_end_brt = now_brt - timedelta(minutes=ATA_LOOKBACK_MIN - ATA_LOOKBACK_WINDOW_MIN)
+    local_now = now + brt_offset
+    window_start_brt = local_now - timedelta(minutes=ATA_LOOKBACK_MIN + ATA_LOOKBACK_WINDOW_MIN)
+    window_end_brt = local_now - timedelta(minutes=ATA_LOOKBACK_MIN - ATA_LOOKBACK_WINDOW_MIN)
 
     result = await list_events(
         phone,

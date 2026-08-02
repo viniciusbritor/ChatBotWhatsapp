@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 from core.llm_provider import LLMProvider as _LLMProvider
-from core.timezone import BRT, now_brt, to_brt
+from core.timezone import now_brt, to_brt
 
 HEALTH_WINDOW_SEC = int(os.getenv("AGENT_HEALTH_WINDOW_SEC", "86400"))
 

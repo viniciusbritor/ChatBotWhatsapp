@@ -1,6 +1,5 @@
 """Seed default agents, skills, and tools to Firestore."""
 import sys
-import os
 
 sys.path.insert(0, "C:/Users/vinic/workspace_antigravity/ChatBotWhatsapp/agents_runtime")
 
