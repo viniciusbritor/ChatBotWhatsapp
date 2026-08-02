@@ -1,4 +1,46 @@
-# Diário de Bordo — ChatBotWhatsapp
+# Diario de Bordo — ChatBotWhatsapp
+
+## 02/08/2026 (04:30 BRT) — Loop de Acesso: Inicio do Plano de 5 Fases
+
+### Contexto
+Usuario reportou que NENHUMA funcionalidade do modulo Agentes Omnichannel
+funciona via WhatsApp: RAG retrieval retorna "nao encontrei", Google
+tools (email/calendar/drive) respondem "Precisa liberar acesso", e o
+Portal `/admin/dashboard` perdeu interfaces de gestao.
+
+### Diagnostico (Fase 1 — 04:30 BRT)
+
+- Cloud Run: RUNNING (rev 00263, commit 75d2eed)
+- **OAuth do owner OK**: token valido, 5 escopos presentes
+- **Owner resolution OK**: Jennifer -> 5511966830020
+- **RAG docs OK**: 7 documentos, 3 fontes
+- **RAG retrieval funciona local**: scores 0.44-0.57
+- Baseline testes: 866 passed, 0 failed (commit 75d2eed)
+- Lint: 75 erros (antes da correcao)
+
+### Plano de 5 Loops
+```
+LOOP 1: Bug B1 — skip_guard para intents pessoais (orchestrator.py)
+LOOP 2: Bug B2 — keyword classification RAG (graph.py)
+LOOP 3: Bug B3 — capability mapping is_rag (orchestrator + access_guardian)
+LOOP 4: Bug B4+B5 — mensagens erro + logs Google tools
+LOOP 5: Validacao cruzada — deploy + smoke WhatsApp
+```
+
+### Gate por Loop
+Cada loop: 0 falhas pytest + 0 erros lint = avanca.
+Rollback: `git revert <commit>` isolado por loop.
+
+---
+
+## 02/08/2026 (04:45 BRT) — Loop 0: Lint Fixes
+
+- `ruff --fix` + correcoes manuais: 75 -> 0 erros
+- Script `diag_oauth_check.py` criado
+- Commit: `160cbe8` na branch `loop/access-fix-02aug`
+- Suite: 866 passed, 0 failed. Lint: clean. Gate: PASSOU.
+
+---
 
 ## 01/08/2026 (continuação) — Owner bypass em TASK B + Evolution reset
 

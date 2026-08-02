@@ -1413,7 +1413,7 @@ async def _execute_single_specialist(
     agent_copy = dict(agent)
     prefetch_data = None
 
-    skip_guard = (
+    skip_guard = not _is_personal_intent(intent) and (
         specialist_id.startswith("manager-")
         and _agent_has_tool(specialist_id, "calendar.")
         or specialist_id.startswith("manager-")
