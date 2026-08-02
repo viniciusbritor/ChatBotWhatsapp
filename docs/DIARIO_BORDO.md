@@ -40,6 +40,23 @@ Rollback: `git revert <commit>` isolado por loop.
 - Commit: `160cbe8` na branch `loop/access-fix-02aug`
 - Suite: 866 passed, 0 failed. Lint: clean. Gate: PASSOU.
 
+## 02/08/2026 (05:15 BRT) — Loops 1-4: Correcoes de Acesso (B1-B5)
+
+### Commits
+| Commit | Bug | Descricao |
+|---|---|---|
+| `301f3f6` | B1 | guardian roda sempre para intents pessoais (email/calendar/drive) |
+| `9ec8b41` | B2 | _keyword_classify protege refs a documentos no contexto RAG |
+| `7a0a536` | B3 | capability knowledge.retrieve — guardian permite RAG sem OAuth |
+| `59f2a3b` | B5 | logs estruturados (gmail/drive/calendar_oauth_missing) |
+
+### Validacao local
+- Suite: **866 passed, 34 skipped, 12 warnings, 0 failed**
+- Lint: **All checks passed!**
+
+### Rollback
+`git revert 59f2a3b 7a0a536 9ec8b41 301f3f6`
+
 ---
 
 ## 01/08/2026 (continuação) — Owner bypass em TASK B + Evolution reset
