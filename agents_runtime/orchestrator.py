@@ -2245,6 +2245,9 @@ async def _execute_deep_agent(
     if instance:
         config["configurable"]["instance"] = instance
         config["configurable"]["_instance"] = instance
+    from core.runtime_context import set_instance, set_phone
+    set_instance(instance)
+    set_phone(phone)
 
     try:
         with current_tracker().stage("deepagent_ainvoke", agent_id=agent_id):

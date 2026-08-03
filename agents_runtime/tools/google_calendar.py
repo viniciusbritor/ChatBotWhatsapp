@@ -81,6 +81,9 @@ def _owner_guard(capability: str):
                 phone = args[0]
             phone = str(phone or "")
             instance = str(kwargs.get("instance", "") or kwargs.get("_instance", ""))
+            if not instance:
+                from core.runtime_context import get_instance
+                instance = get_instance()
             resolution = resolve_owner(instance, fallback_phone=phone)
             denial = deny_if_not_owner(resolution, phone, capability)
             if denial is not None:

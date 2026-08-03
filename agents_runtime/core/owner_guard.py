@@ -112,6 +112,9 @@ def _check_folder_permission(
     # sem consultar folder_permissions. Dupla validação: deny_if_not_owner
     # no caller (_invoke_with_guard) já confirmou owner.
     instance = str(kwargs.get("instance", "") or kwargs.get("_instance", ""))
+    if not instance:
+        from core.runtime_context import get_instance
+        instance = get_instance()
     if instance:
         try:
             resolution = resolve_owner(instance, fallback_phone=phone)
@@ -189,6 +192,9 @@ async def _invoke_with_guard(
 ) -> Dict[str, Any]:
     phone = str(kwargs.get("phone", ""))
     instance = str(kwargs.get("instance", "") or kwargs.get("_instance", ""))
+    if not instance:
+        from core.runtime_context import get_instance
+        instance = get_instance()
     resolution: OwnerResolution | None = None
     if instance:
         resolution = resolve_owner(instance, fallback_phone=phone)
