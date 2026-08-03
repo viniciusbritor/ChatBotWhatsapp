@@ -12,7 +12,7 @@ import asyncio
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
-os.environ.setdefault("GCP_PROJECT", "test-project")
+os.environ.setdefault("FIRESTORE_EMULATOR_HOST", "")
 
 
 class TestModuleIsolation:

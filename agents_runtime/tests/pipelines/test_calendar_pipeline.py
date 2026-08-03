@@ -5,7 +5,7 @@ import os
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
-os.environ.setdefault("GCP_PROJECT", "test-project")
+
 
 
 class TestCalendarDetect:
