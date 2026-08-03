@@ -16,6 +16,7 @@ _ACK_MAP = {
     "calendar": "Só um instante. Vou ver sua agenda... 📅",
     "drive": "Só um instante. Vou procurar aqui... 📁",
     "email": "Só um instante. Vou buscar seus emails... 📧",
+    "rag": "Só um instante. Vou verificar minha base de conhecimento... 📚",
 }
 
 

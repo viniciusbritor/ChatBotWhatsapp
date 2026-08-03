@@ -76,7 +76,16 @@ _LIST_KEYWORDS = (
 
 async def _list_knowledge_base(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Lista todos os documentos indexados na base de conhecimento."""
+    instance = payload.get("instance", "jennifer")
     phone = payload.get("phone", "")
+    extra = payload.get("extra", {}) or {}
+
+    try:
+        from pipelines._ack import send_ack
+        await send_ack(instance, phone, "rag", extra)
+    except Exception:
+        pass
+
     try:
         from agent_orchestration.knowledge_retriever import _list_known_sources
         sources = await _list_known_sources(phone)
@@ -196,9 +205,16 @@ async def _disambiguate_rag_vs_drive(
 
 async def _run_rag(payload: Dict[str, Any]) -> Dict[str, Any]:
     """RAG path: search knowledge base (no OAuth guard)."""
+    instance = payload.get("instance", "jennifer")
     phone = payload.get("phone", "")
     text = payload.get("text", "")
     extra = payload.get("extra", {}) or {}
+
+    try:
+        from pipelines._ack import send_ack
+        await send_ack(instance, phone, "rag", extra)
+    except Exception:
+        pass
 
     try:
         from agent_orchestration.knowledge_retriever import retrieve
