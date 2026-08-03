@@ -43,6 +43,53 @@ _DRIVE_ONLY_KEYWORDS = (
     "faca upload", "upload", "salva no drive",
 )
 
+_LIST_KEYWORDS = (
+    "o que voce sabe", "o que você sabe", "o que vc sabe",
+    "liste os documentos", "lista os documentos", "listar documentos",
+    "qual o conteudo da base", "qual o conteúdo da base",
+    "quais documentos voce tem", "quais documentos você tem",
+    "o que tem na base", "o que esta na base", "o que está na base",
+    "documentos na base", "documentos salvos", "documentos indexados",
+    "me mostre o que tem", "mostre os documentos",
+    "mostre o que voce tem", "mostre o que você tem",
+    "o que voce tem", "o que você tem",
+    "o que ja foi indexado", "o que foi memorizado", "o que foi guardado",
+)
+
+
+async def _list_knowledge_base(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Lista todos os documentos indexados na base de conhecimento."""
+    phone = payload.get("phone", "")
+    try:
+        from agent_orchestration.knowledge_retriever import _list_known_sources
+        sources = await _list_known_sources(phone)
+        if not sources:
+            return {
+                "reply": "Nao tenho nenhum documento na base de conhecimento ainda. "
+                         "Envie um PDF, DOCX, XLSX ou texto que eu memorizo pra voce!",
+                "delay_ms": 0,
+                "presence": "composing",
+                "metadata": {"agent_id": "agent-knowledge-retriever", "list_documents": True, "count": 0},
+            }
+        lista = "\n".join(f"• {s}" for s in sources)
+        prompt = f"Pergunte sobre qualquer um deles! Ex: 'o que diz {sources[0]}?'" if sources else ""
+        return {
+            "reply": (
+                f"📚 Documentos na minha base de conhecimento:\n\n{lista}\n\n{prompt}"
+            ),
+            "delay_ms": 0,
+            "presence": "composing",
+            "metadata": {"agent_id": "agent-knowledge-retriever", "list_documents": True, "count": len(sources)},
+        }
+    except Exception as exc:
+        return {
+            "reply": "Desculpe, nao consegui listar os documentos agora.",
+            "delay_ms": 0,
+            "presence": "composing",
+            "metadata": {"agent_id": "agent-knowledge-retriever", "error": str(exc)[:200]},
+        }
+
+
 _DISAMBIGUATOR_PROMPT = (
     "O usuario disse: '{text}'\n"
     "Contexto recente: {context}\n\n"
@@ -235,6 +282,11 @@ async def run(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     if not text.strip():
         return await _run_rag(payload)
+
+    # Fast path: listar documentos da base
+    t = text.lower()
+    if any(kw in t for kw in _LIST_KEYWORDS):
+        return await _list_knowledge_base(payload)
 
     recent_context = ""
     try:
