@@ -23,6 +23,7 @@ DOC_KEYWORDS = (
     "leia o arquivo", "leia a ata", "abra o arquivo",
     "buscar arquivo", "buscar arquivos", "procurar documento",
     "conteudo do arquivo", "conteudo da pasta",
+    "base de conhecimento", "base de dados", "conhecimento",
 )
 
 _RAG_ONLY_KEYWORDS = (
@@ -54,6 +55,14 @@ _LIST_KEYWORDS = (
     "mostre o que voce tem", "mostre o que você tem",
     "o que voce tem", "o que você tem",
     "o que ja foi indexado", "o que foi memorizado", "o que foi guardado",
+    "base de conhecimento", "sua base", "minha base",
+    "o que tem ai", "o que tem aí",
+    "sua memoria", "sua memória",
+    "o que voce lembra", "o que você lembra",
+    "tem documento", "quais documentos",
+    "o que esta salvo", "o que está salvo",
+    "o que foi guardado", "liste a base",
+    "liste sua base", "lista sua base",
 )
 
 
@@ -103,6 +112,9 @@ _DISAMBIGUATOR_PROMPT = (
 def detect(text: str) -> bool:
     t = text.lower()
     for kw in DOC_KEYWORDS:
+        if kw in t:
+            return True
+    for kw in _LIST_KEYWORDS:
         if kw in t:
             return True
     is_attachment = any(
@@ -284,9 +296,12 @@ async def run(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not text.strip():
         return await _run_rag(payload)
 
-    # Fast path: listar documentos da base
+    # Fast path: listar documentos da base (somente se nao for query de conteudo)
     t = text.lower()
-    if any(kw in t for kw in _LIST_KEYWORDS):
+    _CONTENT_MARKERS = ("diz", "fala", "capitulo", "artigo", "lei", "sobre", "resuma", "explique", "qual o", "quais os")
+    has_list_kw = any(kw in t for kw in _LIST_KEYWORDS)
+    has_content = any(mk in t for mk in _CONTENT_MARKERS)
+    if has_list_kw and not has_content:
         return await _list_knowledge_base(payload)
 
     recent_context = ""
