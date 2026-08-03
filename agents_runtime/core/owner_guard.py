@@ -215,6 +215,14 @@ async def _invoke_with_guard(
     try:
         tool = CAPABILITY_TO_TOOL.get(capability, "")
         if tool in {"drive", "gmail"} and isinstance(result, dict):
+            # Owner bypass: não filtra resultados do proprietário
+            from core.runtime_context import get_instance as _rti
+            from core.owner import resolve_owner as _ro
+            _inst = _rti()
+            if _inst:
+                _res = _ro(_inst, fallback_phone=phone)
+                if _res and _res.owner_phone == phone:
+                    return result
             allowed = __import__("core.folder_permissions", fromlist=["get_user_allowed_tools"]).get_user_allowed_tools(phone).get(tool, [])
             if not allowed:
                 # Lock-down -> ja barrado na pre; defensivo.
@@ -272,6 +280,15 @@ async def post_filter_tool_result(
         if tool not in {"drive", "gmail"}:
             return result
         from core.folder_permissions import get_user_allowed_tools
+
+        # Owner bypass: não filtra resultados do proprietário
+        from core.runtime_context import get_instance as _rti2
+        from core.owner import resolve_owner as _ro2
+        _inst2 = _rti2()
+        if _inst2:
+            _res2 = _ro2(_inst2, fallback_phone=phone)
+            if _res2 and _res2.owner_phone == phone:
+                return result
 
         allowed = get_user_allowed_tools(phone).get(tool, [])
         if not allowed:
