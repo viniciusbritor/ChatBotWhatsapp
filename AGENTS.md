@@ -107,3 +107,10 @@ gcloud --project=coherence-ominichannel-fs logging read "resource.type=cloud_run
 - Repos `Monitoria_Chamadas` e seus triggers (fora de escopo).
 - Triggers `EvolutionWhatsapp-*` (1st-gen, monitorar).
 - Cloud Scheduler pausado (reativação é decisão do operador).
+
+## Regras de blindagem (ANTI-REGRESSÃO)
+
+- **NUNCA comentar/remover função sem `grep` em todas as chamadas.** O incidente 03/08/2026 (NameError `_build_skills_section`) quebrou Calendar/Email/Drive/Jennifer por ~17h porque a função foi comentada mas a chamada permaneceu viva.
+- **ANTES de push no branch `test`**: rodar `pytest tests/pipelines/ -q` — se algum pipeline quebrar (calendar, email, doc, jennifer), o deploy é bloqueado.
+- **`_execute_agent()` é ponto único de falha** — todos os agentes (calendar, email, drive, jennifer) passam por ele. Cada componente interno (skills, correções, deep agent, memory, history) tem try/except próprio. Se um falhar, os outros continuam.
+- **RAG tem caminho próprio** (`retrieve()` direto, sem `_execute_agent`) — não usar como prova de que "está tudo funcionando".

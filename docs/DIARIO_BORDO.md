@@ -3507,5 +3507,73 @@ Resultado: 400 do Firestore Vector para qualquer retrieval com
 O bot agora vai salvar com embeddings OpenAI reais e o retrieval vai
 funcionar com os novos indices.
 
+## 03/08/2026 — INCIDENTE: NameError quebrou todos os agentes Google + Jennifer
+
+### Linha do tempo
+
+| Hora BRT | Evento |
+|---|---|
+| ~00:00 | Commit `16f36ce` (cleanup ~730 linhas mortas) comentou `_build_skills_section()` no `orchestrator.py:677` mas **nao** comentou a chamada na linha 2329 |
+| ~00:00 | Deploy. RAG continua funcionando (nao usa `_execute_agent`). Calendar/Email/Drive/Jennifer quebram silenciosamente |
+| 04:02 | Usuario testa RAG — funciona. Assume que tudo esta normal |
+| 04:17 | Usuario pede "lista meus ultimos 10 emails" — `NameError: name '_build_skills_section' is not defined` |
+| 04:17 | `_executor.run_agent()` captura o erro e retorna "Desculpe, ocorreu um erro ao processar sua solicitação." |
+| 16:14 | Usuario reporta problemas com RAG (contaminacao de dados, CDC com label LGPD) |
+| 16:25 | Usuario descobre que Calendar/Email/Drive tambem estao quebrados |
+| 16:35 | Rollback `git revert a676409` — nao resolve (bug era pre-existente) |
+| 16:51 | Usuario confirma: "vc esta normal?" tambem falha (jennifer usa `_execute_agent`) |
+| 17:16 | Hotfix: descomentar `_build_skills_section` (commit `e04ff89`) |
+| 17:24 | Deploy SUCCESS — todos os agentes voltam a funcionar |
+
+### Causa raiz
+
+```python
+# orchestrator.py:677 — comentado no cleanup
+# def _build_skills_section(skill_ids: List[str]) -> str:
+
+# orchestrator.py:2329 — chamada VIVA, gera NameError
+skills_section = _build_skills_section(agent.get("skills", []))
+```
+
+O `_execute_agent()` e chamado por TODOS os agentes (calendar, email, drive, jennifer) via `_executor.run_agent()`. O NameError na linha 2329 quebrava a execucao antes mesmo de entrar no `try/except` interno.
+
+O RAG sobreviveu porque `_run_rag()` chama `retrieve()` diretamente, sem passar por `_execute_agent()`.
+
+### Licão aprendida
+
+- **NUNCA comentar uma funcao sem verificar TODAS as chamadas a ela** (grep antes de comentar)
+- **O `_execute_agent` e um ponto unico de falha** — qualquer excecao nao-tratada quebra todos os agentes
+- **RAG tem caminho proprio** (via `retrieve()` direto), o que mascara falhas nos outros pipelines
+- **O CI/CD nao tem smoke test entre pipelines** — se tivesse, o deploy `16f36ce` teria sido bloqueado
+
+### Blindagem implementada (Fase B)
+
+1. **Guard clauses no `_execute_agent`**: cada componente (skills, correcoes, deep agent, memory, history) envolto em `try/except` proprio — se um falhar, os outros continuam
+2. **Smoke test `test_smoke_all_pipelines.py`**: valida que calendar, email, doc e jennifer respondem com sucesso (nao "Desculpe, ocorreu um erro")
+3. **Pre-deploy gate**: `pytest tests/pipelines/test_smoke_all_pipelines.py` obrigatorio antes de push
+4. **Regra no AGENTS.md**: "NUNCA comentar funcao sem grep nas chamadas + rodar smoke test full"
+
+---
+
+## 03/08/2026 — Fase B: Blindagem de Arquitetura
+
+### Objetivo
+
+Impedir que um bug no `orchestrator.py` quebre todos os pipelines simultaneamente.
+
+### Mudanças
+
+| Arquivo | Mudança |
+|---|---|
+| `orchestrator.py` | `_execute_agent`: cada componente com try/except proprio. `_build_skills_section`, correcoes, deep agent, memory, history — se um falhar, os outros continuam |
+| `tests/pipelines/test_smoke_all_pipelines.py` | Smoke test que valida calendar, email, doc, jennifer — 0 "Desculpe, ocorreu um erro" |
+| `AGENTS.md` | Regra: nunca comentar funcao sem grep + smoke test |
+| `docs/DIARIO_BORDO.md` | Este registro |
+
+### Design Principle
+
+Cada pipeline deve funcionar com o maximo de componentes disponiveis. Se `_build_skills_section` falhar, o agente roda sem skills. Se `_search_memory` falhar, roda sem memoria. A unica falha fatal e o LLM nao estar disponivel.
+
+---
 
 

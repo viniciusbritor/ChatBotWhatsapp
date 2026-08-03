@@ -2326,7 +2326,14 @@ async def _execute_agent(
     from core.agent_status import record_agent_failure, record_agent_success, start_agent_execution
 
     execution_started = start_agent_execution(agent_id)
-    skills_section = _build_skills_section(agent.get("skills", []))
+
+    # ── Skills section (guarded: se falhar, agente segue sem skills) ──
+    skills_section = ""
+    try:
+        skills_section = _build_skills_section(agent.get("skills", []))
+    except Exception as exc:
+        logger.warning("skills_section_failed agent_id=%s exc=%s", agent_id, exc)
+
     system_prompt = agent.get("system_prompt", "") + skills_section
     if agent.get("role") != "orchestrator":
         system_prompt += (
@@ -2360,8 +2367,18 @@ async def _execute_agent(
     except Exception as exc:
         logger.warning("deepagent_attempt_failed agent_id=%s exc=%s", agent_id, type(exc).__name__)
 
-    history = _get_conversation_history(phone, limit=10)
-    mem_rag = await _search_memory(phone, text, limit=5)
+    history = ""
+    try:
+        history = _get_conversation_history(phone, limit=10) or ""
+    except Exception as exc:
+        logger.warning("history_fetch_failed agent_id=%s exc=%s", agent_id, exc)
+
+    mem_rag = ""
+    try:
+        mem_rag = await _search_memory(phone, text, limit=5) or ""
+    except Exception as exc:
+        logger.warning("memory_rag_failed agent_id=%s exc=%s", agent_id, exc)
+
     recent = [i for i in _interaction_history[-4:] if i.get("phone") == phone]
     ctx_parts = []
     if mem_rag:
