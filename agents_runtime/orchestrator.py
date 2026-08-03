@@ -674,16 +674,16 @@ async def _handle_attachment(
 #     return intent
 
 
-# def _build_skills_section(skill_ids: List[str]) -> str:
-#     """Build skills content section for system prompt."""
-#     if not skill_ids:
-#         return ""
-#     parts = ["\n\n# Skills ativas:"]
-#     for sid in skill_ids:
-#         skill = get_skill(sid)
-#         if skill and skill.get("enabled", True):
-#             parts.append(f"\n## {skill['name']}\n{skill.get('content', '')}")
-#     return "\n".join(parts)
+def _build_skills_section(skill_ids: List[str]) -> str:
+    """Build skills content section for system prompt."""
+    if not skill_ids:
+        return ""
+    parts = ["\n\n# Skills ativas:"]
+    for sid in skill_ids:
+        skill = get_skill(sid)
+        if skill and skill.get("enabled", True):
+            parts.append(f"\n## {skill['name']}\n{skill.get('content', '')}")
+    return "\n".join(parts)
 
 
 # async def _get_orchestrator(instance: str) -> Optional[str]:
