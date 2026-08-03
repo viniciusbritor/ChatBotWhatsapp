@@ -184,6 +184,7 @@ async def _finalize_orchestration(
     if (
         reply_text
         and os.getenv("IMAGE_REPORT_AUTO", "true").lower() == "true"
+        and not metadata.get("skip_image_report")
         and payload.get("phone")
     ):
         try:

@@ -69,7 +69,7 @@ async def _list_knowledge_base(payload: Dict[str, Any]) -> Dict[str, Any]:
                          "Envie um PDF, DOCX, XLSX ou texto que eu memorizo pra voce!",
                 "delay_ms": 0,
                 "presence": "composing",
-                "metadata": {"agent_id": "agent-knowledge-retriever", "list_documents": True, "count": 0},
+                "metadata": {"agent_id": "agent-knowledge-retriever", "list_documents": True, "count": 0, "skip_image_report": True},
             }
         lista = "\n".join(f"• {s}" for s in sources)
         prompt = f"Pergunte sobre qualquer um deles! Ex: 'o que diz {sources[0]}?'" if sources else ""
@@ -79,7 +79,7 @@ async def _list_knowledge_base(payload: Dict[str, Any]) -> Dict[str, Any]:
             ),
             "delay_ms": 0,
             "presence": "composing",
-            "metadata": {"agent_id": "agent-knowledge-retriever", "list_documents": True, "count": len(sources)},
+            "metadata": {"agent_id": "agent-knowledge-retriever", "list_documents": True, "count": len(sources), "skip_image_report": True},
         }
     except Exception as exc:
         return {
@@ -197,7 +197,7 @@ async def _run_rag(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "reply": result["clarification_prompt"],
                 "delay_ms": 0,
                 "presence": "composing",
-                "metadata": {"agent_id": "agent-knowledge-retriever", "needs_clarification": True},
+                "metadata": {"agent_id": "agent-knowledge-retriever", "needs_clarification": True, "skip_image_report": True},
             }
 
         chunks = result.get("results", [])
@@ -206,7 +206,7 @@ async def _run_rag(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "reply": "Nao encontrei nada sobre isso na base de conhecimento.",
                 "delay_ms": 0,
                 "presence": "composing",
-                "metadata": {"agent_id": "agent-knowledge-retriever", "count": 0},
+                "metadata": {"agent_id": "agent-knowledge-retriever", "count": 0, "skip_image_report": True},
             }
 
         resposta = "\n\n".join(
@@ -221,6 +221,7 @@ async def _run_rag(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "agent_id": "agent-knowledge-retriever",
                 "count": len(chunks),
                 "scope": result.get("scope", "private"),
+                "skip_image_report": True,
             },
         }
     except Exception as exc:
@@ -229,7 +230,7 @@ async def _run_rag(payload: Dict[str, Any]) -> Dict[str, Any]:
             "reply": "Desculpe, nao consegui buscar na base de conhecimento agora.",
             "delay_ms": 0,
             "presence": "composing",
-            "metadata": {"agent_id": "agent-knowledge-retriever", "error": str(exc)[:200]},
+            "metadata": {"agent_id": "agent-knowledge-retriever", "error": str(exc)[:200], "skip_image_report": True},
         }
 
 
