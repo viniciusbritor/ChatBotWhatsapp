@@ -496,6 +496,21 @@ async def _retrieve_private(
         language=language,
         since=since,
     )
+    # Fallback: se o filtro de classe zerou a busca, tentar sem ele
+    chunks = result.get("results", []) if isinstance(result, dict) else []
+    if not chunks and class_:
+        logger.info("class_filter_blocked_retrieval class=%s — retrying without", class_)
+        result = await search_legal_knowledge(
+            phone=phone,
+            query=query,
+            k=limit,
+            min_score=min_score,
+            source_title=source_title,
+            class_=None,
+            group=group,
+            language=language,
+            since=since,
+        )
     chunks = result.get("results", []) if isinstance(result, dict) else []
     return {
         "scope": "private",
