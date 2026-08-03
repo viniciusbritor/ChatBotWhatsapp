@@ -24,6 +24,12 @@ DOC_KEYWORDS = (
     "buscar arquivo", "buscar arquivos", "procurar documento",
     "conteudo do arquivo", "conteudo da pasta",
     "base de conhecimento", "base de dados", "conhecimento",
+    "busque", "buscar", "busca", "procure", "procurar",
+    "ache", "achar", "encontre", "encontrar",
+    "localize", "localizar", "pesquise", "pesquisar",
+    "gdrive", "meu drive", "no drive",
+    "meus arquivos", "meus documentos", "minha pasta",
+    "custo", "custos", "orcamento", "orçamento",
 )
 
 _RAG_ONLY_KEYWORDS = (
@@ -42,6 +48,8 @@ _DRIVE_ONLY_KEYWORDS = (
     "meu gdrive", "salvar no drive", "guarda no drive",
     "dentro do drive", "dentro desse drive", "nesse drive",
     "faca upload", "upload", "salva no drive",
+    "gdrive", "no omnichannel", "na omnichannel", "pasta omnichannel",
+    "meu omnichannel",
 )
 
 _LIST_KEYWORDS = (
