@@ -111,7 +111,14 @@ async def search_files(
     """
     try:
         service = _get_service(phone)
-        q_parts = [f"name contains '{query}'" if query else ""]
+        q_parts = []
+        if query:
+            words = [w for w in query.split() if len(w) > 1]
+            if words:
+                for w in words:
+                    q_parts.append(f"name contains '{w}'")
+            else:
+                q_parts.append(f"name contains '{query}'")
         if folder_id:
             q_parts.append(f"'{folder_id}' in parents")
         if mime_type:
@@ -578,7 +585,9 @@ async def deep_search_drive(
             for f in page_files:
                 fn = (f.get("name") or "").lower()
                 qt = query.lower()
-                if qt in fn or _match_folder_name(fn, query):
+                query_words = [w for w in qt.split() if len(w) > 1]
+                match = any(w in fn for w in query_words) if query_words else qt in fn
+                if match or _match_folder_name(fn, query):
                     all_files.append(_format_file(f))
 
             if len(all_files) >= max_results:
