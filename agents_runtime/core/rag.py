@@ -598,12 +598,24 @@ async def index_private_document(
             document_id = hashlib.sha256(
                 f"{owner_hash}:{source_title}:{index}:{chunk[:100]}".encode("utf-8")
             ).hexdigest()[:32]
-            data = dict(
-                common,
-                vector_embedding=Vector(vector),
-                embedding_model=EMBEDDING_MODEL,
-                embedding_dim=EMBEDDING_DIM,
-            )
+            data = {
+                **safe_metadata,
+                "owner_hash": owner_hash,
+                "text_content": chunk,
+                "source_title": mask_pii(source_title),
+                "source_url": source_url,
+                "category": category,
+                "class": class_value,
+                "group": group_value,
+                "theme": theme_value,
+                "chunk_index": index,
+                "language": "pt-BR",
+                "created_at": now,
+                "schema_version": SCHEMA_VERSION,
+                "vector_embedding": Vector(vector),
+                "embedding_model": EMBEDDING_MODEL,
+                "embedding_dim": EMBEDDING_DIM,
+            }
             vector_batch.set(db.collection(PRIVATE_COLLECTION).document(document_id), data)
             vector_ids.append(document_id)
         try:
@@ -624,15 +636,28 @@ async def index_private_document(
             (i, v) for i, v in enumerate(vectors) if v is not None
         ]
         for index, vector in valid_pairs:
+            chunk = chunks[index]
             document_id = hashlib.sha256(
-                f"{owner_hash}:{source_title}:{index}:{chunks[index][:100]}".encode("utf-8")
+                f"{owner_hash}:{source_title}:{index}:{chunk[:100]}".encode("utf-8")
             ).hexdigest()[:32]
-            data = dict(
-                common,
-                vector_embedding=Vector(vector),
-                embedding_model=EMBEDDING_MODEL,
-                embedding_dim=EMBEDDING_DIM,
-            )
+            data = {
+                **safe_metadata,
+                "owner_hash": owner_hash,
+                "text_content": chunk,
+                "source_title": mask_pii(source_title),
+                "source_url": source_url,
+                "category": category,
+                "class": class_value,
+                "group": group_value,
+                "theme": theme_value,
+                "chunk_index": index,
+                "language": "pt-BR",
+                "created_at": now,
+                "schema_version": SCHEMA_VERSION,
+                "vector_embedding": Vector(vector),
+                "embedding_model": EMBEDDING_MODEL,
+                "embedding_dim": EMBEDDING_DIM,
+            }
             vector_batch.set(db.collection(PRIVATE_COLLECTION).document(document_id), data)
             vector_ids.append(document_id)
         try:

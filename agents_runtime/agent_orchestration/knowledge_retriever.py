@@ -464,15 +464,13 @@ def _extract_class_hint(query: str) -> Optional[str]:
 
 
 _SOURCE_TITLE_ALIASES = {
-    "lgpd": "lgpd-capitulo-1.pdf",
-    "cdc": "cdc-capitulo-1.pdf",
-    "codigo de defesa do consumidor": "cdc-capitulo-1.pdf",
-    "manual de higiene": "manual-higiene.pdf",
-    "higiene": "manual-higiene.pdf",
-    "higienizacao": "manual-higiene.pdf",
-    "higienização": "manual-higiene.pdf",
-    "lavagem das maos": "manual-higiene.pdf",
-    "lavar as maos": "manual-higiene.pdf",
+    "lgpd": "Lei_geral_protecao_dados_pessoais_1ed.pdf",
+    "lei geral de protecao de dados": "Lei_geral_protecao_dados_pessoais_1ed.pdf",
+    "protecao de dados": "Lei_geral_protecao_dados_pessoais_1ed.pdf",
+    "cdc": "Codigo-do-consumidor-FINAL.pdf",
+    "codigo de defesa do consumidor": "Codigo-do-consumidor-FINAL.pdf",
+    "defesa do consumidor": "Codigo-do-consumidor-FINAL.pdf",
+    "consumidor": "Codigo-do-consumidor-FINAL.pdf",
 }
 
 

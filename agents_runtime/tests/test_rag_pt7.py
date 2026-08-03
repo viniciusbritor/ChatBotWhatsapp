@@ -18,7 +18,7 @@ class TestChunkingCDC:
     def setup_method(self):
         from pypdf import PdfReader
         text = "\n\n".join(
-            p.extract_text() or "" for p in PdfReader(str(GOLDENSET_DIR / "cdc-capitulo-1.pdf")).pages
+            p.extract_text() or "" for p in PdfReader(str(GOLDENSET_DIR / "Codigo-do-consumidor-FINAL.pdf")).pages
         ).strip()
         self.text = text
 
