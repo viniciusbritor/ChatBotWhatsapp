@@ -1,6 +1,11 @@
+import os
 from unittest.mock import patch
 
 from core.auth import _is_valid_firebase_jwt, is_path_protected
+
+os.environ["GCP_PROJECT"] = "coherence-ominichannel-fs"
+
+os.environ["GCP_PROJECT"] = "coherence-ominichannel-fs"
 
 
 def test_oauth_start_and_callback_are_public():
