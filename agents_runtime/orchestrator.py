@@ -2241,6 +2241,10 @@ async def _execute_deep_agent(
     }
     if phone:
         config["configurable"]["phone"] = phone
+    instance = payload.get("instance", "")
+    if instance:
+        config["configurable"]["instance"] = instance
+        config["configurable"]["_instance"] = instance
 
     try:
         with current_tracker().stage("deepagent_ainvoke", agent_id=agent_id):
