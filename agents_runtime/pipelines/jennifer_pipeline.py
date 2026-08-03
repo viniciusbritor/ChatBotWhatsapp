@@ -1,7 +1,7 @@
 """Jennifer pipeline — fallback para conversa geral.
 
 Sempre da match (fallback). Sem guard OAuth, sem prefetch.
-Usa o agente jennifer do Firestore (Flash, sem tools Google).
+Usa o agente jennifier do Firestore (Flash, sem tools Google).
 
 A intimidade (nickname consent) e tratada pelo orquestrador
 via _setup_nickname_consent ANTES de chamar este pipeline.
@@ -26,7 +26,7 @@ async def run(payload: Dict[str, Any]) -> Dict[str, Any]:
     from pipelines._executor import run_agent
 
     return await run_agent(
-        "jennifer",
+        "jennifier",
         text,
         payload,
         extra,

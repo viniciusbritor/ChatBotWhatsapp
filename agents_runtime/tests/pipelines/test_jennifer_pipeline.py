@@ -46,12 +46,12 @@ class TestJenniferRun:
                 "reply": "Oi Vinicius! Tudo bem? Como posso ajudar?",
                 "delay_ms": 500,
                 "presence": "composing",
-                "metadata": {"agent_id": "jennifer"},
+                "metadata": {"agent_id": "jennifier"},
             },
         ):
             result = await run(self._payload())
         assert "oi" in result["reply"].lower() or "bem" in result["reply"].lower()
-        assert result["metadata"]["agent_id"] == "jennifer"
+        assert result["metadata"]["agent_id"] == "jennifier"
 
     @pytest.mark.asyncio
     async def test_run_no_google_tools_in_response(self):
@@ -65,7 +65,7 @@ class TestJenniferRun:
                 "reply": "Sou a Jennifer, assistente conversacional.",
                 "delay_ms": 500,
                 "presence": "composing",
-                "metadata": {"agent_id": "jennifer"},
+                "metadata": {"agent_id": "jennifier"},
             },
         ):
             result = await run(self._payload())
@@ -86,7 +86,7 @@ class TestJenniferRun:
                 "reply": "Ola! Como vai voce?",
                 "delay_ms": 300,
                 "presence": "composing",
-                "metadata": {"agent_id": "jennifer"},
+                "metadata": {"agent_id": "jennifier"},
             },
         ):
             result = await run(self._payload("ola"))
@@ -103,7 +103,7 @@ class TestJenniferRun:
                 "reply": "Desculpe, ocorreu um erro.",
                 "delay_ms": 0,
                 "presence": "composing",
-                "metadata": {"agent_id": "jennifer", "error": "timeout"},
+                "metadata": {"agent_id": "jennifier", "error": "timeout"},
             },
         ):
             result = await run(self._payload())

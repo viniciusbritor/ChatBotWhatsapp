@@ -105,14 +105,14 @@ class TestTier2Routing:
 
         with patch("pipelines.jennifer_pipeline.run", new_callable=AsyncMock) as mock_jen:
             mock_jen.return_value = {"reply": "Oi! Como posso ajudar?", "delay_ms": 500,
-                                     "presence": "composing", "metadata": {"agent_id": "jennifer"}}
+                                     "presence": "composing", "metadata": {"agent_id": "jennifier"}}
             with patch("pipelines.calendar_pipeline.detect", return_value=False):
                 with patch("pipelines.email_pipeline.detect", return_value=False):
                     with patch("pipelines.doc_pipeline.detect", return_value=False):
                         with patch("orchestrator._detect_web", return_value=False):
                             with patch("orchestrator._setup_nickname_consent", new_callable=AsyncMock):
                                 result = await orchestrate(self._payload("oi tudo bem?"))
-        assert result["metadata"]["agent_id"] == "jennifer"
+        assert result["metadata"]["agent_id"] == "jennifier"
 
     @pytest.mark.asyncio
     async def test_morality_blocks_calendar(self):

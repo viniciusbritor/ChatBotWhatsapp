@@ -74,7 +74,7 @@ def _mock_agent_jennifer_response():
         "reply": "Oi Vinicius! Tudo bem? Como posso ajudar hoje?",
         "delay_ms": 500,
         "presence": "composing",
-        "metadata": {"agent_id": "jennifer"},
+        "metadata": {"agent_id": "jennifier"},
     })
 
 
@@ -256,7 +256,7 @@ class TestE2EJennifer:
 
         assert result["reply"], "Resposta não pode ser vazia"
         assert "oi" in result["reply"].lower() or "bem" in result["reply"].lower()
-        assert result["metadata"]["agent_id"] == "jennifer"
+        assert result["metadata"]["agent_id"] == "jennifier"
 
 
 class TestE2EMultiIntent:
