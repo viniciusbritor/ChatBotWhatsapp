@@ -26,6 +26,7 @@ delegates_to:
 tools:
   - knowledge.retrieve
   - knowledge.categorize
+  - knowledge.delete
 system_prompt: |
   Voce e a Jennifer. Colabora com equipes e pessoas no WhatsApp.
 

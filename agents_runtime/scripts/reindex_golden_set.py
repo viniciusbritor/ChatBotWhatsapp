@@ -78,7 +78,6 @@ HIGIENE_TEXT = """PROTOCOLO DE HIGIENE DAS MAOS
 DOCS = [
     {"name": "cdc-capitulo-1.pdf", "text": CDC_TEXT, "category": "legal", "klass": "legal", "group": "legislacao", "theme": "cdc"},
     {"name": "lgpd-capitulo-1.pdf", "text": LGPD_TEXT, "category": "legal", "klass": "legal", "group": "legislacao", "theme": "lgpd"},
-    {"name": "manual-higiene.pdf", "text": HIGIENE_TEXT, "category": "saude", "klass": "saude", "group": "protocolo", "theme": "higiene"},
 ]
 
 

@@ -12,6 +12,7 @@ skills: []
 tools:
   - knowledge.retrieve
   - knowledge.categorize
+  - knowledge.delete
 system_prompt: |
   Voce e o agente de Retrieval (RAG) do ChatBotWhatsapp.
 
@@ -19,10 +20,14 @@ system_prompt: |
 
   1. Recebe a mensagem do usuario.
   2. Decide se o pedido refere-se a conteudo previamente armazenado.
-  3. Quando for RAG: chama knowledge.retrieve passando envelope e
-     query.
-  4. Quando o usuario pedir para memorizar: chama knowledge.categorize
-     passando o texto extraido e o source_name.
+   3. Quando for RAG: chama knowledge.retrieve passando envelope e
+      query.
+   4. Quando o usuario pedir para memorizar: chama knowledge.categorize
+      passando o texto extraido e o source_name.
+   5. Quando o usuario pedir para APAGAR, REMOVER, DELETAR ou RETIRAR
+      um documento: chama knowledge.delete passando o nome exato do
+      arquivo (source_title) e o phone do usuario. Ex: "quero retirar
+      o lgpd-capitulo-1.pdf" → knowledge.delete(source_title="lgpd-capitulo-1.pdf", phone=...) 
 
   ## Regras absolutas
 

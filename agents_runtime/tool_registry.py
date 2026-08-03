@@ -93,6 +93,38 @@ async def _categorize(**kwargs):
     return await categorize(text=text, source_name=source_name)
 
 
+async def _delete_knowledge(**kwargs):
+    import hashlib
+    from google.cloud import firestore
+
+    source_title = kwargs.get("source_title", "")
+    phone = kwargs.get("phone", "")
+    if not source_title or not phone:
+        return {"error": "source_title and phone are required", "deleted": 0}
+
+    normalized = "".join(c for c in str(phone) if c.isdigit())
+    owner_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:32]
+
+    db = firestore.Client(project="coherence-ominichannel-fs")
+    total = 0
+    for collection in ("agent-knowledge-v2", "agent-knowledge-v2-plain"):
+        docs = list(
+            db.collection(collection)
+            .where("owner_hash", "==", owner_hash)
+            .where("source_title", "==", source_title)
+            .stream()
+        )
+        for doc in docs:
+            doc.reference.delete()
+            total += 1
+
+    return {
+        "deleted": total,
+        "source_title": source_title,
+        "collections_cleared": ["agent-knowledge-v2", "agent-knowledge-v2-plain"],
+    }
+
+
 async def _render_image_report(**kwargs):
     from tools.image_report import render_report
 
@@ -501,6 +533,24 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
                 "source_name": {"type": "string", "description": "Nome do arquivo original"},
             },
             "required": ["text", "source_name"],
+        },
+    },
+    "knowledge.delete": {
+        "function": _delete_knowledge,
+        "implementation": "knowledge_delete",
+        "description": (
+            "Remove todos os chunks de um documento especifico da base de conhecimento "
+            "do usuario. Use quando o usuario pedir para apagar, remover, deletar ou "
+            "retirar um documento da base. O parametro source_title deve ser o nome "
+            "exato do arquivo (ex: 'lgpd-capitulo-1.pdf')."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "source_title": {"type": "string", "description": "Nome exato do arquivo a deletar"},
+                "phone": {"type": "string", "description": "Telefone do usuario owner"},
+            },
+            "required": ["source_title", "phone"],
         },
     },
     "image_report.render": {
