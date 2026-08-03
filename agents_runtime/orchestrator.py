@@ -2337,7 +2337,10 @@ async def _execute_agent(
                 items = corr["corrections"]
                 system_prompt += "\n\n[APRENDIZADOS DO USUARIO]\n"
                 for c in items:
-                    system_prompt += f"- Correcao anterior ({c['target']}): '{c['user_quote'][:100]}' → '{c['after'][:100]}'\n"
+                    system_prompt += (
+                        f"- Correcao anterior ({c['target']}): "
+                        f"'{c['user_quote'][:100]}' → '{c['after'][:100]}'\n"
+                    )
                 system_prompt += "Respeite essas preferencias ao responder."
         except Exception:
             pass
@@ -2362,7 +2365,10 @@ async def _execute_agent(
         ctx_parts.insert(0, f"[HISTORICO RECENTE]\n{history}")
     ctx = "\n\n".join(p for p in ctx_parts if p)
     if ctx:
-        system_prompt += f"\n\n[CONTEXTO DA CONVERSA]\n{ctx}\nVoce JA conhece este usuario. Use a memoria para personalizar a resposta."
+        system_prompt += (
+            f"\n\n[CONTEXTO DA CONVERSA]\n{ctx}\n"
+            "Voce JA conhece este usuario. Use a memoria para personalizar a resposta."
+        )
 
     brt = timezone(timedelta(hours=-3))
     hoje = datetime.now(brt)
