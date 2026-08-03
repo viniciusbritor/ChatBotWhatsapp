@@ -10,6 +10,7 @@ Run:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import Any, Dict
@@ -83,6 +84,7 @@ async def _list_knowledge_base(payload: Dict[str, Any]) -> Dict[str, Any]:
     try:
         from pipelines._ack import send_ack
         await send_ack(instance, phone, "rag", extra)
+        await asyncio.sleep(0.8)
     except Exception:
         pass
 
@@ -213,6 +215,7 @@ async def _run_rag(payload: Dict[str, Any]) -> Dict[str, Any]:
     try:
         from pipelines._ack import send_ack
         await send_ack(instance, phone, "rag", extra)
+        await asyncio.sleep(0.8)
     except Exception:
         pass
 
