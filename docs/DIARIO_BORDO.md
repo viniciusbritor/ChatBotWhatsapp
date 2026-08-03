@@ -3419,6 +3419,63 @@ por estagio e sem custo de tokens.
   existentes (urllib, requests, httpx, google-cloud) e desenhar
   wrapper com timeout default 30s.
 
+## 02/08/2026 — Plano de Refatoração: 4 Pipelines + Pro Desambiguador
+
+### Objetivos
+1. Corrigir roteamento: "agenda" → Calendar, "email" → Email, nunca RAG/Drive
+2. RAG Firestore Vector leitura/escrita público/privado
+3. Acesso GDrive/Gmail/Calendar com guard OAuth
+4. Pipelines independentes — corrigir um não quebra outro
+5. DeepSeek V4 Pro só no desambiguador de documentos
+
+### Arquitetura Alvo
+```
+WhatsApp → orchestrator.py (~1097 linhas)
+  Tier 1 (bloqueantes, first-match):
+    intimacy → runtime_status → correction → morality
+  Tier 2 (funcionais, collect-all → parallel):
+    calendar → email → web → doc → jennifer (fallback)
+```
+
+### Pipelines
+| Pipeline | LLM | Guard | Keywords |
+|---|---|---|---|
+| `calendar_pipeline.py` | Flash | Sim | agenda, compromisso, reunião, evento |
+| `email_pipeline.py` | Flash | Sim | email, gmail, inbox, caixa de entrada |
+| `doc_pipeline.py` | Flash + ⭐Pro | Drive sim, RAG não | documento, pdf, ata, base de conhecimento |
+| `jennifer_pipeline.py` | Flash | Não | fallback (sempre match) |
+
+### Módulos de Infra (pipelines/_*.py)
+| Módulo | Responsabilidade | Fallback se quebrar |
+|---|---|---|
+| `_guard.py` | OAuth + owner check | `{"verdict": "deny"}` |
+| `_prefetch.py` | Prefetch Calendar/Email/Drive | `None` (sem cache) |
+| `_ack.py` | "Só um instante..." typing indicator | `pass` (silencioso) |
+| `_executor.py` | Carregar + executar agente DeepSeek | Resposta de erro amigável |
+
+### Fases
+```
+P0  (15min): Deploy índice Firestore Vector
+P1  (30min): _guard + _prefetch + _ack + _executor + testes isolamento
+P2  (35min): calendar_pipeline.py + testes (21)
+P3  (30min): email_pipeline.py + testes (16)
+P4  (65min): doc_pipeline.py + Pro + fallback "clarify" + testes (33)
+P5  (25min): jennifer_pipeline.py + testes (10)
+P6  (60min): Reescrever orchestrator.py + testes (38)
+P7  (10min): Deletar graph.py + limpar __init__.py
+P8  (20min): Deletar ~91 testes órfãos
+P9  (15min): Ajustar ~20 testes sobreviventes
+P10 (30min): Testes E2E smoke (8)
+P11 (20min): ruff + pytest + push + deploy
+```
+TOTAL: 5h55 | Testes: ~904
+
+### Gate por Fase
+Cada fase: pytest do módulo → 100% pass = avança.
+Rollback: `git revert <commit>` isolado por fase.
+
+---
+
 ## 30/07/2026 — Fase PT7: RAG retrieval fix (índices vetoriais faltantes)
 
 User reportou que após pedir "guardar CDC capítulo 1" e depois "resumo

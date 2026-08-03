@@ -29,7 +29,7 @@ from core.masker import mask_pii
 from core.delay_calculator import calculate_delay_ms, calculate_presence
 from core.commands import detect_command, apply_command
 from tool_registry import get_tool, get_tool_schema, is_user_scoped_tool
-from agent_loader import get_agent, get_skill, list_agents, get_user, get_config, has_nickname
+from agent_loader import get_agent, get_skill, list_agents, get_config, has_nickname
 from core.audit import log_action
 from core.timezone import now_brt
 from core.observability import (
@@ -1659,36 +1659,176 @@ async def _execute_multi_specialists_parallel(
     }
 
 
+def _detect_runtime_status(text: str) -> bool:
+    keywords = (
+        "quantos agentes", "quais agentes", "agentes funcionando", "agentes ativos",
+        "agentes rodando", "status dos agentes", "o que esta rodando", "o que está rodando",
+        "listar agentes", "liste os agentes",
+    )
+    return any(kw in text.lower() for kw in keywords)
+
+
+def _detect_intimacy(text: str) -> bool:
+    keywords = (
+        "me chame de", "pode me chamar de", "meu apelido",
+        "meu nome é", "meu nome e", "como devo te chamar",
+    )
+    return any(kw in text.lower() for kw in keywords)
+
+
+def _detect_correction(text: str) -> bool:
+    keywords = ("na verdade", "não é assim", "nao e assim", "errado", "errada")
+    return any(kw in text.lower() for kw in keywords)
+
+
+def _detect_morality(text: str) -> bool:
+    gross = (
+        "puta", "merda", "caralho", "fdp", "porra",
+        "buceta", "viado", "bicha", "desgraça",
+        "foder", "fode", "piranha", "vagabunda", "puto",
+        "bosta", "porcaria", "desgraçado",
+    )
+    assault = ("assedio", "abuso", "estupro", "violencia", "agressao",
+               "ameaça", "ameaca", "chantagem")
+    t = text.lower()
+    return any(kw in t for kw in gross) or any(kw in t for kw in assault)
+
+
+def _detect_web(text: str) -> bool:
+    keywords = (
+        "pesquisar", "buscar na internet", "busque na internet", "procure na web",
+        "pesquise na web", "noticia atual", "noticias atuais", "pesquisa sobre",
+    )
+    t = text.lower()
+    if any(kw in t for kw in keywords):
+        return True
+    import re
+    if re.search(r"https?://\S+", text, flags=re.IGNORECASE):
+        return True
+    return False
+
+
+async def _handle_runtime_status(payload: dict, instance: str, phone: str) -> dict:
+    from core.agent_status import build_agent_inventory, format_inventory_reply
+    inventory = build_agent_inventory(instance=instance, phone=phone)
+    reply = format_inventory_reply(inventory)
+    return {
+        "reply": reply,
+        "delay_ms": calculate_delay_ms(reply),
+        "presence": calculate_presence(),
+        "metadata": {
+            "agent_id": "runtime-status",
+            "route": "deterministic",
+            "response_identity": "Jennifer",
+            "counts": inventory["counts"],
+            "generated_at": inventory["generated_at"],
+        },
+    }
+
+
+async def _handle_morality(payload: dict, masked_text: str, sender_name: str,
+                           cache_key, instance: str, phone: str) -> dict:
+    path = [{"step": 1, "phase": "morality_handler"}]
+    from agent_loader import get_agent
+    agent = get_agent("agent-morality")
+    if agent:
+        result = await _execute_agent(dict(agent), masked_text, payload, payload.get("extra", {}))
+        return await _finalize_orchestration(payload, masked_text, sender_name, result, path, cache_key)
+    return {
+        "reply": "Mensagem bloqueada por violar as politicas de respeito.",
+        "delay_ms": 0,
+        "presence": "composing",
+        "metadata": {"agent_id": "morality-guard", "blocked": True},
+    }
+
+
+async def _handle_correction(payload: dict, masked_text: str, sender_name: str,
+                              cache_key) -> dict:
+    path = [{"step": 1, "phase": "correction_handler"}]
+    from agent_loader import get_agent
+    agent = get_agent("agent-learning")
+    if agent:
+        result = await _execute_agent(dict(agent), masked_text, payload, payload.get("extra", {}))
+        return await _finalize_orchestration(payload, masked_text, sender_name, result, path, cache_key)
+    return {
+        "reply": "Obrigado pela correcao! Vou aprender com isso.",
+        "delay_ms": 0,
+        "presence": "composing",
+        "metadata": {"agent_id": "correction-handler"},
+    }
+
+
+async def _handle_intimacy(payload: dict, masked_text: str, sender_name: str,
+                            cache_key, first_name: str, phone: str) -> dict:
+    path = [{"step": 1, "phase": "intimacy_handler"}]
+    from agent_loader import get_agent
+    agent = get_agent("agent-intimacy")
+    if agent:
+        agent_copy = dict(agent)
+        if first_name and not has_nickname(phone):
+            suggested = _prefetch_nickname(first_name)
+            if not suggested:
+                suggested = _generate_diminutive(first_name)
+            agent_copy["system_prompt"] = agent_copy.get("system_prompt", "") + (
+                f"\n\n[CONTEXTO DE INTIMIDADE]\n"
+                f"Primeiro nome do usuario: {first_name}. Apelido sugerido: {suggested}\n"
+            )
+        result = await _execute_agent(agent_copy, masked_text, payload, payload.get("extra", {}))
+        return await _finalize_orchestration(payload, masked_text, sender_name, result, path, cache_key)
+    return {
+        "reply": f"Oi {first_name}! Como posso te chamar?",
+        "delay_ms": 0,
+        "presence": "composing",
+        "metadata": {"agent_id": "intimacy-handler"},
+    }
+
+
+async def _handle_web(payload: dict, masked_text: str, sender_name: str,
+                       cache_key) -> dict:
+    path = [{"step": 1, "phase": "web_handler"}]
+    from agent_loader import get_agent
+    agent = get_agent("manager-web")
+    if agent:
+        result = await _execute_agent(dict(agent), masked_text, payload, payload.get("extra", {}))
+        return await _finalize_orchestration(payload, masked_text, sender_name, result, path, cache_key)
+    return {
+        "reply": "Funcionalidade de busca web indisponivel no momento.",
+        "delay_ms": 0,
+        "presence": "composing",
+        "metadata": {"agent_id": "web-handler", "error": "agent_not_found"},
+    }
+
+
+def _merge_pipeline_results(results: list) -> dict:
+    replies = [r["reply"] for r in results if r and r.get("reply")]
+    delays = [r.get("delay_ms", 0) for r in results if r]
+    return {
+        "reply": "\n\n---\n\n".join(replies),
+        "delay_ms": max(delays) if delays else 0,
+        "presence": "composing",
+        "metadata": {"multi_intent": True, "pipelines": len(replies)},
+    }
+
+
+async def _setup_nickname_consent(payload: dict, first_name: str, phone: str) -> None:
+    if not first_name or has_nickname(phone):
+        return
+    suggested = _prefetch_nickname(first_name)
+    if not suggested:
+        suggested = _generate_diminutive(first_name)
+    from core.pending_actions import set_pending_action
+    await set_pending_action(
+        phone, "nickname_consent",
+        {"first_name": first_name, "nickname": suggested},
+    )
+
+
 async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Main orchestration entry point.
-
-    Args:
-        payload: {
-            "instance": "jennifer",
-            "phone": "+5511966830020",
-            "text": "oi",
-            "sender_name": "Vinicius",
-            "extra": {...}
-        }
-
-    Returns:
-        {
-            "reply": str,
-            "delay_ms": int,
-            "presence": str,
-            "metadata": {
-                "agent_id": str,
-                "model_used": str,
-                "escalated": bool,
-                "tool_calls": [...]
-            }
-        }
-    """
     instance = payload.get("instance", "jennifer")
     phone = payload.get("phone", "")
     text = payload.get("text", "")
     sender_name = payload.get("sender_name", "user")
-    extra = payload.get("extra", {})
+    extra = payload.get("extra", {}) or {}
 
     _tracker = new_tracker()
     set_current_tracker(_tracker)
@@ -1701,7 +1841,6 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
             response = copy.deepcopy(cached)
             response.pop("ts", None)
             response.setdefault("metadata", {})["cached"] = True
-            logger.info("Idempotent response cache hit")
             return response
 
     first_name = _extract_first_name(sender_name)
@@ -1709,11 +1848,20 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
     masked_text = mask_pii(text)
     confirmation = _short_confirmation(masked_text)
 
+    # ========================
+    # PENDING ACTIONS (pre-routing)
+    # ========================
     from core.pending_actions import consume_pending_action, get_pending_action
     pending_action = await get_pending_action(phone)
+
     if pending_action and pending_action.get("action_type") == "attachment_mode":
-        attachment_intent = _detect_intent(masked_text)
-        if not (attachment_intent.get("is_attachment_save") or attachment_intent.get("is_attachment_file")):
+        is_save = any(
+            kw in masked_text.lower()
+            for kw in ("memorize", "memorizar", "guarde", "guardar",
+                       "indexe", "indexar", "armazene", "armazenar")
+        )
+        is_file = any(kw in masked_text.lower() for kw in ("salve", "salvar", "salva", "guarda"))
+        if not (is_save or is_file):
             reply = "Responda apenas 'memorizar' para indexar no conhecimento ou 'salvar' para guardar no Drive."
             result = {
                 "reply": reply,
@@ -1726,23 +1874,18 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
                 },
             }
             path = [{"step": 1, "phase": "pending_action", "action": "attachment_mode"}]
-            return await _finalize_orchestration(
-                payload, masked_text, sender_name, result, path, cache_key
-            )
+            return await _finalize_orchestration(payload, masked_text, sender_name, result, path, cache_key)
         await consume_pending_action(phone, "attachment_mode")
         pending_payload = pending_action.get("payload", {}).get("attachment_payload", {})
         pending_payload["phone"] = phone
         pending_payload["instance"] = pending_payload.get("instance") or instance
-        attachment_result = await _handle_attachment(
-            pending_payload, attachment_intent, sender_name
-        )
+        intent = {"is_attachment_save": is_save, "is_attachment_file": is_file}
+        attachment_result = await _handle_attachment(pending_payload, intent, sender_name)
         if attachment_result is not None:
-            path = [{"step": 1, "phase": "pending_action", "action": "attachment_mode"}]
-            path.append({"step": 2, "phase": "attachment_handler",
-                         "status": attachment_result.get("metadata", {}).get("attachment", "unknown")})
-            return await _finalize_orchestration(
-                payload, masked_text, sender_name, attachment_result, path, cache_key
-            )
+            path = [{"step": 1, "phase": "pending_action", "action": "attachment_mode"},
+                    {"step": 2, "phase": "attachment_handler",
+                     "status": attachment_result.get("metadata", {}).get("attachment", "unknown")}]
+            return await _finalize_orchestration(payload, masked_text, sender_name, attachment_result, path, cache_key)
 
     if confirmation is not None:
         if pending_action and pending_action.get("action_type") == "nickname_consent":
@@ -1751,29 +1894,15 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
             name = action_payload.get("first_name") or first_name
             nickname = action_payload.get("nickname", "")
             from tools.nickname import set_consent
-
             consent = await set_consent(phone, name, nickname, confirmation)
-            reply = (
-                f"Combinado, {nickname}! Vou usar esse apelido daqui pra frente."
-                if confirmation
-                else f"Tudo certo, {name}. Vou continuar usando seu primeiro nome."
-            )
-            result = {
-                "reply": reply,
-                "delay_ms": calculate_delay_ms(reply),
-                "presence": calculate_presence(),
-                "metadata": {
-                    "agent_id": "agent-intimacy",
-                    "response_identity": "Jennifer",
-                    "pending_action": "nickname_consent",
-                    "accepted": confirmation,
-                    "consent_recorded": "error" not in consent,
-                },
-            }
+            reply = (f"Combinado, {nickname}! Vou usar esse apelido daqui pra frente."
+                     if confirmation else f"Tudo certo, {name}. Vou continuar usando seu primeiro nome.")
+            result = {"reply": reply, "delay_ms": calculate_delay_ms(reply), "presence": calculate_presence(),
+                      "metadata": {"agent_id": "agent-intimacy", "response_identity": "Jennifer",
+                                   "pending_action": "nickname_consent", "accepted": confirmation,
+                                   "consent_recorded": "error" not in consent}}
             path = [{"step": 1, "phase": "pending_action", "action": "nickname_consent"}]
-            return await _finalize_orchestration(
-                payload, masked_text, sender_name, result, path, cache_key
-            )
+            return await _finalize_orchestration(payload, masked_text, sender_name, result, path, cache_key)
         if pending_action and pending_action.get("action_type") == "group_consent":
             await consume_pending_action(phone, "group_consent")
             action_payload = pending_action.get("payload", {})
@@ -1781,253 +1910,104 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
             requested_intent = action_payload.get("intent", "calendar")
             try:
                 from tools.group import set_member_confirmation
-
                 await set_member_confirmation(group_jid, phone, True)
             except Exception as exc:
                 logger.warning("set_member_confirmation failed: %s", exc)
-            intent_token = f"is_{requested_intent}"
-            intent = {intent_token: True}
-            specialist_ids = _resolve_agents_for_intents(intent, instance)
-            specialist_id = specialist_ids[0] if specialist_ids else None
-            if specialist_id:
-                agent = get_agent(specialist_id)
-                if agent:
-                    agent_copy = dict(agent)
-                    payload["_group_consent_granted"] = True
-                    agent_result = await _execute_agent(
-                        agent_copy, masked_text, payload, extra
-                    )
-                    reply = agent_result.get("reply", "Ok, liberei o acesso.")
-                else:
-                    reply = "Ok, liberei o acesso."
+            reply = "Ok, liberei o acesso."
+            pipeline_map = {"calendar": "calendar", "email": "email", "drive": "doc"}
+            pipe_name = pipeline_map.get(requested_intent)
+            if pipe_name == "calendar":
+                from pipelines.calendar_pipeline import run as run_cal
+                result = await run_cal(payload)
+            elif pipe_name == "email":
+                from pipelines.email_pipeline import run as run_email
+                result = await run_email(payload)
+            elif pipe_name == "doc":
+                from pipelines.doc_pipeline import run as run_doc
+                result = await run_doc(payload)
             else:
-                reply = "Ok, liberei o acesso."
-            result = {
-                "reply": reply,
-                "delay_ms": calculate_delay_ms(reply),
-                "presence": calculate_presence(),
-                "metadata": {
-                    "agent_id": "agent-privacy-guard",
-                    "response_identity": "Jennifer",
-                    "pending_action": "group_consent",
-                    "accepted": confirmation,
-                    "group_jid": group_jid,
-                },
-            }
-            path = [{"step": 1, "phase": "pending_action", "action": "group_consent"}]
-            return await _finalize_orchestration(
-                payload, masked_text, sender_name, result, path, cache_key
-            )
+                result = {"reply": reply, "delay_ms": 0, "presence": "composing",
+                          "metadata": {"agent_id": "group_consent", "pending_action": "group_consent"}}
+            return await _finalize_orchestration(payload, masked_text, sender_name, result,
+                                                  [{"step": 1, "phase": "pending_action", "action": "group_consent"}],
+                                                  cache_key)
 
-    intent = _detect_intent(masked_text)
-    path = [{"step": 1, "phase": "intent_detect", "details": {key: value for key, value in intent.items() if value}}]
-
-    with current_tracker().stage("intent_detected"):
-        # F4d.5/H: detecta se a mensagem pede conteudo armazenado no RAG.
-        # Heuristica primeiro; tie-breaker LLM so se ambiguo.
-        from agent_orchestration.knowledge_retriever import is_rag_query
-        recent_ctx = ""
-        try:
-            recent_ctx = _get_conversation_history(
-                payload.get("phone", ""), limit=2,
-            ) or ""
-        except Exception:
-            recent_ctx = ""
-        extra = payload.get("extra", {}) or {}
-        remote_jid = str(extra.get("remote_jid", ""))
-        scope_key = (
-            remote_jid.split("@")[0] + "@g.us"
-            if "@g.us" in remote_jid
-            else payload.get("phone", "")
-        )
-        try:
-            intent["is_rag"] = await is_rag_query(
-                masked_text,
-                recent_context=recent_ctx,
-                phone=scope_key,
-            )
-        except Exception:
-            intent["is_rag"] = False
-    if intent["is_rag"]:
-        path.append({"step": "1a", "phase": "rag_intent", "details": "true"})
-
-    specialist_ids = _resolve_agents_for_intents(
-        intent, instance, masked_text=masked_text, scope_key=scope_key,
-    )
-    specialist_id = specialist_ids[0] if specialist_ids else None
-
-    if specialist_ids:
-        _tracker.add_cost("agents_resolved", len(specialist_ids))
-
-    if extra.get("has_document") and not intent.get("is_attachment"):
-        intent["is_attachment"] = True
-    if extra.get("has_document") and intent.get("is_attachment"):
-        attachment_result = await _handle_attachment(payload, intent, sender_name)
-        if attachment_result is not None:
-            path.append({"step": 2, "phase": "attachment_handler",
-                         "status": attachment_result.get("metadata", {}).get("attachment", "unknown")})
-            return await _finalize_orchestration(
-                payload, masked_text, sender_name, attachment_result, path, cache_key
-            )
-
-    if intent.get("is_runtime_status"):
-        from core.agent_status import build_agent_inventory, format_inventory_reply
-
-        inventory = build_agent_inventory(instance=instance, phone=phone)
-        reply = format_inventory_reply(inventory)
-        result = {
-            "reply": reply,
-            "delay_ms": calculate_delay_ms(reply),
-            "presence": calculate_presence(),
-            "metadata": {
-                "agent_id": "runtime-status",
-                "route": "deterministic",
-                "response_identity": "Jennifer",
-                "counts": inventory["counts"],
-                "generated_at": inventory["generated_at"],
-            },
-        }
-        path.append({"step": 2, "phase": "runtime_status", "agent": "runtime-status"})
-        return await _finalize_orchestration(
-            payload, masked_text, sender_name, result, path, cache_key
-        )
-
-    if _is_personal_intent(intent) and _is_group_message(payload):
-        group_jid = extra.get("remote_jid", "") or _extract_group_jid(payload)
-        is_confirmed = False
-        if group_jid:
-            try:
-                from tools.group import get_member_confirmation
-                is_confirmed = await get_member_confirmation(group_jid, phone)
-            except Exception:
-                pass
-
-        if not is_confirmed:
-            logger.info(f"Privacy guard: unconfirmed member {phone} in group {group_jid}")
-            from core.pending_actions import set_pending_action
-
-            await set_pending_action(
-                phone,
-                "group_consent",
-                {
-                    "group_jid": group_jid,
-                    "requested_by": phone,
-                    "intent": "calendar" if intent.get("is_calendar") else (
-                        "email" if intent.get("is_email") else "drive"
-                    ),
-                    "agent": "agent-privacy-guard",
-                },
-                ttl_sec=300,
-            )
-            personal_label = (
-                "sua agenda pessoal" if intent.get("is_calendar")
-                else "seus emails" if intent.get("is_email")
-                else "seus arquivos do Drive"
-            )
-            return {
-                "reply": (
-                    f"Oi {sender_name}! 🔒 Voce pediu para acessar {personal_label} aqui no grupo. "
-                    "Por seguranca, so o proprietario da conta pode ver esses dados. "
-                    "Se voce for o dono da Jennifer, me mande 'sim' no privado que eu libero. "
-                    "Ou acesse o Portal: coherence-portal-test-c5nbfc5meq-uc.a.run.app"
-                ),
-                "delay_ms": 0,
-                "presence": "composing",
-                "metadata": {
-                    "agent_id": "privacy-guard",
-                    "blocked": "group_unconfirmed_member",
-                    "pending_action": "group_consent",
-                },
-            }
-
-        logger.info(f"Privacy guard: confirmed member {phone} in group {group_jid}, executing")
-
-    if _is_personal_intent(intent) and not get_user(phone):
-        logger.info(f"Privacy guard: unregistered user {phone} requesting personal data")
-        portal_url = "https://coherence-portal-test-c5nbfc5meq-uc.a.run.app"
-        return {
-            "reply": f"Oi {sender_name}! Para acessar agenda, emails ou documentos, "
-                     f"vincule sua conta no Portal Coherence: {portal_url}\n\n"
-                     "Depois, no módulo 'Agentes Omnichannel', vá até a aba 'Usuários' e clique em 'Vincular Agenda'. "
-                     "É rapidinho! 🔑",
-            "delay_ms": 0,
-            "presence": "composing",
-            "metadata": {"agent_id": "privacy-guard", "blocked": "unregistered_user"},
-        }
-
+    # ========================
+    # COMMANDS (before pipelines)
+    # ========================
     cmd = detect_command(masked_text)
     if cmd:
-        path.append({"step": 2, "phase": "command", "agent": "command-handler", "command": cmd})
         logger.info(f"Proactive command detected from {phone}: {cmd}")
         cmd_result = await apply_command(phone, cmd)
-        log_action(
-            actor="user",
-            action="PROACTIVE_COMMAND",
-            target=phone,
-            details={"command": cmd, "result": cmd_result},
-        )
-        result = {
-            "reply": cmd_result.get("message", "Comando aplicado."),
-            "delay_ms": 0,
-            "presence": "paused",
-            "metadata": {
-                "agent_id": "command-handler",
-                "command": cmd,
-                "applied": True,
-            },
-        }
-    elif specialist_ids:
-        if len(specialist_ids) == 1:
-            result = await _execute_single_specialist(
-                specialist_ids[0], intent, payload, masked_text, extra,
-                instance, phone, sender_name, path,
-            )
-        else:
-            result = await _execute_multi_specialists_parallel(
-                specialist_ids, intent, payload, masked_text, extra,
-                instance, phone, sender_name, path,
-            )
+        log_action(actor="user", action="PROACTIVE_COMMAND", target=phone,
+                    details={"command": cmd, "result": cmd_result})
+        result = {"reply": cmd_result.get("message", "Comando aplicado."), "delay_ms": 0, "presence": "paused",
+                  "metadata": {"agent_id": "command-handler", "command": cmd, "applied": True}}
+        return await _finalize_orchestration(payload, masked_text, sender_name, result,
+                                              [{"step": 1, "phase": "command", "command": cmd}], cache_key)
+
+    # ========================
+    # ATTACHMENT (has_document flag)
+    # ========================
+    if extra.get("has_document"):
+        intent = {"is_attachment_save": False, "is_attachment_file": False, "is_attachment": True}
+        attachment_result = await _handle_attachment(payload, intent, sender_name)
+        if attachment_result is not None:
+            path = [{"step": 1, "phase": "attachment_handler",
+                     "status": attachment_result.get("metadata", {}).get("attachment", "unknown")}]
+            return await _finalize_orchestration(payload, masked_text, sender_name, attachment_result, path, cache_key)
+
+    # ========================
+    # TIER 1: Security / Blocking (first-match, zero LLM)
+    # ========================
+    if _detect_intimacy(masked_text):
+        return await _handle_intimacy(payload, masked_text, sender_name, cache_key, first_name, phone)
+
+    if _detect_runtime_status(masked_text):
+        result = await _handle_runtime_status(payload, instance, phone)
+        path = [{"step": 1, "phase": "runtime_status"}]
+        return await _finalize_orchestration(payload, masked_text, sender_name, result, path, cache_key)
+
+    if _detect_correction(masked_text):
+        return await _handle_correction(payload, masked_text, sender_name, cache_key)
+
+    if _detect_morality(masked_text):
+        return await _handle_morality(payload, masked_text, sender_name, cache_key, instance, phone)
+
+    # ========================
+    # TIER 2: Functional (collect-all, parallel if multiple)
+    # ========================
+    import asyncio as _asyncio
+    from pipelines.calendar_pipeline import detect as cal_detect, run as cal_run
+    from pipelines.email_pipeline import detect as eml_detect, run as eml_run
+    from pipelines.doc_pipeline import detect as doc_detect, run as doc_run
+
+    matches = []
+    if cal_detect(masked_text):
+        matches.append(("calendar", cal_run))
+    if eml_detect(masked_text):
+        matches.append(("email", eml_run))
+    if _detect_web(masked_text):
+        result = await _handle_web(payload, masked_text, sender_name, cache_key)
+        return await _finalize_orchestration(payload, masked_text, sender_name, result,
+                                              [{"step": 1, "phase": "web_handler"}], cache_key)
+    if doc_detect(masked_text):
+        matches.append(("doc", doc_run))
+
+    path = [{"step": 1, "phase": "pipeline_routing", "matches": [m[0] for m in matches]}]
+
+    if len(matches) == 0:
+        from pipelines.jennifer_pipeline import run as jen_run
+        await _setup_nickname_consent(payload, first_name, phone)
+        result = await jen_run(payload)
+    elif len(matches) == 1:
+        await _setup_nickname_consent(payload, first_name, phone)
+        result = await matches[0][1](payload)
     else:
-        orchestrator_id = await _get_orchestrator(instance)
-        if not orchestrator_id:
-            return _error_response(503, "no_orchestrator", "Nenhum orchestrator disponivel")
-        orchestrator = get_agent(orchestrator_id)
-        if not orchestrator:
-            return _error_response(503, "agent_not_found", f"Orchestrator {orchestrator_id} nao encontrado")
-        path.append({"step": 2, "phase": "orchestrator", "agent": orchestrator_id, "reason": "default_route"})
+        results = await _asyncio.gather(*[p[1](payload) for p in matches])
+        result = _merge_pipeline_results(list(results))
 
-        orchestrator = copy.deepcopy(orchestrator)
-        if first_name and not has_nickname(phone):
-            suggested = _prefetch_nickname(first_name)
-            if not suggested:
-                suggested = _generate_diminutive(first_name)
-            intimacy_context = (
-                f"\n\n[CONTEXTO DE INTIMIDADE - PRIMEIRO CONTATO]\n"
-                f"Primeiro nome: {first_name}. Apelido sugerido: {suggested}\n"
-                f"1. Cumprimente usando APENAS o primeiro nome '{first_name}'.\n"
-                f"2. Pergunte: 'Posso te chamar de {suggested}?' e aguarde confirmacao.\n"
-                f"3. JAMAIS use apelidos depreciativos, ofensivos ou ironicos.\n"
-                f"4. Nao interprete a resposta futura sem consultar pending_action.\n"
-                f"5. Se ele rejeitar, nao insista."
-            )
-            orchestrator["system_prompt"] = orchestrator.get("system_prompt", "") + intimacy_context
-            if "nickname.get_preferred_name" not in orchestrator.get("tools", []):
-                orchestrator["tools"] = list(orchestrator.get("tools", [])) + [
-                    "nickname.get_preferred_name",
-                ]
-            from core.pending_actions import set_pending_action
-
-            await set_pending_action(
-                phone,
-                "nickname_consent",
-                {"first_name": first_name, "nickname": suggested},
-            )
-
-        result = await _execute_agent(orchestrator, masked_text, payload, extra)
-
-    return await _finalize_orchestration(
-        payload, masked_text, sender_name, result, path, cache_key
-    )
+    return await _finalize_orchestration(payload, masked_text, sender_name, result, path, cache_key)
 
 
 _MINIMAX_TOOL_CALL_RE = re.compile(r"<\s*tool_call\s*>.*?</\s*tool_call\s*>", re.DOTALL)
