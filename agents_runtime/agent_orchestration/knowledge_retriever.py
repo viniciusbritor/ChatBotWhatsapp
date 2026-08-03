@@ -463,9 +463,34 @@ def _extract_class_hint(query: str) -> Optional[str]:
     return max(scores.items(), key=lambda item: item[1])[0]
 
 
+_SOURCE_TITLE_ALIASES = {
+    "lgpd": "lgpd-capitulo-1.pdf",
+    "cdc": "cdc-capitulo-1.pdf",
+    "codigo de defesa do consumidor": "cdc-capitulo-1.pdf",
+    "manual de higiene": "manual-higiene.pdf",
+    "higiene": "manual-higiene.pdf",
+    "higienizacao": "manual-higiene.pdf",
+    "higienização": "manual-higiene.pdf",
+    "lavagem das maos": "manual-higiene.pdf",
+    "lavar as maos": "manual-higiene.pdf",
+}
+
+
+def _match_source_title_alias(query: str) -> Optional[str]:
+    """Map common terms in the query to known document filenames.
+
+    Example: query contains 'lgpd' → source_title='lgpd-capitulo-1.pdf'
+    """
+    t = _normalize(query)
+    for term, filename in _SOURCE_TITLE_ALIASES.items():
+        if _normalize(term) in t:
+            return filename
+    return None
+
+
 def _extract_query_hints(query: str) -> Dict[str, str]:
     hints: Dict[str, str] = {}
-    source_title = _extract_source_title_hint(query)
+    source_title = _extract_source_title_hint(query) or _match_source_title_alias(query)
     if source_title:
         hints["source_title"] = source_title
     cls = _extract_class_hint(query)
