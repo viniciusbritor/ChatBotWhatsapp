@@ -84,6 +84,7 @@ async def _list_knowledge_base(payload: Dict[str, Any]) -> Dict[str, Any]:
     try:
         from pipelines._ack import send_ack
         await send_ack(instance, phone, "rag", extra)
+        await asyncio.sleep(0.8)
     except Exception:
         pass
 
@@ -127,28 +128,13 @@ _DISAMBIGUATOR_PROMPT = (
 )
 
 
-_DOC_EXCLUDE_PATTERNS = (
-    "agenda", "agend", "evento", "eventos", "compromisso",
-    "compromissos", "lembrete", "calendario", "disponivel",
-    "semana que vem", "proxima semana",
-    "email", "e-mail", "emails", "e-mails",
-    "caixa de entrada", "caixa postal", "correio", "inbox",
-    "gmail", "ler email", "enviar email", "ultimos emails",
-    "ultima mensagem", "mensagens",
-)
-
-
 def detect(text: str) -> bool:
     t = text.lower()
-    has_calendar_or_email = any(ex in t for ex in _DOC_EXCLUDE_PATTERNS)
-
-    for kw in _LIST_KEYWORDS:
-        if kw in t:
-            return True
     for kw in DOC_KEYWORDS:
         if kw in t:
-            if has_calendar_or_email:
-                return False
+            return True
+    for kw in _LIST_KEYWORDS:
+        if kw in t:
             return True
     is_attachment = any(
         kw in t for kw in (
@@ -229,6 +215,7 @@ async def _run_rag(payload: Dict[str, Any]) -> Dict[str, Any]:
     try:
         from pipelines._ack import send_ack
         await send_ack(instance, phone, "rag", extra)
+        await asyncio.sleep(0.8)
     except Exception:
         pass
 
@@ -339,11 +326,9 @@ async def run(payload: Dict[str, Any]) -> Dict[str, Any]:
     # Fast path: listar documentos da base (somente se nao for query de conteudo)
     t = text.lower()
     _CONTENT_MARKERS = ("diz", "fala", "capitulo", "artigo", "lei", "sobre", "resuma", "explique", "qual o", "quais os")
-    _SEARCH_MARKERS = ("busque", "buscar", "procure", "procurar", "pesquise", "pesquisar", "ache", "achar", "encontre", "encontrar")
     has_list_kw = any(kw in t for kw in _LIST_KEYWORDS)
     has_content = any(mk in t for mk in _CONTENT_MARKERS)
-    has_search = any(mk in t for mk in _SEARCH_MARKERS)
-    if has_list_kw and not has_content and not has_search:
+    if has_list_kw and not has_content:
         return await _list_knowledge_base(payload)
 
     recent_context = ""

@@ -28,8 +28,7 @@ async def send_ack(
 ) -> None:
     """Envia typing indicator + mensagem de espera no WhatsApp.
 
-    Aguarda o envio HTTP para garantir que o ack chegue antes da resposta.
-    Presence é fire-and-forget (não bloqueante).
+    Fire-and-forget via asyncio.create_task. Nunca bloqueia o pipeline.
     """
     try:
         text = _ACK_MAP.get(ack_type, "Só um instante... ⏳")
@@ -42,13 +41,15 @@ async def send_ack(
         asyncio.create_task(
             send_presence(instance, phone, "composing", remote_jid=remote_jid)
         )
-        await send_text(
-            instance=instance,
-            phone=phone,
-            text=text,
-            delay_ms=delay_ms,
-            presence="composing",
-            remote_jid=remote_jid,
+        asyncio.create_task(
+            send_text(
+                instance=instance,
+                phone=phone,
+                text=text,
+                delay_ms=delay_ms,
+                presence="composing",
+                remote_jid=remote_jid,
+            )
         )
     except Exception:
         pass
