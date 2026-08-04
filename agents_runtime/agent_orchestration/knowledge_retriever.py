@@ -384,6 +384,22 @@ def _extract_phone(envelope: Optional[Dict[str, Any]]) -> str:
     return ""
 
 
+_ABOUT_QUERY_MARKERS = (
+    "sobre o que", "do que se trata", "do que trata",
+    "me explique", "me resuma", "qual o tema", "qual o assunto",
+    "o que e", "o que sao", "sobre o que e", "resumo do",
+    "conteudo do", "me fala sobre", "qual o conteudo",
+    "qual e o conteudo", "qual o conteudo de",
+    "qual o resumo", "sobre qual tema", "qual e o tema",
+    "explique sobre", "resuma o", "resuma a",
+    "fale sobre", "o que voce sabe sobre", "o que vc sabe sobre",
+)
+
+
+def _is_about_query(query: str) -> bool:
+    return any(m in _normalize(query) for m in _ABOUT_QUERY_MARKERS)
+
+
 _DOC_HINT = re.compile(
     r"[\w\u00C0-\u017F][\w\-\.\(\)\u00C0-\u017F ]*\.(?:pdf|docx|xlsx|txt|md|csv)",
     re.IGNORECASE,
@@ -486,14 +502,132 @@ def _match_source_title_alias(query: str) -> Optional[str]:
     return None
 
 
-def _extract_query_hints(query: str) -> Dict[str, str]:
+async def _match_source_title_dynamic(phone: str, query: str) -> Optional[str]:
+    """Look up Firestore for source_titles matching query terms.
+
+    Falls back to Firestore when static aliases fail. Returns the
+    source_title when 2+ non-stopword words from the query match
+    words in a known document filename.
+    """
+    if not phone or not query:
+        return None
+    try:
+        sources = await _list_known_sources(phone, limit=50)
+        if not sources:
+            return None
+        query_words = set(
+            w.strip(".,;:!?()\"'\u00A0")
+            for w in _normalize(query).split()
+            if w.strip(".,;:!?()\"'\u00A0") and w not in _FILENAME_STOPWORDS
+        )
+        if len(query_words) < 2:
+            return None
+        best_match = None
+        best_score = 0
+        for src in sources:
+            src_root = _normalize(src).rsplit(".", 1)[0]
+            src_words = set(src_root.split())
+            common = query_words & src_words
+            score = len(common)
+            if score > best_score:
+                best_score = score
+                best_match = src
+        return best_match if best_score >= 2 else None
+    except Exception:
+        return None
+
+
+_LLM_ENRICH_PROMPT = (
+    "Analise a pergunta do usuario e extraia:\n"
+    "1. enriched_query: a query em portugues com os termos principais "
+    "para busca semantica (max 100 chars)\n"
+    "2. source_hint: palavra-chave que identifica o documento mencionado "
+    "('cdc', 'lgpd', 'tese', 'dissertacao', 'edital', 'lei', etc) ou vazio\n"
+    "3. class_hint: categoria do documento ('legal', 'academico', "
+    "'edital', 'financeiro', 'saude', 'manual', 'outros') ou vazio\n\n"
+    "Responda APENAS com um JSON: "
+    '{{"enriched_query":"...", "source_hint":"...", "class_hint":"..."}}\n\n'
+    "Pergunta: {query}"
+)
+
+
+async def _llm_enrich_query(query: str) -> Dict[str, str]:
+    """Extrai assunto principal, source hint e class hint via DeepSeek Flash.
+
+    Usado como complemento ao pipeline de hints: quando heuristica e
+    aliases nao encontram source_title ou class, o LLM preenche as lacunas.
+    Retorna dict com enriched_query, source_hint, class_hint.
+    Se o LLM falhar, enriched_query = query original (fallback transparente).
+    """
+    if not query.strip():
+        return {"enriched_query": query, "source_hint": "", "class_hint": ""}
+
+    try:
+        api_key = (os.getenv("DEEPSEEK_API_KEY", "") or "").strip()
+        if not api_key:
+            return {"enriched_query": query, "source_hint": "", "class_hint": ""}
+
+        from langchain_openai import ChatOpenAI
+
+        base_url = os.getenv(
+            "DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"
+        ).strip()
+
+        llm = ChatOpenAI(
+            model="deepseek-v4-flash",
+            api_key=api_key,
+            base_url=base_url,
+            temperature=0,
+            max_tokens=150,
+            timeout=8,
+            model_kwargs={"thinking": {"type": "disabled"}},
+        )
+
+        prompt = _LLM_ENRICH_PROMPT.format(query=query.strip()[:300])
+        result = await asyncio.to_thread(llm.invoke, prompt)
+        raw = (
+            getattr(result, "content", str(result))
+            if not isinstance(result, dict)
+            else result.get("content", "")
+        )
+
+        import json as _json
+        match = re.search(r"\{[^}]+\}", raw)
+        if match:
+            data = _json.loads(match.group(0))
+            return {
+                "enriched_query": str(data.get("enriched_query", "") or "").strip()[:150] or query,
+                "source_hint": str(data.get("source_hint", "") or "").strip(),
+                "class_hint": str(data.get("class_hint", "") or "").strip(),
+            }
+
+        return {"enriched_query": query, "source_hint": "", "class_hint": ""}
+    except Exception as exc:
+        logger.warning("llm_enrich_query failed: %s", exc)
+        return {"enriched_query": query, "source_hint": "", "class_hint": ""}
+
+
+async def _extract_query_hints(phone: str, query: str) -> Dict[str, str]:
     hints: Dict[str, str] = {}
-    source_title = _extract_source_title_hint(query) or _match_source_title_alias(query)
+    source_title = (
+        _extract_source_title_hint(query)
+        or _match_source_title_alias(query)
+        or await _match_source_title_dynamic(phone, query)
+    )
     if source_title:
         hints["source_title"] = source_title
     cls = _extract_class_hint(query)
     if cls:
         hints["class"] = cls
+
+    # LLM enrichment preenche lacunas e gera enriched_query
+    enrichment = await _llm_enrich_query(query)
+    hints["enriched_query"] = enrichment["enriched_query"]
+    if not hints.get("source_title") and enrichment.get("source_hint"):
+        hints["llm_source_hint"] = enrichment["source_hint"]
+    if not hints.get("class") and enrichment.get("class_hint"):
+        hints["class"] = enrichment["class_hint"]
+
     return hints
 
 
@@ -604,10 +738,22 @@ async def _rerank_with_llm(
             text = (c.get("text") or "")[:500]
             chunk_lines.append(f"[{i}] (score={c.get('score', 0):.2f}) {text}")
         chunks_blob = "\n".join(chunk_lines)
+        about_hint = ""
+        if _is_about_query(query):
+            about_hint = (
+                "\nIMPORTANTE: A query pergunta SOBRE O QUE E o documento. "
+                "Priorize chunks com CONTEUDO SUBSTANTIVO (resumo, introducao, "
+                "metodologia, conclusao, resultados) sobre chunks com METADADOS "
+                "(folha de rosto, agradecimentos, ficha catalografica, creditos, "
+                "cabecalhos institucionais). "
+                "Chunks de cabecalho so devem ser priorizados se contiverem "
+                "informacao substantiva sobre o tema do documento.\n"
+            )
         prompt = (
             "Re-ordene os chunks abaixo por relevancia para a query. "
             "Retorne SOMENTE um JSON array de indices, do mais "
-            f"relevante para o menos relevante, max {top_n} itens.\n"
+            f"relevante para o menos relevante, max {top_n} itens."
+            f"{about_hint}\n"
             f"Query: {query}\n\n"
             f"Chunks:\n{chunks_blob}\n\n"
             f"Resposta (JSON array de {top_n} indices):"
@@ -743,7 +889,8 @@ async def retrieve(
     is_group = _is_group(envelope)
     phone = _extract_phone(envelope)
     group_jid = _extract_group_jid(envelope) if is_group else ""
-    hints = _extract_query_hints(query)
+    hints = await _extract_query_hints(phone, query)
+    enriched_query = hints.get("enriched_query") or query
     started = time.monotonic()
     query_hash = hashlib.md5(
         (phone + ":" + _normalize(query)).encode("utf-8")
@@ -814,13 +961,9 @@ async def retrieve(
                 _cache_set(cache_key, result)
                 return result
             group_hits = await _retrieve_group(
-                group_jid=group_jid, query=query, limit=effective_limit, min_score=threshold
+                group_jid=group_jid, query=enriched_query, limit=effective_limit, min_score=threshold
             )
             if group_hits["count"] > 0:
-                group_hits["results"] = await _rerank_with_llm(
-                    query, group_hits["results"], top_n=3
-                )
-                group_hits["count"] = len(group_hits["results"])
                 result = {
                     **group_hits,
                     "decision": "group",
@@ -833,7 +976,7 @@ async def retrieve(
                 _cache_set(cache_key, result)
                 return result
             private_hits = await _retrieve_private(
-                phone=phone, query=query, limit=effective_limit, min_score=threshold,
+                phone=phone, query=enriched_query, limit=effective_limit, min_score=threshold,
                 source_title=hints.get("source_title"),
                 class_=hints.get("class"),
             )
@@ -869,15 +1012,11 @@ async def retrieve(
             return result
 
         private_hits = await _retrieve_private(
-            phone=phone, query=query, limit=effective_limit, min_score=threshold,
+            phone=phone, query=enriched_query, limit=effective_limit, min_score=threshold,
             source_title=hints.get("source_title"),
             class_=hints.get("class"),
         )
         if private_hits["count"] > 0:
-            private_hits["results"] = await _rerank_with_llm(
-                query, private_hits["results"], top_n=3
-            )
-            private_hits["count"] = len(private_hits["results"])
             decision = "private"
             result = {
                 **private_hits,
@@ -972,6 +1111,9 @@ def _summarize_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 __all__ = [
     "is_rag_query",
+    "_is_about_query",
+    "_llm_enrich_query",
+    "_match_source_title_dynamic",
     "retrieve",
     "share_pending_action_consume",
     "RAG_RETRIEVE_MIN_SCORE",

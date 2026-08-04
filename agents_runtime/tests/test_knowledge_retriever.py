@@ -588,26 +588,137 @@ class TestRerank:
         assert rec.classes == ["legal", "legal"]
 
 
+class TestAboutQueryDetection:
+    def test_detects_about_queries(self):
+        from agent_orchestration.knowledge_retriever import _is_about_query
+
+        queries = [
+            "sobre o que se trata a dissertação vinicius",
+            "do que se trata esse documento?",
+            "me explique o conteudo do pdf",
+            "qual o tema do arquivo?",
+            "o que é esse documento sobre?",
+            "me fala sobre o que voce guardou",
+            "resuma o documento que voce salvou",
+            "sobre qual tema é essa tese?",
+            "fale sobre o conteudo da ata",
+            "qual o resumo do que voce memorizou?",
+        ]
+        for q in queries:
+            assert _is_about_query(q), f"should detect: {q}"
+
+    def test_rejects_non_about_queries(self):
+        from agent_orchestration.knowledge_retriever import _is_about_query
+
+        queries = [
+            "oi, tudo bem?",
+            "qual o artigo 5 do cdc?",
+            "liste os documentos",
+            "busque por editais na base",
+            "qual o prazo do edital 2024?",
+            "memorize esse arquivo",
+        ]
+        for q in queries:
+            assert not _is_about_query(q), f"should NOT detect: {q}"
+
+    def test_detects_normalized_accents(self):
+        from agent_orchestration.knowledge_retriever import _is_about_query
+
+        assert _is_about_query("sobre o que é a dissertação?")
+        assert _is_about_query("qual é o tema do documento?")
+        assert _is_about_query("o que é que voce guardou?")
+
+
+class TestRerankAntiMetadataHints:
+    @pytest.mark.asyncio
+    async def test_about_query_injects_hint_into_prompt(self):
+        from agent_orchestration import knowledge_retriever
+
+        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "fake"}):
+            captured_prompt = []
+
+            class FakeLLM:
+                def invoke(self, msgs):
+                    captured_prompt.append(msgs[0]["content"])
+                    class R:
+                        content = "[2, 1, 0]"
+                    return R()
+
+            with patch("langchain_openai.ChatOpenAI") as mock_openai:
+                mock_openai.return_value = FakeLLM()
+                chunks = [
+                    {"text": "chunk 0: D.Sc. Prof. orientador... ficha catalografica", "score": 0.9},
+                    {"text": "chunk 1: agradecimentos aos professores e familia", "score": 0.85},
+                    {"text": "chunk 2: introducao: modelos bayesianos para volatilidade", "score": 0.8},
+                    {"text": "chunk 3: metodologia de precificacao de opcoes", "score": 0.75},
+                ]
+                await knowledge_retriever._rerank_with_llm(
+                    "sobre o que se trata a dissertacao?",
+                    chunks, top_n=3,
+                )
+
+            assert len(captured_prompt) == 1
+            prompt = captured_prompt[0]
+            assert "IMPORTANTE" in prompt
+            assert "CONTEUDO SUBSTANTIVO" in prompt
+            assert "METADADOS" in prompt
+            assert "folha de rosto" in prompt
+            assert "agradecimentos" in prompt
+
+    @pytest.mark.asyncio
+    async def test_factual_query_omits_hint(self):
+        from agent_orchestration import knowledge_retriever
+
+        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "fake"}):
+            captured_prompt = []
+
+            class FakeLLM:
+                def invoke(self, msgs):
+                    captured_prompt.append(msgs[0]["content"])
+                    class R:
+                        content = "[2, 0, 1]"
+                    return R()
+
+            with patch("langchain_openai.ChatOpenAI") as mock_openai:
+                mock_openai.return_value = FakeLLM()
+                chunks = [
+                    {"text": "c0", "score": 0.9},
+                    {"text": "c1", "score": 0.8},
+                    {"text": "c2", "score": 0.7},
+                    {"text": "c3", "score": 0.6},
+                ]
+                await knowledge_retriever._rerank_with_llm(
+                    "qual o artigo 5 do codigo de defesa do consumidor?",
+                    chunks, top_n=3,
+                )
+
+            assert len(captured_prompt) == 1
+            prompt = captured_prompt[0]
+            assert "IMPORTANTE" not in prompt
+            assert "CONTEUDO SUBSTANTIVO" not in prompt
+            assert "METADADOS" not in prompt
+
+
 class TestRetrieveWithHints:
     @pytest.mark.asyncio
     async def test_extracts_source_title_from_query(self):
         from agent_orchestration.knowledge_retriever import _extract_query_hints
 
-        hints = _extract_query_hints("o que tem no cdc-portugues-2013.pdf sobre saude?")
+        hints = await _extract_query_hints("5511999", "o que tem no cdc-portugues-2013.pdf sobre saude?")
         assert hints.get("source_title") == "cdc-portugues-2013.pdf"
 
     @pytest.mark.asyncio
     async def test_extracts_class_hint(self):
         from agent_orchestration.knowledge_retriever import _extract_query_hints
 
-        hints = _extract_query_hints("tem algum edital de licitacao?")
+        hints = await _extract_query_hints("5511999", "tem algum edital de licitacao?")
         assert hints.get("class") == "edital"
 
     @pytest.mark.asyncio
     async def test_no_hints_when_unrelated(self):
         from agent_orchestration.knowledge_retriever import _extract_query_hints
 
-        hints = _extract_query_hints("oi, tudo bem?")
+        hints = await _extract_query_hints("5511999", "oi, tudo bem?")
         assert "source_title" not in hints
         assert "class" not in hints
 
@@ -653,3 +764,304 @@ class TestRetrieveWithHints:
         assert result["decision"] == "needs_clarification"
         assert result["needs_clarification"] is True
         assert "Não encontrei" in result["clarification_prompt"]
+
+
+class TestSourceTitleAlias:
+    @pytest.mark.asyncio
+    async def test_static_alias_lgpd(self):
+        from agent_orchestration.knowledge_retriever import _match_source_title_alias
+
+        assert _match_source_title_alias("o que diz a lgpd sobre dados?") == (
+            "Lei_geral_protecao_dados_pessoais_1ed.pdf"
+        )
+
+    @pytest.mark.asyncio
+    async def test_static_alias_cdc(self):
+        from agent_orchestration.knowledge_retriever import _match_source_title_alias
+
+        assert _match_source_title_alias("qual o artigo 5 do codigo de defesa do consumidor?") == (
+            "Codigo-do-consumidor-FINAL.pdf"
+        )
+
+    @pytest.mark.asyncio
+    async def test_static_alias_no_match(self):
+        from agent_orchestration.knowledge_retriever import _match_source_title_alias
+
+        assert _match_source_title_alias("dissertacao vinicius rocha") is None
+
+
+class TestSourceTitleDynamic:
+    @pytest.mark.asyncio
+    async def test_dynamic_matches_firestore_title(self):
+        from agent_orchestration import knowledge_retriever
+
+        fake_sources = [
+            "Codigo-do-consumidor-FINAL.pdf",
+            "Lei_geral_protecao_dados_pessoais_1ed.pdf",
+            "dissertacao vinicius.pdf",
+        ]
+        with patch.object(
+            knowledge_retriever, "_list_known_sources",
+            AsyncMock(return_value=fake_sources),
+        ):
+            result = await knowledge_retriever._match_source_title_dynamic(
+                "5511999", "sobre o que se trata a dissertacao vinicius?"
+            )
+        assert result == "dissertacao vinicius.pdf"
+
+    @pytest.mark.asyncio
+    async def test_dynamic_requires_two_common_words(self):
+        from agent_orchestration import knowledge_retriever
+
+        fake_sources = ["dissertacao vinicius.pdf", "ata_reuniao_2024.pdf"]
+        with patch.object(
+            knowledge_retriever, "_list_known_sources",
+            AsyncMock(return_value=fake_sources),
+        ):
+            result = await knowledge_retriever._match_source_title_dynamic(
+                "5511999", "dissertacao"
+            )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_dynamic_empty_phone_returns_none(self):
+        from agent_orchestration import knowledge_retriever
+
+        result = await knowledge_retriever._match_source_title_dynamic("", "query")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_dynamic_firestore_failure_returns_none(self):
+        from agent_orchestration import knowledge_retriever
+
+        with patch.object(
+            knowledge_retriever, "_list_known_sources",
+            AsyncMock(side_effect=Exception("firestore down")),
+        ):
+            result = await knowledge_retriever._match_source_title_dynamic(
+                "5511999", "dissertacao vinicius"
+            )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_query_hints_uses_dynamic_fallback(self):
+        from agent_orchestration import knowledge_retriever
+
+        fake_sources = ["dissertacao vinicius.pdf"]
+        with patch.object(
+            knowledge_retriever, "_list_known_sources",
+            AsyncMock(return_value=fake_sources),
+        ):
+            hints = await knowledge_retriever._extract_query_hints(
+                "5511999", "sobre o que se trata a dissertacao vinicius?"
+            )
+        assert hints.get("source_title") == "dissertacao vinicius.pdf"
+        assert hints.get("class") == "academico"
+
+
+class TestLLMQueryEnrichment:
+    @pytest.mark.asyncio
+    async def test_enrich_extracts_subject_from_ambiguous_query(self):
+        from agent_orchestration import knowledge_retriever
+        import json
+
+        class FakeResponse:
+            content = json.dumps({
+                "enriched_query": "modelos de precificacao de opcoes abordagem bayesiana",
+                "source_hint": "tese",
+                "class_hint": "academico",
+            })
+
+        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "fake"}):
+            with patch("asyncio.to_thread", new_callable=AsyncMock, return_value=FakeResponse()):
+                result = await knowledge_retriever._llm_enrich_query(
+                    "aquele negocio de opcoes"
+                )
+        assert "precificacao" in result["enriched_query"]
+        assert result["source_hint"] == "tese"
+        assert result["class_hint"] == "academico"
+
+    @pytest.mark.asyncio
+    async def test_enrich_preserves_clear_query(self):
+        from agent_orchestration import knowledge_retriever
+        import json
+
+        class FakeResponse:
+            content = json.dumps({
+                "enriched_query": "artigo 5 codigo de defesa do consumidor",
+                "source_hint": "cdc",
+                "class_hint": "legal",
+            })
+
+        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "fake"}):
+            with patch("asyncio.to_thread", new_callable=AsyncMock, return_value=FakeResponse()):
+                result = await knowledge_retriever._llm_enrich_query(
+                    "qual o artigo 5 do cdc?"
+                )
+        assert "artigo 5" in result["enriched_query"]
+        assert result["source_hint"] == "cdc"
+        assert result["class_hint"] == "legal"
+
+    @pytest.mark.asyncio
+    async def test_enrich_fallback_on_llm_failure(self):
+        from agent_orchestration import knowledge_retriever
+        import asyncio as _asyncio
+
+        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "fake"}):
+            with patch.object(_asyncio, "to_thread", AsyncMock(side_effect=Exception("LLM down"))):
+                result = await knowledge_retriever._llm_enrich_query(
+                    "sobre o que se trata a tese?"
+                )
+        assert result["enriched_query"] == "sobre o que se trata a tese?"
+        assert result["source_hint"] == ""
+        assert result["class_hint"] == ""
+
+    @pytest.mark.asyncio
+    async def test_enrich_fallback_when_no_api_key(self):
+        from agent_orchestration import knowledge_retriever
+
+        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": ""}):
+            result = await knowledge_retriever._llm_enrich_query(
+                "sobre o que se trata?"
+            )
+        assert result["enriched_query"] == "sobre o que se trata?"
+        assert result["source_hint"] == ""
+        assert result["class_hint"] == ""
+
+
+class TestRetrieveUsesEnrichedQuery:
+    @pytest.mark.asyncio
+    async def test_retrieve_uses_enriched_query_in_vector_search(self):
+        from agent_orchestration import knowledge_retriever
+        import json
+
+        envelope = {
+            "phone": "5511999",
+            "extra": {"remote_jid": "5511999@s.whatsapp.net"},
+        }
+        captured_query = []
+
+        def fake_search(**kwargs):
+            captured_query.append(kwargs.get("query", ""))
+            return {"results": [], "owner_hash": "abc"}
+
+        class FakeResponse:
+            content = json.dumps({
+                "enriched_query": "modelos precificacao opcoes bayesianos",
+                "source_hint": "",
+                "class_hint": "",
+            })
+
+        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "fake"}):
+            with patch("asyncio.to_thread", new_callable=AsyncMock, return_value=FakeResponse()):
+                with patch(
+                    "agent_orchestration.knowledge_retriever.search_legal_knowledge",
+                    AsyncMock(side_effect=fake_search),
+                ):
+                    await knowledge_retriever.retrieve(
+                        envelope, "aquele negocio de opcoes que vc memorizou"
+                    )
+
+        assert len(captured_query) >= 1
+        assert "precificacao" in captured_query[0]
+
+    @pytest.mark.asyncio
+    async def test_retrieve_no_longer_calls_rerank(self):
+        from agent_orchestration import knowledge_retriever
+        import json
+
+        envelope = {
+            "phone": "5511999",
+            "extra": {"remote_jid": "5511999@s.whatsapp.net"},
+        }
+        chunks = [
+            {"text": "c1", "score": 0.9, "source": "doc.pdf"},
+            {"text": "c2", "score": 0.8, "source": "doc.pdf"},
+        ]
+
+        class FakeResponse:
+            content = json.dumps({
+                "enriched_query": "test query",
+                "source_hint": "",
+                "class_hint": "",
+            })
+
+        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "fake"}):
+            with patch("asyncio.to_thread", new_callable=AsyncMock, return_value=FakeResponse()):
+                with patch(
+                    "agent_orchestration.knowledge_retriever.search_legal_knowledge",
+                    AsyncMock(return_value={"results": chunks, "owner_hash": "abc"}),
+                ):
+                    with patch(
+                        "agent_orchestration.knowledge_retriever._rerank_with_llm",
+                        wraps=knowledge_retriever._rerank_with_llm,
+                    ) as rerank_spy:
+                        knowledge_retriever._RETRIEVAL_CACHE.clear()
+                        result = await knowledge_retriever.retrieve(
+                            envelope, "test"
+                        )
+
+        assert rerank_spy.call_count == 0
+        assert result["count"] == 2
+
+    @pytest.mark.asyncio
+    async def test_retrieve_emits_metrics_after_enrichment(self):
+        from agent_orchestration import knowledge_retriever
+        import json
+
+        envelope = {
+            "phone": "5511999",
+            "extra": {"remote_jid": "5511999@s.whatsapp.net"},
+        }
+        chunks = [
+            {"text": "c1", "score": 0.9, "source": "doc.pdf", "class": "legal"},
+        ]
+
+        class FakeResponse:
+            content = json.dumps({
+                "enriched_query": "cdc artigo 5",
+                "source_hint": "cdc",
+                "class_hint": "legal",
+            })
+
+        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "fake"}):
+            with patch("asyncio.to_thread", new_callable=AsyncMock, return_value=FakeResponse()):
+                with patch(
+                    "agent_orchestration.knowledge_retriever.search_legal_knowledge",
+                    AsyncMock(return_value={"results": chunks, "owner_hash": "abc"}),
+                ):
+                    result = await knowledge_retriever.retrieve(
+                        envelope, "qual o artigo 5 do cdc?"
+                    )
+
+        assert result["decision"] == "private"
+        assert result["count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_enrichment_query_falls_back_to_original_on_llm_down(self):
+        from agent_orchestration import knowledge_retriever
+
+        envelope = {
+            "phone": "5511999",
+            "extra": {"remote_jid": "5511999@s.whatsapp.net"},
+        }
+        chunks = [{"text": "c1", "score": 0.9, "source": "doc.pdf"}]
+        captured_query = []
+
+        def fake_search(**kwargs):
+            captured_query.append(kwargs.get("query", ""))
+            return {"results": chunks, "owner_hash": "abc"}
+
+        knowledge_retriever._RETRIEVAL_CACHE.clear()
+
+        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": ""}):
+            with patch(
+                "agent_orchestration.knowledge_retriever.search_legal_knowledge",
+                AsyncMock(side_effect=fake_search),
+            ):
+                result = await knowledge_retriever.retrieve(
+                    envelope, "sobre o que se trata a tese?"
+                )
+
+        assert result["count"] == 1
+        assert "sobre o que se trata a tese" in captured_query[0]

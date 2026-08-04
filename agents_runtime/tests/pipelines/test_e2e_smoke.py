@@ -240,7 +240,7 @@ class TestE2EDocAndDrive:
             result = await orchestrate(_base_payload("leia o documento"))
 
         assert result["metadata"]["needs_clarification"] is True
-        assert "base de conhecimento" in result["reply"].lower()
+        assert "banco semantico" in result["reply"].lower()
         assert "drive" in result["reply"].lower()
 
 

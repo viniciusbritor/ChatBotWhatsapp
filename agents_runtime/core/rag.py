@@ -28,6 +28,7 @@ import requests
 
 from core.masker import mask_pii
 from core.secrets import get_secret
+from core.text_cleaner import clean_portuguese
 from core.timezone import now_brt
 
 logger = logging.getLogger(__name__)
@@ -167,7 +168,7 @@ async def embed_query(text: str, attempt: int = 0) -> Optional[List[float]]:
     - 3 retries: 4s
     - Exausted: log error + return None
     """
-    clean_text = mask_pii(str(text or "")).strip()
+    clean_text = clean_portuguese(mask_pii(str(text or "")).strip())
     if not clean_text:
         return None
     try:
@@ -244,7 +245,7 @@ async def embed_documents(texts: List[str]) -> Optional[List[List[float]]]:
     return [vector for vector in vectors if vector is not None]
 
 
-def _chunk_text(text: str, max_chars: int = 1200, overlap: int = 180) -> List[str]:
+def _chunk_text(text: str, max_chars: int = 1200, overlap: int = 300) -> List[str]:
     chunks = []
     start = 0
     while start < len(text):
@@ -255,6 +256,11 @@ def _chunk_text(text: str, max_chars: int = 1200, overlap: int = 180) -> List[st
                 if last_separator > start + max_chars // 2:
                     end = last_separator + len(separator)
                     break
+            else:
+                # Word-aware fallback: procura ultimo espaco
+                last_space = text.rfind(" ", start, end)
+                if last_space > start + max_chars // 2:
+                    end = last_space + 1
         chunks.append(text[start:end].strip())
         start = end - overlap if end < len(text) else end
     return [chunk for chunk in chunks if chunk]
@@ -519,6 +525,7 @@ async def index_private_document(
     db = _get_firestore()
     if db is None:
         return {"error": "firestore_unavailable"}
+    text_content = clean_portuguese(text_content)
     clean_content = mask_pii(text_content)
     chars_soft_limit = PRIVATE_CHARS_SOFT_LIMIT
     chunks_soft_limit = PRIVATE_CHUNKS_SOFT_LIMIT
@@ -746,7 +753,7 @@ async def search_legal_knowledge(
                 continue
             chunks.append(
                 {
-                    "text": data.get("text_content", ""),
+                    "text": clean_portuguese(data.get("text_content", "")),
                     "score": score,
                     "source": data.get("source_title", ""),
                     "source_url": data.get("source_url", ""),

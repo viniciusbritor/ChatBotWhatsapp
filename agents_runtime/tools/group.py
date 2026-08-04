@@ -322,7 +322,7 @@ _GROUP_KNOWLEDGE_COLLECTION = "group-knowledge-v2"
 _EMBEDDING_MODEL = "text-embedding-3-small"
 _EMBEDDING_DIM = 1536
 _CHUNK_MAX_CHARS = 1200
-_CHUNK_OVERLAP_PCT = 15
+_CHUNK_OVERLAP_PCT = 25
 _CHUNKS_SOFT_LIMIT_DEFAULT = 500
 _CHARS_SOFT_LIMIT_DEFAULT = 1_000_000
 _THEME_HEURISTICS = [
@@ -365,6 +365,10 @@ def _chunk_text_smart(text: str, max_chars: int = _CHUNK_MAX_CHARS,
                 if last_sep > start + max_chars // 2:
                     end = last_sep + len(sep)
                     break
+            else:
+                last_space = text.rfind(" ", start, end)
+                if last_space > start + max_chars // 2:
+                    end = last_space + 1
         chunk = text[start:end].strip()
         if chunk:
             chunks.append(chunk)

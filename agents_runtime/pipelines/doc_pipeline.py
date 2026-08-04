@@ -227,12 +227,15 @@ async def _run_rag(payload: Dict[str, Any]) -> Dict[str, Any]:
     text = payload.get("text", "")
     extra = payload.get("extra", {}) or {}
 
-    try:
-        from pipelines._ack import send_ack
-        await send_ack(instance, phone, "rag", extra)
-        await asyncio.sleep(0.8)
-    except Exception:
-        pass
+    async def _send_ack_rag():
+        try:
+            from pipelines._ack import send_ack
+            await send_ack(instance, phone, "rag", extra)
+            await asyncio.sleep(0.8)
+        except Exception:
+            pass
+
+    ack_task = asyncio.create_task(_send_ack_rag())
 
     try:
         from agent_orchestration.knowledge_retriever import retrieve
@@ -247,15 +250,21 @@ async def _run_rag(payload: Dict[str, Any]) -> Dict[str, Any]:
         result = await retrieve(envelope, text)
 
         if result.get("clarification_prompt"):
+            await ack_task
             return {
                 "reply": result["clarification_prompt"],
                 "delay_ms": 0,
                 "presence": "composing",
-                "metadata": {"agent_id": "agent-knowledge-retriever", "needs_clarification": True, "skip_image_report": True},
+                "metadata": {
+                    "agent_id": "agent-knowledge-retriever",
+                    "needs_clarification": True,
+                    "skip_image_report": True,
+                },
             }
 
         chunks = result.get("results", [])
         if not chunks:
+            await ack_task
             return {
                 "reply": "Nao encontrei nada sobre isso na base de conhecimento.",
                 "delay_ms": 0,
@@ -263,10 +272,8 @@ async def _run_rag(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "metadata": {"agent_id": "agent-knowledge-retriever", "count": 0, "skip_image_report": True},
             }
 
-        resposta = "\n\n".join(
-            f"[{c.get('source', '?')[:40]}] {c.get('text', '')[:300]}"
-            for c in chunks[:3]
-        )
+        resposta = await _synthesize_rag_answer(text, chunks)
+        await ack_task
         return {
             "reply": resposta,
             "delay_ms": 500,
@@ -279,6 +286,7 @@ async def _run_rag(payload: Dict[str, Any]) -> Dict[str, Any]:
             },
         }
     except Exception as exc:
+        await ack_task
         logger.error("rag_retrieve_failed error=%s", exc)
         return {
             "reply": "Desculpe, nao consegui buscar na base de conhecimento agora.",
@@ -286,6 +294,110 @@ async def _run_rag(payload: Dict[str, Any]) -> Dict[str, Any]:
             "presence": "composing",
             "metadata": {"agent_id": "agent-knowledge-retriever", "error": str(exc)[:200], "skip_image_report": True},
         }
+
+
+_SYNTHESIS_SYSTEM_PROMPT = (
+    "Voce e a Jennifer, assistente virtual. Use APENAS os trechos abaixo "
+    "para responder a pergunta do usuario de forma clara e direta. "
+    "NAO invente informacao que nao esta nos trechos. "
+    "Se os trechos nao contiverem a resposta, diga que nao encontrou. "
+    "Responda em portugues brasileiro, em no maximo 1 paragrafo. "
+    "Sempre cite a fonte entre colchetes."
+)
+
+
+def _fallback_raw_chunks(chunks: list) -> str:
+    """Fallback: dump cru de chunks (comportamento legado)."""
+    return "\n\n".join(
+        f"[{c.get('source', '?')[:40]}] {c.get('text', '')[:300]}"
+        for c in chunks[:3]
+    )
+
+
+async def _call_llm_synthesis(
+    model: str,
+    query: str,
+    chunks: list,
+    max_tokens: int,
+    timeout: int,
+    extra_kwargs: dict,
+) -> str:
+    """Call DeepSeek LLM for RAG synthesis. Returns answer text."""
+    from langchain_openai import ChatOpenAI
+
+    api_key = (os.getenv("DEEPSEEK_API_KEY", "") or "").strip()
+    if not api_key:
+        raise ValueError("DEEPSEEK_API_KEY not set")
+
+    base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1").strip()
+
+    context = "\n---\n".join(
+        f"[Fonte: {c.get('source', '?')}] {c.get('text', '')[:800]}"
+        for c in chunks[:5]
+    )
+
+    user_prompt = (
+        f"Pergunta: {query}\n\n"
+        f"Trechos:\n{context}\n\n"
+        f"Resposta:"
+    )
+
+    llm = ChatOpenAI(
+        model=model,
+        api_key=api_key,
+        base_url=base_url,
+        temperature=0.3,
+        max_tokens=max_tokens,
+        timeout=timeout,
+        model_kwargs=extra_kwargs,
+    )
+
+    response = await asyncio.to_thread(llm.invoke, [
+        {"role": "system", "content": _SYNTHESIS_SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ])
+
+    content = getattr(response, "content", str(response))
+    if not isinstance(content, str):
+        content = str(content)
+    return content.strip()
+
+
+async def _synthesize_rag_answer(query: str, chunks: list) -> str:
+    """Sintetiza resposta a partir dos chunks.
+    Flash (primary) → Pro (fallback) → raw chunks (last resort).
+    """
+    if not chunks:
+        return "Nao encontrei nada sobre isso na base de conhecimento."
+
+    # --- Tentativa 1: V4 Flash (thinking disabled) ---
+    try:
+        answer = await _call_llm_synthesis(
+            model="deepseek-v4-flash",
+            query=query, chunks=chunks,
+            max_tokens=600, timeout=15,
+            extra_kwargs={"thinking": {"type": "disabled"}},
+        )
+        if answer and len(answer.strip()) >= 20:
+            return answer
+    except Exception as exc:
+        logger.warning("RAG synthesis Flash failed: %s", exc)
+
+    # --- Tentativa 2: V4 Pro (thinking disabled) ---
+    try:
+        answer = await _call_llm_synthesis(
+            model="deepseek-v4-pro",
+            query=query, chunks=chunks,
+            max_tokens=600, timeout=20,
+            extra_kwargs={"thinking": {"type": "disabled"}},
+        )
+        if answer and len(answer.strip()) >= 20:
+            return answer
+    except Exception as exc:
+        logger.warning("RAG synthesis Pro fallback failed: %s", exc)
+
+    # --- Fallback 3: dump cru de chunks ---
+    return _fallback_raw_chunks(chunks)
 
 
 async def _run_drive(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -362,10 +474,10 @@ async def run(payload: Dict[str, Any]) -> Dict[str, Any]:
     if decision == "clarify":
         return {
             "reply": (
-                "Nao entendi se voce quer buscar na:\n\n"
-                "• Base de conhecimento (editais, leis, teses que indexamos)\n"
+                "Nao entendi se voce quer buscar no:\n\n"
+                "• Banco semantico (editais, leis, teses que indexei)\n"
                 "• Google Drive (seus arquivos, PPTs, planilhas)\n\n"
-                "E so me dizer: 'base de conhecimento' ou 'drive'?"
+                "E so me dizer: 'banco semantico' ou 'drive'?"
             ),
             "delay_ms": 0,
             "presence": "composing",

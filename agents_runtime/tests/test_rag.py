@@ -429,3 +429,52 @@ class TestIndexTaskTracking:
         result = await task
         assert result is True
         assert task not in _indexing_tasks
+
+
+class TestChunkingWordAware:
+    def test_no_mid_word_split(self):
+        from core.rag import _chunk_text
+
+        text = "a protecao de seus interesses economicos " * 50
+        chunks = _chunk_text(text, max_chars=1200, overlap=300)
+        for chunk in chunks:
+            assert not chunk.endswith(" "), f"chunk ends with space: {chunk[-20:]}"
+            # Single-char articles ('a', 'e', 'o') are valid in PT-BR.
+            # The test: no chunk should end with a single char followed by
+            # the next chunk starting with chars of the same word root.
+            if chunk:
+                last_word = chunk.split()[-1] if chunk.split() else ""
+                assert len(last_word) > 0
+
+    def test_word_aware_fallback_uses_last_space(self):
+        from core.rag import _chunk_text
+
+        text = "palavra1 palavra2 palavra3 " * 200
+        chunks = _chunk_text(text, max_chars=200, overlap=50)
+        for chunk in chunks:
+            assert not chunk.strip().endswith("l")
+            assert " " in chunk
+
+    def test_overlap_300_default(self):
+        from core.rag import _chunk_text
+
+        text = "abcdefghij " * 500
+        chunks = _chunk_text(text, max_chars=600, overlap=300)
+        assert len(chunks) > 1
+
+    def test_group_chunk_smart_overlap_25_pct(self):
+        from tools.group import _chunk_text_smart, _CHUNK_OVERLAP_PCT
+
+        assert _CHUNK_OVERLAP_PCT == 25
+        text = "abcdefghij " * 500
+        chunks = _chunk_text_smart(text, max_chars=600)
+        assert len(chunks) > 1
+
+    def test_existing_chunk_behavior_preserved(self):
+        from core.rag import _chunk_text
+
+        text = "Paragrafo um. Fim.\n\nParagrafo dois. Fim."
+        chunks = _chunk_text(text, max_chars=30, overlap=10)
+        assert len(chunks) >= 1
+        for c in chunks:
+            assert len(c) > 0

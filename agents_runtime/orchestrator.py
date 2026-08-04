@@ -497,6 +497,28 @@ async def _handle_attachment(
     is_file = bool(intent.get("is_attachment_file"))
     is_ambiguous = not (is_save or is_file)
 
+    _RAG_KEYWORDS = (
+        "memorizar", "memorize", "indexar", "indexe",
+        "base de conhecimento", "banco semantico",
+        "armazenar na base", "guardar na base",
+        "no rag", "no vector", "no firestore",
+    )
+    _DRIVE_KEYWORDS = (
+        "salvar no drive", "guardar no drive",
+        "subir no drive", "gdrive", "google drive",
+        "meu drive", "no drive", "salva no drive",
+        "upload", "faz upload",
+    )
+
+    if is_ambiguous:
+        caption = (payload.get("text", "") or "").lower()
+        if any(kw in caption for kw in _RAG_KEYWORDS):
+            is_save = True
+            is_ambiguous = False
+        elif any(kw in caption for kw in _DRIVE_KEYWORDS):
+            is_file = True
+            is_ambiguous = False
+
     async def _send_ack(text: str) -> None:
         try:
             await send_text(
@@ -520,7 +542,7 @@ async def _handle_attachment(
             ttl_sec=300,
         )
         await _send_ack(
-            "Esse arquivo e para memorizar na base de conhecimento (RAG) ou so para salvar? "
+            "Esse arquivo e para memorizar no banco semantico ou salvar no drive? "
             "Responda 'memorizar' ou 'salvar'."
         )
         reply = "Aguardando confirmacao sobre o arquivo."
