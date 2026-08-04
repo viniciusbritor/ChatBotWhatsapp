@@ -216,3 +216,134 @@ def test_parse_pdf_robust_metadata_fields_complete():
     }
     assert set(metadata.keys()) == expected_fields
     assert metadata["file_size"] == 1024
+
+
+# ---------------------------------------------------------------------------
+# Tests added in D1.6 — encoding corruption detection + NFKC normalization
+# ---------------------------------------------------------------------------
+
+
+class TestEncodingCorruption:
+    def test_combining_char_with_space(self):
+        """c cedilla + space + tilde desconectada deve ser detectado."""
+        from core.pdf_extract import _has_encoding_corruption
+        assert _has_encoding_corruption("Preci\ufb01ca\u0327 c\u0303 ao")
+
+    def test_ligature_fi(self):
+        """Ligatura \ufb01 (fi) deve ser detectada."""
+        from core.pdf_extract import _has_encoding_corruption
+        assert _has_encoding_corruption("Preci\ufb01ca\u00e7\u00e3o")
+
+    def test_ligature_fl(self):
+        """Ligatura \ufb02 (fl) deve ser detectada."""
+        from core.pdf_extract import _has_encoding_corruption
+        assert _has_encoding_corruption("in\ufb02u\u00eancia")
+
+    def test_control_chars_c1(self):
+        """Caracteres de controle C1 em alta densidade."""
+        from core.pdf_extract import _has_encoding_corruption
+        corrupted = "Texto normal " + "\x90\x9d" * 50
+        assert _has_encoding_corruption(corrupted)
+
+    def test_tilde_disconnected(self):
+        """Dois combining chars em sequencia: cedilla + tilde."""
+        from core.pdf_extract import _has_encoding_corruption
+        assert _has_encoding_corruption("a\u0303o disserta\u0327\u0303")
+
+    def test_combining_density_high(self):
+        """Alta densidade de combining chars (>3%)."""
+        from core.pdf_extract import _has_encoding_corruption
+        corrupted = "Disserta\u0327c\u0303ao de Mestrado " * 30
+        assert _has_encoding_corruption(corrupted)
+
+    def test_normal_portuguese_ok(self):
+        """Texto normal em portugu\u00eas n\u00e3o deve ser detectado."""
+        from core.pdf_extract import _has_encoding_corruption
+        assert not _has_encoding_corruption(
+            "Precifica\u00e7\u00e3o de op\u00e7\u00f5es financeiras com volatilidade"
+        )
+
+    def test_normal_english_ok(self):
+        """Texto em ingl\u00eas n\u00e3o deve ser detectado."""
+        from core.pdf_extract import _has_encoding_corruption
+        assert not _has_encoding_corruption(
+            "Bayesian approach to estimate volatility in option pricing models"
+        )
+
+    def test_empty_text_ok(self):
+        """Texto vazio n\u00e3o deve ser detectado."""
+        from core.pdf_extract import _has_encoding_corruption
+        assert not _has_encoding_corruption("")
+
+
+class TestUnicodeNormalization:
+    def test_ligature_fi_becomes_fi(self):
+        """Ligatura \ufb01 vira 'fi' ap\u00f3s NFKC."""
+        from core.pdf_extract import _normalize_unicode
+        result = _normalize_unicode("Preci\ufb01ca\u00e7\u00e3o")
+        assert "\ufb01" not in result
+        assert "fi" in result
+        assert result == "Precifica\u00e7\u00e3o"
+
+    def test_ligature_fl_becomes_fl(self):
+        """Ligatura \ufb02 vira 'fl' ap\u00f3s NFKC."""
+        from core.pdf_extract import _normalize_unicode
+        result = _normalize_unicode("in\ufb02u\u00eancia")
+        assert "\ufb02" not in result
+        assert "fl" in result
+
+    def test_normal_text_unchanged(self):
+        """Texto normal em portugu\u00eas permanece inalterado."""
+        from core.pdf_extract import _normalize_unicode
+        original = "Precifica\u00e7\u00e3o de op\u00e7\u00f5es financeiras com volatilidade"
+        assert _normalize_unicode(original) == original
+
+    def test_empty_text(self):
+        """Texto vazio permanece vazio."""
+        from core.pdf_extract import _normalize_unicode
+        assert _normalize_unicode("") == ""
+
+    def test_combining_chars_composed(self):
+        """Caracteres combinantes s\u00e3o compostos: a + til = \u00e3."""
+        from core.pdf_extract import _normalize_unicode
+        decomposed = "a\u0303 c\u0327 e\u0301"
+        result = _normalize_unicode(decomposed)
+        assert result == "\u00e3 \u00e7 \u00e9"
+
+
+class TestParsePdfRobustFallthrough:
+    def test_corruption_falls_through_to_pdfplumber(self):
+        """Quando pypdf retorna texto com encoding quebrado,
+        parse_pdf_robust deve cair para pdfplumber."""
+        from unittest.mock import patch
+        from core.pdf_extract import parse_pdf_robust
+
+        corrupted_text = "Disserta\u0327c\u0303ao de Mestrado " * 30
+        corrupted_text += "normal filler text. " * 10
+
+        fake_raw = b"%PDF-1.4 fake pdf content"
+
+        with patch("core.pdf_extract._try_pypdf_with_tolerance",
+                   return_value=(corrupted_text, 10, 10)):
+            with patch("core.pdf_extract._try_pdfplumber",
+                       return_value="Texto correto extra\u00eddo pelo pdfplumber"):
+                result = parse_pdf_robust(fake_raw, return_metadata=True)
+                text, meta = result
+                assert meta["parser"] == "pdfplumber"
+                assert "pdfplumber" in text
+
+    def test_clean_pypdf_stops_at_pypdf(self):
+        """Quando pypdf retorna texto limpo, pdfplumber nunca \u00e9 chamado."""
+        from unittest.mock import patch
+        from core.pdf_extract import parse_pdf_robust
+
+        clean_text = "Texto limpo extra\u00eddo do PDF sem corrup\u00e7\u00e3o. " * 20
+        fake_raw = b"%PDF-1.4 clean pdf"
+
+        with patch("core.pdf_extract._try_pypdf_with_tolerance",
+                   return_value=(clean_text, 10, 10)):
+            with patch("core.pdf_extract._try_pdfplumber") as mock_plumber:
+                result = parse_pdf_robust(fake_raw, return_metadata=True)
+                text, meta = result
+                assert meta["parser"] == "pypdf"
+                mock_plumber.assert_not_called()

@@ -22,9 +22,41 @@ from __future__ import annotations
 
 import io
 import logging
+import re
+import unicodedata
 from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
+
+_ENCODING_CORRUPTION_PATTERNS = [
+    re.compile(r'\s[\u0300-\u036f]'),
+    re.compile(r'[\ufb00-\ufb04]'),
+    re.compile(r'[\u0300-\u036f]{2,}'),
+]
+
+_COMBINING_CHAR_THRESHOLD = 0.03
+
+
+def _has_encoding_corruption(text: str, *, sample_len: int = 2000) -> bool:
+    sample = text[:sample_len]
+    if not sample:
+        return False
+    for pattern in _ENCODING_CORRUPTION_PATTERNS:
+        if pattern.search(sample):
+            return True
+    control_count = sum(1 for c in sample if '\x80' <= c <= '\x9f')
+    if control_count > len(sample) * 0.005:
+        return True
+    combining_count = sum(1 for c in sample if unicodedata.category(c) == 'Mn')
+    if combining_count > len(sample) * _COMBINING_CHAR_THRESHOLD:
+        return True
+    return False
+
+
+def _normalize_unicode(text: str) -> str:
+    if not text:
+        return text
+    return unicodedata.normalize('NFKC', text)
 
 
 def _try_pypdf(raw: bytes) -> str:
@@ -38,7 +70,7 @@ def _try_pypdf(raw: bytes) -> str:
 
     reader = PdfReader(io.BytesIO(raw))
     parts = [page.extract_text() or "" for page in reader.pages]
-    return "\n".join(parts)
+    return _normalize_unicode("\n".join(parts))
 
 
 def _try_pypdf_with_tolerance(raw: bytes) -> tuple[str, int, int]:
@@ -72,7 +104,7 @@ def _try_pypdf_with_tolerance(raw: bytes) -> tuple[str, int, int]:
                 },
             )
             break
-    return "\n".join(parts), pages_parsed, pages_total
+    return _normalize_unicode("\n".join(parts)), pages_parsed, pages_total
 
 
 def _try_pdfplumber(raw: bytes) -> str:
@@ -84,14 +116,14 @@ def _try_pdfplumber(raw: bytes) -> str:
             text = page.extract_text() or ""
             if text:
                 parts.append(text)
-    return "\n".join(parts)
+    return _normalize_unicode("\n".join(parts))
 
 
 def _try_pdfminer(raw: bytes) -> str:
     from pdfminer.high_level import extract_text as pdfminer_extract_text
 
     bio = io.BytesIO(raw)
-    return pdfminer_extract_text(bio)
+    return _normalize_unicode(pdfminer_extract_text(bio))
 
 
 _PARSER_NAMES = ("pypdf", "pdfplumber", "pdfminer")
@@ -156,6 +188,18 @@ def parse_pdf_robust(
             if allow_partial and parser_name == "pypdf":
                 partial_text, parsed, total = _try_pypdf_with_tolerance(raw)
                 if partial_text:
+                    if _has_encoding_corruption(partial_text):
+                        logger.warning(
+                            "pdf_extract encoding corruption detected in pypdf — falling through",
+                            extra={
+                                "event_name": "pdf_extract_encoding_corruption",
+                                "parser": parser_name,
+                                "pages_parsed": parsed,
+                                "pages_total": total,
+                                "sample": partial_text[:200],
+                            },
+                        )
+                        continue
                     text = partial_text
                     metadata["parser"] = parser_name
                     metadata["pages_total"] = total
@@ -176,6 +220,16 @@ def parse_pdf_robust(
 
             parser_fn = globals()[f"_try_{parser_name}"]
             text = parser_fn(raw)
+            if text and parser_name == "pypdf" and _has_encoding_corruption(text):
+                logger.warning(
+                    "pdf_extract encoding corruption in non-tolerance pypdf — falling through",
+                    extra={
+                        "event_name": "pdf_extract_encoding_corruption",
+                        "parser": parser_name,
+                        "sample": text[:200],
+                    },
+                )
+                continue
             metadata["parser"] = parser_name
             if parser_name == "pypdf":
                 metadata["pages_total"] = _count_pypdf_pages(raw)
