@@ -53,6 +53,11 @@ _DRIVE_ONLY_KEYWORDS = (
     "meu omnichannel",
 )
 
+_DELETE_MARKERS = (
+    "retire", "retirar", "apague", "apagar", "deletar", "delete",
+    "remover", "remova", "remove",
+)
+
 _LIST_KEYWORDS = (
     "o que voce sabe", "o que você sabe", "o que vc sabe",
     "liste os documentos", "lista os documentos", "listar documentos",
@@ -446,18 +451,20 @@ async def run(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Detect → disambiguate → route to RAG or Drive."""
     text = payload.get("text", "")
     phone = payload.get("phone", "")
+    extra = payload.get("extra", {}) or {}
 
     if not text.strip():
         return await _run_rag(payload)
 
-    # Fast path: listar documentos da base (somente se nao for query de conteudo ou busca)
+    # Fast path: listar documentos da base (somente se nao for query de conteudo, busca ou exclusao)
     t = text.lower()
     _CONTENT_MARKERS = ("diz", "fala", "capitulo", "artigo", "lei", "sobre", "resuma", "explique", "qual o", "quais os")
     _SEARCH_MARKERS = ("busque", "buscar", "procure", "procurar", "pesquise", "pesquisar", "ache", "achar", "encontre", "encontrar")
     has_list_kw = any(kw in t for kw in _LIST_KEYWORDS)
     has_content = any(mk in t for mk in _CONTENT_MARKERS)
     has_search = any(mk in t for mk in _SEARCH_MARKERS)
-    if has_list_kw and not has_content and not has_search:
+    has_delete = any(kw in t for kw in _DELETE_MARKERS)
+    if has_list_kw and not has_content and not has_search and not has_delete:
         return await _list_knowledge_base(payload)
 
     recent_context = ""
@@ -486,6 +493,33 @@ async def run(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "needs_clarification": True,
             },
         }
+
+    if has_delete and decision == "rag":
+        from agent_orchestration.knowledge_retriever import _list_known_sources
+        sources = await _list_known_sources(phone)
+        if sources:
+            t_lower = text.lower()
+            for source in sorted(sources, key=len, reverse=True):
+                if source.lower() in t_lower:
+                    from tool_registry import get_tool
+                    delete_fn = get_tool("knowledge.delete")
+                    result = await delete_fn(source_title=source, phone=phone)
+                    deleted = result.get("deleted", 0)
+                    if deleted > 0:
+                        return {
+                            "reply": f"Feito! Removi '{source}' da base de conhecimento.",
+                            "delay_ms": 0,
+                            "presence": "composing",
+                            "metadata": {"agent_id": "agent-knowledge-retriever", "deleted_count": deleted, "source_title": source, "skip_image_report": True},
+                        }
+                    return {
+                        "reply": f"Nao encontrei '{source}' na base de conhecimento.",
+                        "delay_ms": 0,
+                        "presence": "composing",
+                        "metadata": {"agent_id": "agent-knowledge-retriever", "deleted_count": 0, "skip_image_report": True},
+                    }
+        from pipelines._executor import run_agent
+        return await run_agent("agent-knowledge-retriever", text, payload, extra)
 
     if decision == "drive":
         return await _run_drive(payload)

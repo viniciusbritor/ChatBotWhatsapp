@@ -32,6 +32,7 @@ async def reindex_private(phone: str, dry_run: bool = False) -> dict:
         embed_documents,
         PRIVATE_COLLECTION,
     )
+    from core.text_cleaner import clean_portuguese
 
     db = _get_firestore()
     if db is None:
@@ -64,7 +65,8 @@ async def reindex_private(phone: str, dry_run: bool = False) -> dict:
             logger.info("skip_empty source=%s", source_title)
             continue
 
-        chunks = _chunk_text(original_text, max_chars=1200, overlap=300)
+        clean_text = clean_portuguese(original_text)
+        chunks = _chunk_text(clean_text, max_chars=1200, overlap=300)
         logger.info(
             "source=%s old_chunks=1 new_chunks=%d text_len=%d",
             source_title, len(chunks), len(original_text),

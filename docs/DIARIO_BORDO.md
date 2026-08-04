@@ -3576,4 +3576,46 @@ Cada pipeline deve funcionar com o maximo de componentes disponiveis. Se `_build
 
 ---
 
+## 04/08/2026 — Fase Kb: Deleção determinística + blindagem reindex_rag.py
+
+### Problema
+
+1. **Deleção quebrada**: "apague X.pdf da base" caía no fast path de listagem
+   (`_LIST_KEYWORDS`) porque não verificava `_DELETE_MARKERS`. Listava documentos
+   em vez de deletar.
+
+2. **RAG retrieval quebrado**: embeddings corrompidos por diacríticos spacing em
+   documentos antigos (pré-`clean_portuguese`). Vetores de `Preciﬁca¸ c˜ ao` não
+   casam com queries de `Precificação`.
+
+3. **Violação GUARDRAILS §0**: `reindex_rag.py` bypassava `index_private_document()`
+   e gravava `text_content` sem `clean_portuguese()`.
+
+### Mudanças
+
+| Arquivo | Mudança |
+|---------|---------|
+| `pipelines/doc_pipeline.py` | `_DELETE_MARKERS` (9 keywords). Fast path de listagem exclui `has_delete`. Deleção determinística: substring match contra `_list_known_sources()` → `get_tool("knowledge.delete")` direto. Fallback LLM agent só se não der match. `extra` extraído do payload (corrige NameError latente). |
+| `scripts/reindex_rag.py` | `clean_portuguese(text)` aplicado ANTES de `_chunk_text()`. `text_content` gravado limpo (conformidade GUARDRAILS §0). |
+
+### Fluxo de deleção
+
+```
+"apague Codigo-do-consumidor-FINAL.pdf da sua base"
+  → detect() → True
+  → run() → has_delete=True → pula fast path de listagem
+  → disambiguation → "rag"
+  → _list_known_sources(phone) → ["Codigo-do-consumidor-FINAL.pdf", ...]
+  → substring match → matched!
+  → get_tool("knowledge.delete")(source_title=matched, phone=phone)
+  → ✅ 0 chamadas LLM, 0 latência
+```
+
+### Próximos passos
+
+- [ ] Reindexar docs: `python -m scripts.reindex_rag --phone <phone>`
+- [ ] Validar retrieval com "quem escreveu tese vinicius" pós-reindex
+
+---
+
 
