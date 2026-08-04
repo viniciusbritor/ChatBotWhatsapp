@@ -164,6 +164,107 @@ class TestAttachmentsAndCommands:
         assert mock_att.called
 
 
+class TestAttachmentModeConfirmation:
+    """F4d: usuario confirma 'memorizar' apos pergunta 'memorizar ou salvar?'."""
+
+    def _payload(self, text="memorizar"):
+        return {
+            "instance": "jennifer",
+            "phone": "+5511966830020",
+            "text": text,
+            "sender_name": "Vinicius",
+            "extra": {"remote_jid": "5511966830020@s.whatsapp.net"},
+        }
+
+    def _pending_action(self):
+        return {
+            "action_type": "attachment_mode",
+            "payload": {
+                "attachment_payload": {
+                    "instance": "jennifer",
+                    "phone": "+5511966830020",
+                    "message_id": "test-att-msg-001",
+                    "sender_name": "Vinicius",
+                    "extra": {
+                        "has_document": True,
+                        "doc_mimetype": "application/pdf",
+                        "doc_file_name": "teste.pdf",
+                        "remote_jid": "5511966830020@s.whatsapp.net",
+                    },
+                },
+            },
+        }
+
+    @pytest.mark.asyncio
+    async def test_memorizar_confirmation_calls_handler_with_is_attachment(self):
+        """Quando o usuario responde 'memorizar', _handle_attachment
+        deve ser chamado com is_attachment=True e is_save=True."""
+        from orchestrator import orchestrate
+
+        pending = self._pending_action()
+
+        with patch("core.pending_actions.get_pending_action", new_callable=AsyncMock) as mock_get:
+            with patch("core.pending_actions.consume_pending_action", new_callable=AsyncMock) as mock_consume:
+                with patch("pipelines.calendar_pipeline.detect", return_value=False):
+                    with patch("pipelines.email_pipeline.detect", return_value=False):
+                        with patch("pipelines.doc_pipeline.detect", return_value=False):
+                            with patch("orchestrator._detect_web", return_value=False):
+                                with patch("orchestrator._handle_attachment", new_callable=AsyncMock) as mock_att:
+                                    mock_att.return_value = {
+                                        "reply": "Feito! Memorei 10 trechos.",
+                                        "delay_ms": 500,
+                                        "presence": "composing",
+                                        "metadata": {"attachment": "rag_individual", "source_name": "teste.pdf"},
+                                    }
+                                    with patch("pipelines.jennifer_pipeline.run", new_callable=AsyncMock):
+                                        mock_get.return_value = pending
+                                        result = await orchestrate(self._payload("memorizar"))
+
+        assert mock_get.called
+        assert mock_consume.called
+        assert mock_att.called
+        call_kwargs = mock_att.call_args
+        intent = call_kwargs[0][1]  # segundo arg posicional = intent
+        assert intent["is_attachment"] is True
+        assert intent["is_attachment_save"] is True
+        assert intent["is_attachment_file"] is False
+        assert result["reply"] == "Feito! Memorei 10 trechos."
+        assert result["metadata"]["attachment"] == "rag_individual"
+
+    @pytest.mark.asyncio
+    async def test_salvar_confirmation_calls_handler_with_is_attachment(self):
+        """Quando o usuario responde 'salvar', _handle_attachment
+        deve ser chamado com is_attachment=True e is_file=True."""
+        from orchestrator import orchestrate
+
+        pending = self._pending_action()
+
+        with patch("core.pending_actions.get_pending_action", new_callable=AsyncMock) as mock_get:
+            with patch("core.pending_actions.consume_pending_action", new_callable=AsyncMock) as mock_consume:
+                with patch("pipelines.calendar_pipeline.detect", return_value=False):
+                    with patch("pipelines.email_pipeline.detect", return_value=False):
+                        with patch("pipelines.doc_pipeline.detect", return_value=False):
+                            with patch("orchestrator._detect_web", return_value=False):
+                                with patch("orchestrator._handle_attachment", new_callable=AsyncMock) as mock_att:
+                                    mock_att.return_value = {
+                                        "reply": "Feito! Salvei no Drive.",
+                                        "delay_ms": 500,
+                                        "presence": "composing",
+                                        "metadata": {"attachment": "drive_individual", "source_name": "teste.pdf"},
+                                    }
+                                    with patch("pipelines.jennifer_pipeline.run", new_callable=AsyncMock):
+                                        mock_get.return_value = pending
+                                        result = await orchestrate(self._payload("salvar"))
+
+        assert mock_att.called
+        call_kwargs = mock_att.call_args
+        intent = call_kwargs[0][1]
+        assert intent["is_attachment"] is True
+        assert intent["is_attachment_save"] is False
+        assert intent["is_attachment_file"] is True
+        assert result["reply"] == "Feito! Salvei no Drive."
+
+
 class TestIdempotency:
     def _payload(self):
         return {

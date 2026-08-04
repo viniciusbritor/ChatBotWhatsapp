@@ -220,7 +220,7 @@ class TestClearScriptExists:
 
 
 class TestGoldenSetPopulation:
-    def test_goldenset_has_three_pdfs(self):
+    def test_goldenset_has_pdfs(self):
         pdfs = sorted(GOLDENSET_DIR.glob("*.pdf"))
         assert len(pdfs) >= 1, f"Nenhum PDF em {GOLDENSET_DIR}"
         # Cada PDF deve ter pelo menos 100 chars de texto extraivel

@@ -1880,7 +1880,7 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
         pending_payload = pending_action.get("payload", {}).get("attachment_payload", {})
         pending_payload["phone"] = phone
         pending_payload["instance"] = pending_payload.get("instance") or instance
-        intent = {"is_attachment_save": is_save, "is_attachment_file": is_file}
+        intent = {"is_attachment_save": is_save, "is_attachment_file": is_file, "is_attachment": True}
         attachment_result = await _handle_attachment(pending_payload, intent, sender_name)
         if attachment_result is not None:
             path = [{"step": 1, "phase": "pending_action", "action": "attachment_mode"},
