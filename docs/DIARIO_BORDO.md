@@ -3656,3 +3656,81 @@ Cada pipeline deve funcionar com o maximo de componentes disponiveis. Se `_build
 - [ ] Considerar adicionar "exclua", "excluir", "limpe", "limpar" aos `_DELETE_MARKERS`
 
 ---
+
+## 05/08/2026 (BRT) — RAG overhaul: full-document + sections + routing fixes
+
+### Problema
+
+O RAG por chunks retornava conteudo inutil para documentos academicos:
+- Ficha catalografica sempre no topo (embedding favorece similaridade superficial)
+- Texto corrompido (CID codes `(cid:181)`, combining marks, texto sem espacos)
+- Sintese LLM falhava silenciosamente -> fallback raw chunks ilegivel
+- Rotas erradas: "apague tese vinicius" caia na Jennifer LLM que dizia "nao posso"
+- "comente a introducao" caia no fast path de listagem
+- PDF com fonte quebrada nao disparava OCR (quality check nao detectava CID)
+
+### Mudancas
+
+| Arquivo | Mudanca |
+|---------|---------|
+| `core/pdf_extract.py` | `_check_text_quality` detecta CID `(cid:N)` e texto sem espacos (< 5% ratio) -> dispara OCR |
+| `core/pdf_extract.py` | `parse_pdf_hybrid`: native -> quality check -> OCR fallback |
+| `core/rag.py` | `SECTIONS_COLLECTION = agent-knowledge-sections` + `_build_sections` (capitulos ate 8000 chars) |
+| `core/rag.py` | `index_private_sections`: 1 doc por secao com embedding proprio |
+| `core/rag.py` | `search_sections`: busca secoes com fallback silencioso para chunks |
+| `core/rag.py` | `index_private_document` chama `index_private_sections` (fire-and-forget) |
+| `pipelines/doc_pipeline.py` | `_retrieve_full_document`: concatena chunks do plain na ordem (ate 12K chars) |
+| `pipelines/doc_pipeline.py` | `_synthesize_full_document`: LLM recebe documento COMPLETO, nao fragmentos |
+| `pipelines/doc_pipeline.py` | `detect()` captura delete sem keyword de documento |
+| `pipelines/doc_pipeline.py` | disambiguator: query com `.pdf` + pergunta -> `"rag"` |
+| `pipelines/doc_pipeline.py` | `_CONTENT_MARKERS` adiciona comente/comentar/descreva/introducao/conteudo |
+| `pipelines/doc_pipeline.py` | `_prioritize_content_chunks`: about queries priorizam RESUMO/INTRO |
+| `pipelines/doc_pipeline.py` | delete roteado ANTES do disambiguator (desacoplado) |
+| `agent_orchestration/knowledge_retriever.py` | `_retrieve_private` tenta secoes primeiro, fallback chunks |
+| `scripts/populate_sections.py` | NOVO: agrupa chunks do plain por source_title e indexa secoes |
+| `scripts/reindex_rag.py` | Indexa secoes apos chunks |
+| `cloudbuild-test.yaml` | Vector index para `agent-knowledge-sections` |
+| `firestore.indexes.json` | Index de secoes (owner_hash + embedding_* + schema_version + vector) |
+
+### Testes limpos
+
+| O que | Qtd |
+|-------|-----|
+| Removidos (audio legacy Whisper, refactor 23/07) | 23 |
+| GoldenSet corrigido (Codigo-do-consumidor-FINAL.pdf, 1.5MB) | 4 |
+| Tests deterministas (DEEPSEEK_API_KEY limpa em heuristic) | 2 |
+| Resultado | 974 passed, 14 skipped (condicionais legitimos) |
+
+### Resultados validados
+
+- 41 secoes criadas: dissertacao (21), LGPD (17 com titulos reais "SEÇÃO II - Do Tratamento de Dados Pessoais Sensíveis"), tese (3)
+- search_sections retorna secoes completas (2000-8000 chars) com scores > 0.5
+- Indice vetorial agent-knowledge-sections READY (criado via cmd /c por causa do parsing do vector-config no PowerShell)
+
+### Commits da sessao
+
+| Commit | Resumo |
+|--------|--------|
+| `da87f9b` | chunking semantico — detecta secoes/capitulos/paragrafos |
+| `d1f4434` | OCR hybrid fallback para PDFs com fonte corrompida |
+| `78c7ae4` | combining marks (Mn) + delete fuzzy match + anti-hallucination |
+| `1c463a4` | DOCX tabelas + XLSX pipe + PPTX handler + fallback sintese limpo |
+| `5897a90` | OCR conectado + fallback estruturado + priorizacao de chunks |
+| `5223492` | full document path + storage/retrieval por secoes |
+| `b25c5f6` | script populate_sections |
+| `f6cd3c4` | roteamento delete/pergunta + sections na ingestao |
+| `51c7c0d` | testes heuristic deterministas |
+| `ce2ec81` | remover 23 testes audio legacy + corrigir GoldenSet |
+
+### Pendencia ABERTA (critica)
+
+O texto armazenado da dissertacao e tese AINDA contem corrupcao (CID, combining marks)
+da primeira ingestao (pre-OCR). O reindex `populate_sections` le do plain que tem o
+texto sujo. Para resolver de verdade:
+1. Reenviar os PDFs originais via WhatsApp (agora com OCR + sections automatico)
+2. OU re-extract dos PDFs com parse_pdf_hybrid
+3. Investigar por que o quality check nao disparou OCR na re-ingestao de 15:32 BRT
+
+Nota: a dissertacao foi apagada da base (15:31) e re-enviada (15:32). Os chunks
+continuaram sujos — OCR possivelmente nao disparou porque o texto de paginas
+especificas (equacoes) esta limpo o suficiente para passar o threshold global.
