@@ -68,18 +68,18 @@ MESSAGE_HISTORY_RETENTION_DAYS = int(
     os.getenv("RAG_MESSAGE_HISTORY_RETENTION_DAYS", "365")
 )
 
-# Firestore Vector collections (documents only, never chat turns).
-PRIVATE_COLLECTION = os.getenv("RAG_PRIVATE_COLLECTION", "agent-knowledge-v2")
-SHARED_COLLECTION = os.getenv("RAG_SHARED_COLLECTION", "public-knowledge-v2")
-COLLECTIVE_COLLECTION = os.getenv("RAG_COLLECTIVE_COLLECTION", "collective-knowledge-v2")
+# Firestore Vector — knowledge-database (documentos, nao chat turns).
+# scope="private" + owner_hash | scope="group" + group_hash
+KNOWLEDGE_DATABASE = os.getenv("RAG_KNOWLEDGE_DATABASE", "knowledge-database")
+PRIVATE_COLLECTION = KNOWLEDGE_DATABASE
+SHARED_COLLECTION = None
+COLLECTIVE_COLLECTION = None
 LEGACY_MEMORY_COLLECTION = os.getenv(
     "RAG_MEMORY_COLLECTION", "conversation-memory-v2"
 )
-SECTIONS_COLLECTION = os.getenv(
-    "RAG_SECTIONS_COLLECTION", "agent-knowledge-sections"
-)
-SECTION_MAX_CHARS = int(os.getenv("RAG_SECTION_MAX_CHARS", "8000"))
-SECTION_MIN_CHARS = int(os.getenv("RAG_SECTION_MIN_CHARS", "1500"))
+SECTIONS_COLLECTION = None
+SECTION_MAX_CHARS = 0
+SECTION_MIN_CHARS = 0
 
 EMBEDDING_CONCURRENCY = int(os.getenv("RAG_EMBEDDING_CONCURRENCY", "4"))
 EMBED_DOCUMENTS_TIMEOUT_SEC = float(os.getenv("EMBED_DOCUMENTS_TIMEOUT_SEC", "60"))
@@ -719,9 +719,7 @@ async def index_private_document(
         if truncated_reason is None:
             truncated_reason = "chunks_above_soft_limit"
 
-    plain_batch = db.batch()
     vector_batch = db.batch()
-    plain_ids: List[str] = []
     vector_ids: List[str] = []
 
     owner_hash = _owner_hash(phone)
@@ -747,9 +745,9 @@ async def index_private_document(
         document_id = hashlib.sha256(
             f"{owner_hash}:{source_title}:{index}:{chunk[:100]}".encode("utf-8")
         ).hexdigest()[:32]
-        plain_id = f"{document_id}-plain"
         common = {
             **safe_metadata,
+            "scope": "private",
             "owner_hash": owner_hash,
             "text_content": chunk,
             "source_title": mask_pii(source_title),
@@ -765,13 +763,6 @@ async def index_private_document(
             "created_at": now,
             "schema_version": SCHEMA_VERSION,
         }
-        plain_batch.set(
-            db.collection(PRIVATE_COLLECTION + "-plain").document(plain_id),
-            common,
-        )
-        plain_ids.append(plain_id)
-
-    await asyncio.to_thread(plain_batch.commit)
 
     vectors = await embed_documents(chunks)
     partial = False
@@ -785,6 +776,7 @@ async def index_private_document(
             ).hexdigest()[:32]
             data = {
                 **safe_metadata,
+                "scope": "private",
                 "owner_hash": owner_hash,
                 "text_content": chunk,
                 "source_title": mask_pii(source_title),
@@ -803,12 +795,12 @@ async def index_private_document(
                 "embedding_model": EMBEDDING_MODEL,
                 "embedding_dim": EMBEDDING_DIM,
             }
-            vector_batch.set(db.collection(PRIVATE_COLLECTION).document(document_id), data)
+            vector_batch.set(db.collection(KNOWLEDGE_DATABASE).document(document_id), data)
             vector_ids.append(document_id)
         try:
             await asyncio.to_thread(vector_batch.commit)
         except Exception as exc:
-            logger.warning("Vector commit failed (plain kept) error=%s", exc)
+            logger.warning("Vector commit failed error=%s", exc)
             vector_ids = []
     elif vectors is not None and len(vectors) > 0:
         # PHASE 4: partial success. Indexa o que deu certo.
@@ -829,6 +821,7 @@ async def index_private_document(
             ).hexdigest()[:32]
             data = {
                 **safe_metadata,
+                "scope": "private",
                 "owner_hash": owner_hash,
                 "text_content": chunk,
                 "source_title": mask_pii(source_title),
@@ -845,7 +838,7 @@ async def index_private_document(
                 "embedding_model": EMBEDDING_MODEL,
                 "embedding_dim": EMBEDDING_DIM,
             }
-            vector_batch.set(db.collection(PRIVATE_COLLECTION).document(document_id), data)
+            vector_batch.set(db.collection(KNOWLEDGE_DATABASE).document(document_id), data)
             vector_ids.append(document_id)
         try:
             await asyncio.to_thread(vector_batch.commit)
@@ -858,7 +851,6 @@ async def index_private_document(
             "index_private_document_vector_skipped chunks=%d vectors=%d",
             len(chunks), vector_count,
         )
-        # PHASE 4: all failed -> return error (vs Phase 1-3 fail-closed)
         if len(chunks) > 0:
             if vectors is None:
                 return {"error": "embedding_failed", "chunks": len(chunks)}
@@ -867,29 +859,12 @@ async def index_private_document(
                 "chunks": len(chunks),
             }
 
-    # Etapa 2: indexa secoes/capitulos (fire-and-forget com try/except)
-    sections_result: Dict[str, Any] = {"status": "skipped"}
-    try:
-        sections_result = await index_private_sections(
-            phone=phone,
-            text_content=text_content,
-            source_title=source_title,
-            metadata=metadata,
-            class_=class_value,
-            group=group_value,
-            theme=theme_value,
-        )
-    except Exception as exc:
-        logger.warning("index_private_sections_failed error=%s", exc)
-        sections_result = {"status": "error", "detail": str(exc)[:200]}
-
     return {
-        "doc_ids": plain_ids,
-        "vector_doc_ids": vector_ids,
+        "doc_ids": vector_ids,
+        "scope": "private",
         "owner_hash": owner_hash,
         "chunks": len(chunks),
         "chunks_indexed": len(vector_ids),
-        "partial": partial,
         "chars": len(text_content),
         "truncated": truncated,
         "class": class_value,
@@ -897,10 +872,30 @@ async def index_private_document(
         "theme": theme_value,
         "truncated_reason": truncated_reason,
         "source_title": mask_pii(source_title),
-        "collection": PRIVATE_COLLECTION + "-plain",
-        "vector_collection": PRIVATE_COLLECTION,
-        "sections": sections_result,
+        "collection": KNOWLEDGE_DATABASE,
     }
+
+
+async def index_document(
+    scope: str,
+    hash_val: str,
+    text_content: str,
+    source_title: str,
+    source_url: Optional[str] = None,
+    category: str = "legislacao",
+    metadata: Optional[Dict[str, Any]] = None,
+    class_: Optional[str] = None,
+    group_: Optional[str] = None,
+    theme: Optional[str] = None,
+) -> Dict[str, Any]:
+    if scope not in ("private", "group"):
+        return {"error": f"invalid_scope: {scope}"}
+    if scope == "private":
+        return await index_private_document(
+            phone="", text_content=text_content, source_title=source_title,
+            source_url=source_url, category=category, metadata=metadata,
+            class_=class_, group=group_, theme=theme,
+        )
 
 
 async def index_private_sections(
@@ -998,7 +993,7 @@ async def search_legal_knowledge(
     query_vector = await embed_query(query)
     if query_vector is None:
         return {"results": [], "error": "embedding_failed"}
-    extra_filters: List[Tuple[str, str, Any]] = []
+    extra_filters: List[Tuple[str, str, Any]] = [("scope", "==", "private")]
     if source_title:
         extra_filters.append(("source_title", "==", source_title))
     if class_:
@@ -1012,7 +1007,7 @@ async def search_legal_knowledge(
     try:
         documents = await _find_nearest(
             db,
-            PRIVATE_COLLECTION,
+            KNOWLEDGE_DATABASE,
             query_vector,
             k,
             _vector_filters(_owner_hash(phone), extra_filters or None),

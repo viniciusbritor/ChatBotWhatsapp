@@ -303,6 +303,7 @@ async def _list_known_sources(phone: str, limit: int = 10) -> List[str]:
         def fetch():
             return list(
                 db_ref.collection(PRIVATE_COLLECTION)
+                .where("scope", "==", "private")
                 .where("owner_hash", "==", owner_hash)
                 .limit(200)
                 .stream()
@@ -646,24 +647,6 @@ async def _retrieve_private(
     language: Optional[str] = None,
     since: Optional[str] = None,
 ) -> Dict[str, Any]:
-    # Etapa 2: tenta secoes (capitulos inteiros) primeiro
-    from core.rag import search_sections
-
-    sections_result = await search_sections(
-        phone=phone, query=query, k=3, min_score=0.3, source_title=source_title,
-    )
-    sections = sections_result.get("results", []) if isinstance(sections_result, dict) else []
-    if sections:
-        return {
-            "scope": "private",
-            "results": sections,
-            "count": len(sections),
-            "min_score": min_score,
-            "mode": "sections",
-            "owner_hash": sections_result.get("owner_hash"),
-            "filters": {"source_title": source_title, "class": class_, "group": group},
-        }
-
     result = await search_legal_knowledge(
         phone=phone,
         query=query,

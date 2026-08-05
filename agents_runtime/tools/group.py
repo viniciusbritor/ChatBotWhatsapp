@@ -318,7 +318,7 @@ async def get_group_info(group_jid: str) -> Dict[str, Any]:
 # Group RAG (F4): index/search knowledge per group with OpenAI embeddings
 # ---------------------------------------------------------------------------
 
-_GROUP_KNOWLEDGE_COLLECTION = "group-knowledge-v2"
+_GROUP_KNOWLEDGE_COLLECTION = "knowledge-database"
 _EMBEDDING_MODEL = "text-embedding-3-small"
 _EMBEDDING_DIM = 1536
 _CHUNK_MAX_CHARS = 1200
@@ -546,6 +546,7 @@ async def index_group_document(
             f"group:{gh}:{source_name}:{i}:{chunk[:40]}".encode("utf-8")
         ).hexdigest()[:32]
         doc = {
+            "scope": "group",
             "text": chunk,
             "source_name": source_name,
             "theme": theme,
