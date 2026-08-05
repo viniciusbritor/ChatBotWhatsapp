@@ -21,6 +21,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -257,13 +258,107 @@ def _chunk_text(text: str, max_chars: int = 1200, overlap: int = 300) -> List[st
                     end = last_separator + len(separator)
                     break
             else:
-                # Word-aware fallback: procura ultimo espaco
                 last_space = text.rfind(" ", start, end)
                 if last_space > start + max_chars // 2:
                     end = last_space + 1
         chunks.append(text[start:end].strip())
         start = end - overlap if end < len(text) else end
     return [chunk for chunk in chunks if chunk]
+
+
+_HEADING_PATTERNS = re.compile(
+    r"^("
+    r"(?:CAP[ÍI]TULO|Cap[ií]tulo|SE[ÇC][ÃA]O|Se[çc][ãa]o|PARTE|Parte|ANEXO|Anexo)"
+    r"\s+[IVXLCDM\d]+[\s\.\-\u2013\u2014].*"
+    r"|"
+    r"^\d+(?:\.\d+)*[\s\.\-\u2013\u2014]+\s*[A-Z\u00C0-\u00DC][A-Z\u00C0-\u00DC\s]{3,}"
+    r"|"
+    r"^[A-Z\u00C0-\u00DC][A-Z\u00C0-\u00DC\s\-]{10,}$"
+    r"|"
+    r"^(?:ABSTRACT|RESUMO|INTRODU[ÇC][ÃA]O|CONCLUS[ÃA]O|REFER[ÊE]NCIAS?|BIBLIOGRAFIA|AP[ÊE]NDICE|AGRADECIMENTOS)"
+    r"\s*$"
+    r")",
+    re.MULTILINE,
+)
+
+
+def _detect_sections(text: str) -> List[tuple[str, str]]:
+    matches = list(_HEADING_PATTERNS.finditer(text))
+    if not matches:
+        return [("", text)]
+
+    sections: List[tuple[str, str]] = []
+    prev_title = ""
+    prev_start = 0
+
+    for m in matches:
+        if prev_start == 0 and m.start() == 0:
+            prev_title = m.group(0).strip()
+            prev_start = m.end()
+            continue
+        if prev_start > 0:
+            sections.append((prev_title, text[prev_start:m.start()].strip()))
+        prev_title = m.group(0).strip()
+        prev_start = m.end()
+
+    if prev_start > 0:
+        sections.append((prev_title, text[prev_start:].strip()))
+
+    if not sections:
+        sections.append(("", text))
+
+    return [(title, body) for title, body in sections if body and len(body) >= 50]
+
+
+def _chunk_text_semantic(
+    text: str,
+    max_chars: int = 2000,
+    min_chars: int = 200,
+    overlap_chars: int = 100,
+) -> List[tuple[str, str, str]]:
+    if not text or not text.strip():
+        return []
+
+    sections = _detect_sections(text)
+    all_chunks: List[tuple[str, str, str]] = []
+
+    for section_idx, (section_title, section_body) in enumerate(sections):
+        paragraphs = re.split(r"\n\s*\n", section_body)
+        for para_text in paragraphs:
+            para_text = para_text.strip()
+            if not para_text or len(para_text) < 50:
+                continue
+
+            if len(para_text) <= max_chars:
+                chunk_title = section_title or ""
+                all_chunks.append((chunk_title, "paragraph", para_text))
+                continue
+
+            sentences = re.split(r"(?<=[.!?])\s+", para_text)
+            current = ""
+            for sent in sentences:
+                sent = sent.strip()
+                if not sent:
+                    continue
+                if len(current) + len(sent) + 1 <= max_chars:
+                    current = (current + " " + sent).strip()
+                else:
+                    if len(current) >= min_chars:
+                        all_chunks.append((section_title or "", "sentence_group", current))
+                        current = sent
+                    else:
+                        current = (current + " " + sent).strip()
+
+            if current and len(current) >= min_chars:
+                all_chunks.append((section_title or "", "sentence_group", current))
+
+    if not all_chunks:
+        return _chunk_text(text, max_chars=1200, overlap=300)
+
+    return all_chunks
+
+
+_CHUNK_TEXT_CALLABLE = _chunk_text_semantic
 
 
 def _vector_filters(
@@ -529,9 +624,13 @@ async def index_private_document(
     clean_content = mask_pii(text_content)
     chars_soft_limit = PRIVATE_CHARS_SOFT_LIMIT
     chunks_soft_limit = PRIVATE_CHUNKS_SOFT_LIMIT
-    chunks = _chunk_text(clean_content)
-    if not chunks:
+    raw_chunks = _chunk_text_semantic(clean_content)
+    if not raw_chunks:
         return {"error": "empty_content"}
+
+    chunks = [t[2] for t in raw_chunks]
+    section_titles = [t[0] for t in raw_chunks]
+    chunk_types = [t[1] for t in raw_chunks]
 
     truncated = False
     truncated_reason: Optional[str] = None
@@ -583,6 +682,8 @@ async def index_private_document(
             "group": group_value,
             "theme": theme_value,
             "chunk_index": index,
+            "chunk_type": chunk_types[index],
+            "section_title": section_titles[index],
             "language": "pt-BR",
             "created_at": now,
             "schema_version": SCHEMA_VERSION,
@@ -616,6 +717,8 @@ async def index_private_document(
                 "group": group_value,
                 "theme": theme_value,
                 "chunk_index": index,
+                "chunk_type": chunk_types[index],
+                "section_title": section_titles[index],
                 "language": "pt-BR",
                 "created_at": now,
                 "schema_version": SCHEMA_VERSION,
@@ -763,6 +866,8 @@ async def search_legal_knowledge(
                     "theme": data.get("theme", ""),
                     "language": data.get("language", ""),
                     "created_at": data.get("created_at", ""),
+                    "chunk_type": data.get("chunk_type", ""),
+                    "section_title": data.get("section_title", ""),
                 }
             )
             if len(chunks) >= k:

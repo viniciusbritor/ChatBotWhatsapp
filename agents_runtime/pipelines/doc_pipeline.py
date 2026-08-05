@@ -340,6 +340,15 @@ def _fallback_raw_chunks(chunks: list) -> str:
     )
 
 
+def _format_chunk_context(c: dict) -> str:
+    section = c.get("section_title", "")
+    source = c.get("source", "?")
+    text = c.get("text", "")[:800]
+    if section:
+        return f"[Fonte: {source} | Seção: {section}] {text}"
+    return f"[Fonte: {source}] {text}"
+
+
 async def _call_llm_synthesis(
     model: str,
     query: str,
@@ -358,8 +367,7 @@ async def _call_llm_synthesis(
     base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1").strip()
 
     context = "\n---\n".join(
-        f"[Fonte: {c.get('source', '?')}] {c.get('text', '')[:800]}"
-        for c in chunks[:5]
+        _format_chunk_context(c) for c in chunks[:5]
     )
 
     user_prompt = (
