@@ -379,6 +379,109 @@ coherence-ominichannel-fs
     └── public-knowledge-v2/     # base pública
 ```
 
+### 0.3. Inventário de Agentes (18 agentes + 2 resolvers)
+
+> Última atualização: **05/08/2026** — reclassificação com cores de status.
+
+| Cor | Significado |
+|---|---|
+| 🟢 Verde | Mais usados, funcionando (diários) |
+| 🟡 Amarelo | Menos usados, funcionando (ocasionais) |
+| 🟠 Laranja | Nunca usados, funcionando (background/interno) |
+| 🔴 Vermelho | Com problema (deploy bloqueado) |
+
+#### 🟢 Em uso diário (7)
+
+| Agente | Tipo | Disparado por |
+|---|---|---|
+| `jennifier` | Orchestrator | Toda mensagem (fallback) |
+| `agent-knowledge-retriever` | Sub-agente | Query "base de conhecimento" |
+| `agent-categorizer` | Sub-agente | Todo anexo ingerido (PDF/DOCX/XLSX) |
+| `manager-calendar` | Deep Agent | Keywords: agenda, reunião, evento |
+| `manager-email` | Deep Agent | Keywords: email, inbox, gmail |
+| `manager-drive` | Deep Agent | Keywords: drive, pasta, upload |
+| `access-guardian` | Determinístico | Antes de toda tool Google (OAuth+scopes) |
+
+#### 🟡 Uso ocasional (9)
+
+| Agente | Tipo | Disparado por |
+|---|---|---|
+| `agent-intimacy` | Specialist | "me chame de", "meu apelido" |
+| `agent-learning` | Specialist | "na verdade", "errado" |
+| `manager-web` | Deep Agent | "pesquisar", "buscar na internet" |
+| `agent-locomocao` | Specialist | "uber", "rota", "onde fica" |
+| `agent-youtube` | Specialist | "youtube", "video", "tutorial" |
+| `agent-morality` | Specialist | Keywords de agressão |
+| `agent-group-rag` | Deep Agent | Anexo em grupo WhatsApp |
+| `agent-rag` (legacy) | Specialist | Superseded pelo knowledge-retriever |
+| `doc-disambiguator` | Pipeline | RAG vs Drive ambíguo |
+
+#### 🟠 Background / Interno (5)
+
+| Agente | Tipo | Função |
+|---|---|---|
+| `ata-generator` | Worker | Gera ata de reunião pós-evento |
+| `agent-proatividade` | Worker | Lembretes e follow-ups |
+| `group-resolver` | Interno | Mapeia grupo WhatsApp → pasta Drive |
+| `agent-privacy-guard` | Interno | Bloqueia dados pessoais em grupo |
+| `source_title_resolver` | LLM Resolver | 🔧 NOVO (Opção D) — match semântico de documentos via LLM |
+
+#### 🔴 Com problema (0 — resolvido em 05/08/2026)
+
+| Item | Status |
+|---|---|
+| ~~Esteira CI/CD quebrada~~ | ✅ Corrigido (`cf09d94`) |
+| ~~Índice source_title_full~~ | ✅ Definido no cloudbuild |
+| ~~Fases 1-5 não deployadas~~ | ✅ Em deploy (`cf09d94`) |
+
+```mermaid
+graph TB
+    subgraph GREEN["🟢 Uso diario"]
+        J["jennifier"]
+        RET["knowledge-retriever"]
+        CAT["categorizer"]
+        CAL["manager-calendar"]
+        EML["manager-email"]
+        DRV["manager-drive"]
+        ACC["access-guardian"]
+    end
+    subgraph YELLOW["🟡 Uso ocasional"]
+        INT["intimacy"]
+        LRN["learning"]
+        WEB["manager-web"]
+        LOC["locomocao"]
+        YT["youtube"]
+        MOR["morality"]
+        GRP["group-rag"]
+        RAG["agent-rag (legacy)"]
+        DIS["doc-disambiguator"]
+    end
+    subgraph ORANGE["🟠 Background/Interno"]
+        ATA["ata-generator"]
+        PRO["proatividade"]
+        GRS["group-resolver"]
+        PRV["privacy-guard"]
+        SRC["source_title_resolver ⟮NOVO⟯"]
+    end
+    J --> RET
+    J --> CAT
+    J --> CAL
+    J --> EML
+    J --> DRV
+    J --> ACC
+    J --> INT
+    J --> LRN
+    J --> WEB
+    J --> LOC
+    J --> YT
+    J --> MOR
+    J --> GRP
+    J --> RAG
+    RET --> SRC
+    GRP --> DRV
+    GRS --> DRV
+```
+
 ## 1. Objetivo
 
 Um único runtime FastAPI (`agents-runtime`) responde a mensagens do
