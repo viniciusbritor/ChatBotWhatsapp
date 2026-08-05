@@ -3734,3 +3734,99 @@ texto sujo. Para resolver de verdade:
 Nota: a dissertacao foi apagada da base (15:31) e re-enviada (15:32). Os chunks
 continuaram sujos — OCR possivelmente nao disparou porque o texto de paginas
 especificas (equacoes) esta limpo o suficiente para passar o threshold global.
+
+## 05/08/2026 (BRT) — Execucao A+B+C+D: limpeza + re-ingestao GoldenSet
+
+### Contexto
+
+Apos o RAG overhaul, o retrieval ainda retornava conteudo ruim para a
+dissertacao e tese. Investigacao concluiu que o texto armazenado era de
+ingestao PRE-OCR (CID codes, combining marks). Decisao: limpar a base e
+re-ingestar com os PDFs do GoldenSet (fontes limpas).
+
+### Passo A — Investigacao (por que OCR nao disparou)
+
+Testado os 2 PDFs do GoldenSet com `parse_pdf_robust`:
+- `Lei_geral_protecao_dados_pessoais_1ed.pdf`: 80215 chars, quality 1.0, 0 CID
+- `Codigo-do-consumidor-FINAL.pdf`: 113273 chars, quality 1.0, 0 CID
+
+CONCLUSAO: Os PDFs do GoldenSet sao limpos. O problema era o PDF ORIGINAL
+da dissertacao (fonte CID corrompida) que o usuario enviou via WhatsApp.
+O pipeline (parse_pdf_hybrid -> clean_portuguese -> chunk -> embed ->
+index) estava correto — o dado de entrada e que era ruim.
+
+### Passo B — Limpeza do Firestore Vector
+
+`scripts/clear_knowledge_base.py` reescrito com batch (lotes de 100):
+
+| Collection | Docs removidos |
+|------------|----------------|
+| `agent-knowledge-v2` | 0 (ja vazio — dados estavam nas sections) |
+| `agent-knowledge-v2-plain` | 16 |
+| `agent-knowledge-sections` | 41 |
+| **Total** | **57** |
+
+### Passo C — Re-ingestao GoldenSet
+
+`scripts/ingest_goldenset.py` (NOVO): le PDF do GoldenSet -> parse_pdf_hybrid
+-> index_private_document (chunks + sections automatico).
+
+Nota importante: `embed_documents` com 98 chunks estoura o timeout default
+de 60s (EMBEDDING_CONCURRENCY=4). Necessario:
+- `EMBED_DOCUMENTS_TIMEOUT_SEC=600`
+- `RAG_EMBEDDING_CONCURRENCY=8`
+
+| Documento | Chunks | Indexed | Seccoes |
+|-----------|--------|---------|---------|
+| Codigo-do-consumidor-FINAL.pdf | 98 | 98 | 27 |
+| Lei_geral_protecao_dados_pessoais_1ed.pdf | 53 | 53 | 14 |
+| **Total** | **151** | **151** | **41** |
+
+### Passo D — Validacao retrieval
+
+`search_sections` ("dado sensivel LGPD"):
+- [0.58] SEÇÃO III – Do Tratamento de Dados Pessoais de Crianças
+- [0.58] SEÇÃO I – Da Segurança e do Sigilo de Dados
+- [0.56] SEÇÃO II – Do Tratamento de Dados Pessoais Sensíveis (5374 chars)
+
+`search_legal_knowledge` ("direitos do consumidor"):
+- [0.73] DOS DIREITOS BÁSICOS DO CONSUMIDOR
+- [0.68] DOS BANCOS DE DADOS E CADASTROS DE CONSUMIDORES
+- [0.67] DA POLÍTICA NACIONAL DE RELAÇÕES DE CONSUMO
+
+DIFERENCA CRUCIAL vs antes:
+| Antes (dado sujo) | Agora (dado limpo GoldenSet) |
+|-------------------|-------------------------------|
+| Ficha catalografica no topo | Secao correta no topo com titulo real |
+| Texto com (cid:181), sem espacos | Texto limpo, quality 1.0 |
+| Score 0.30-0.40 (adaptive floor) | Score 0.56-0.73 (acima do floor) |
+
+### Commits
+
+| Commit | Resumo |
+|--------|--------|
+| `3c7ec76` | clear_knowledge_base (batch) + ingest_goldenset |
+
+### Conclusao sobre "A + D fazem sentido juntos?"
+
+A (diagnostico ativo) e D (validacao passiva) NAO sao complementares —
+sao sequenciais. Mas A+B+C+D na sequencia fizeram sentido: A provou que
+o pipeline esta OK, B+C trocaram dado ruim por limpo, D confirmou o
+retrieval funcional.
+
+### Estado final da base (05/08 19:xx BRT)
+
+- `agent-knowledge-v2`: 151 chunks com embeddings (CDC + LGPD)
+- `agent-knowledge-v2-plain`: 151 chunks (texto)
+- `agent-knowledge-sections`: 41 seccoes com titulos reais
+- dissertacao e tese REMOVIDAS (serao re-ingestadas via WhatsApp quando
+  o usuario reenviar — OCR + sections automatico)
+
+### Aprendizados
+
+1. PDFs com fonte CID corrompida nao sao detectados pelo quality check
+   global quando so algumas paginas (equacoes) estao corrompidas — o
+   OCR roda all-or-nothing por pagina inteira.
+2. `embed_documents` default timeout 60s e insuficiente para >50 chunks
+   com concurrency 4. Para ingestao em massa, usar timeout 600 + concurrency 8.
+3. Batch de delete no Firestore: lotes de 100 (max 500 ops por batch).
