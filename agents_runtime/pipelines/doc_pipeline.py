@@ -345,7 +345,7 @@ def _fallback_raw_chunks(chunks: list) -> str:
         prefix = f"[{source[:40]}]"
         if section:
             prefix = f"[{source[:40]} | {section}]"
-        lines.append(f"{prefix} {clean[:350]}")
+        lines.append(f"{prefix} {clean[:300]}")
     return "\n\n".join(lines) if lines else "Nao encontrei nada sobre isso na base de conhecimento."
 
 
