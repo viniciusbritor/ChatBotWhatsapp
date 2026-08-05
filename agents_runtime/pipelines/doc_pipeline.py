@@ -157,6 +157,8 @@ def detect(text: str) -> bool:
             if has_calendar_or_email:
                 return False
             return True
+    if any(kw in t for kw in _DELETE_MARKERS):
+        return True
     is_attachment = any(
         kw in t for kw in (
             "memorize", "memorizar", "guarde", "guardar",
@@ -189,6 +191,14 @@ async def _disambiguate_rag_vs_drive(
         r'\.(?:pdf|docx|xlsx|txt|md|csv)\b', _re.IGNORECASE,
     )
     if _DOC_EXT_RE.search(text) and not any(kw in t for kw in _DRIVE_ONLY_KEYWORDS):
+        _QUESTION_HINTS = (
+            "me diga", "comente", "explique", "sobre o que", "qual a",
+            "qual o", "o que é", "o que e", "resuma", "fale sobre",
+            "conceito", "quem é", "quem e", "introducao", "introdução",
+            "resumo", "conteudo", "conteúdo", "o que diz",
+        )
+        if any(kw in t for kw in _QUESTION_HINTS):
+            return "rag"
         return "clarify"
 
     try:
@@ -662,7 +672,7 @@ async def run(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     # Fast path: listar documentos da base (somente se nao for query de conteudo, busca ou exclusao)
     t = text.lower()
-    _CONTENT_MARKERS = ("diz", "fala", "capitulo", "artigo", "lei", "sobre", "resuma", "explique", "qual o", "quais os")
+    _CONTENT_MARKERS = ("diz", "fala", "capitulo", "artigo", "lei", "sobre", "resuma", "explique", "qual o", "quais os", "comente", "comentar", "descreva", "introducao", "introdução", "conteudo", "conteúdo")
     _SEARCH_MARKERS = ("busque", "buscar", "procure", "procurar", "pesquise", "pesquisar", "ache", "achar", "encontre", "encontrar")
     has_list_kw = any(kw in t for kw in _LIST_KEYWORDS)
     has_content = any(mk in t for mk in _CONTENT_MARKERS)

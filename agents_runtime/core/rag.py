@@ -836,6 +836,22 @@ async def index_private_document(
                 "chunks": len(chunks),
             }
 
+    # Etapa 2: indexa secoes/capitulos (fire-and-forget com try/except)
+    sections_result: Dict[str, Any] = {"status": "skipped"}
+    try:
+        sections_result = await index_private_sections(
+            phone=phone,
+            text_content=text_content,
+            source_title=source_title,
+            metadata=metadata,
+            class_=class_value,
+            group=group_value,
+            theme=theme_value,
+        )
+    except Exception as exc:
+        logger.warning("index_private_sections_failed error=%s", exc)
+        sections_result = {"status": "error", "detail": str(exc)[:200]}
+
     return {
         "doc_ids": plain_ids,
         "vector_doc_ids": vector_ids,
@@ -852,6 +868,7 @@ async def index_private_document(
         "source_title": mask_pii(source_title),
         "collection": PRIVATE_COLLECTION + "-plain",
         "vector_collection": PRIVATE_COLLECTION,
+        "sections": sections_result,
     }
 
 

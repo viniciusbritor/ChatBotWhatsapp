@@ -713,9 +713,17 @@ class TestDisambiguatorPdfFastPath:
     async def test_pdf_sem_keyword_pede_clarify(self):
         from pipelines.doc_pipeline import _disambiguate_rag_vs_drive
         result = await _disambiguate_rag_vs_drive(
-            "o que diz o resumo do documento 'dissertação vinicius.pdf'"
+            "me mostre o arquivo 'dissertação vinicius.pdf'"
         )
         assert result == "clarify"
+
+    @pytest.mark.asyncio
+    async def test_pdf_com_pergunta_vai_para_rag(self):
+        from pipelines.doc_pipeline import _disambiguate_rag_vs_drive
+        result = await _disambiguate_rag_vs_drive(
+            "me diga sobre o que é a introdução do arquivo 'dissertação vinicius.pdf'"
+        )
+        assert result == "rag"
 
     @pytest.mark.asyncio
     async def test_docx_sem_keyword_pede_clarify(self):
@@ -954,3 +962,49 @@ class TestFullDocumentPath:
             )
         assert isinstance(result, str)
         assert len(result) > 0
+
+
+class TestDetectDelete:
+    def test_detect_captures_bare_delete(self):
+        from pipelines.doc_pipeline import detect
+        assert detect("apague tese vinicius") is True
+
+    def test_detect_captures_delete_with_excluir(self):
+        from pipelines.doc_pipeline import detect
+        assert detect("exclua a lei de dados") is True
+
+    def test_detect_does_not_capture_normal_query(self):
+        from pipelines.doc_pipeline import detect
+        assert detect("qual o horario da reuniao") is False
+
+
+class TestComenteContentMarker:
+    @pytest.mark.asyncio
+    async def test_comente_nao_lista_documentos(self):
+        """'comente a introdução' deve ir para retrieval, não listagem."""
+        from pipelines.doc_pipeline import run
+        from agent_orchestration import knowledge_retriever
+        from unittest.mock import AsyncMock, patch as mpatch
+
+        fake_sources = ["dissertação vinicius.pdf"]
+        fake_retrieve = {
+            "results": [{"source": "dissertação vinicius.pdf", "text": "conteudo", "score": 0.7}],
+            "scope": "private",
+            "filters": {},
+        }
+
+        with mpatch.object(
+            knowledge_retriever, "_list_known_sources",
+            AsyncMock(return_value=fake_sources),
+        ):
+            with mpatch("agent_orchestration.knowledge_retriever.retrieve",
+                        AsyncMock(return_value=fake_retrieve)):
+                with mpatch("pipelines.doc_pipeline._retrieve_full_document",
+                            AsyncMock(return_value="")):
+                    result = await run({
+                        "instance": "jennifer",
+                        "phone": "5511999",
+                        "text": "comente a introdução de 'dissertação vinicius.pdf'",
+                        "extra": {},
+                    })
+        assert "Documentos na minha base" not in result["reply"]
