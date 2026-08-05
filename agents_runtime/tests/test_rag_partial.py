@@ -27,6 +27,7 @@ async def test_index_partial_7_of_10_chunks_ok(monkeypatch):
     monkeypatch.setattr(rag, "_chunk_text", lambda text, max_chars=1200, overlap=180: [
         f"chunk_{i}" for i in range(10)
     ])
+    monkeypatch.setattr(rag, "_chunk_text_semantic", lambda text, **kw: [("", "paragraph", f"chunk_{i}") for i in range(10)])
 
     async def fake_embed_documents(chunks):
         # embed_documents ja filtra Nones internamente, entao
@@ -66,6 +67,7 @@ async def test_index_all_embeddings_fail_returns_error(monkeypatch):
     monkeypatch.setattr(rag, "_now_brt", lambda: MagicMock(isoformat=lambda: "2026"))
     monkeypatch.setattr(rag, "mask_pii", lambda s: s)
     monkeypatch.setattr(rag, "_chunk_text", lambda text, **kw: ["c1", "c2"])
+    monkeypatch.setattr(rag, "_chunk_text_semantic", lambda text, **kw: [("", "paragraph", "c1"), ("", "paragraph", "c2")])
 
     async def fake_embed_documents(chunks):
         return []  # empty list = all failed
@@ -96,6 +98,7 @@ async def test_index_all_embeddings_ok_partial_false(monkeypatch):
     monkeypatch.setattr(rag, "_now_brt", lambda: MagicMock(isoformat=lambda: "2026"))
     monkeypatch.setattr(rag, "mask_pii", lambda s: s)
     monkeypatch.setattr(rag, "_chunk_text", lambda text, **kw: ["c1", "c2", "c3"])
+    monkeypatch.setattr(rag, "_chunk_text_semantic", lambda text, **kw: [("", "p", "c1"), ("", "p", "c2"), ("", "p", "c3")])
 
     async def fake_embed_documents(chunks):
         return [[0.1] * 1536 for _ in chunks]
@@ -128,6 +131,7 @@ async def test_index_embed_documents_returns_none_returns_error(monkeypatch):
     monkeypatch.setattr(rag, "_now_brt", lambda: MagicMock(isoformat=lambda: "2026"))
     monkeypatch.setattr(rag, "mask_pii", lambda s: s)
     monkeypatch.setattr(rag, "_chunk_text", lambda text, **kw: ["c1", "c2", "c3"])
+    monkeypatch.setattr(rag, "_chunk_text_semantic", lambda text, **kw: [("", "p", "c1"), ("", "p", "c2"), ("", "p", "c3")])
 
     async def fake_embed_documents(chunks):
         return None  # timeout or all-errored
