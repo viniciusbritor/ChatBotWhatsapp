@@ -502,6 +502,23 @@ async def run(payload: Dict[str, Any]) -> Dict[str, Any]:
             t_lower = text.lower()
             for source in sorted(sources, key=len, reverse=True):
                 if source.lower() in t_lower:
+                    instance = payload.get("instance", "jennifer")
+                    extra = payload.get("extra", {}) or {}
+                    try:
+                        from core.delay_calculator import calculate_delay_ms
+                        from core.evolution_client import send_text
+                        ack_msg = f"Entendido, vou remover '{source}' da base de conhecimento..."
+                        delay_ms = max(1500, calculate_delay_ms(ack_msg))
+                        await send_text(
+                            instance=instance,
+                            phone=phone,
+                            text=ack_msg,
+                            delay_ms=delay_ms,
+                            presence="composing",
+                            remote_jid=extra.get("remote_jid", ""),
+                        )
+                    except Exception:
+                        pass
                     from tool_registry import get_tool
                     delete_fn = get_tool("knowledge.delete")
                     result = await delete_fn(source_title=source, phone=phone)
