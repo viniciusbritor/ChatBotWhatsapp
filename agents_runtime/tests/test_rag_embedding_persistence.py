@@ -1,10 +1,10 @@
-"""Testes E2E com GoldenSet/disserta\u00e7\u00e3o.pdf (PHASE 5 do loop RAG).
+"""Testes E2E com GoldenSet (PHASE 5 do loop RAG).
 
 Valida pipeline completo:
   GoldenSet PDF -> parse -> chunk -> embed -> index -> retrieve
 
 Pre-requisitos para rodar (skip se ausentes):
-- GoldenSet/disserta\u00e7\u00e3o.pdf presente (1.2MB)
+- GoldenSet/Codigo-do-consumidor-FINAL.pdf presente (1.5MB)
 - OPENAI_API_KEY valida
 - Firestore disponivel (FirestoreEmulator OU GCP test)
 - agent-knowledge-v2 com vector composite index (Phase H F4d.6)
@@ -18,13 +18,14 @@ _CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.dirname(os.path.dirname(_CURRENT_DIR))
 # GoldenSet esta no repo root: ChatBotWhatsapp/GoldenSet
 GOLDENSET_DIR = os.path.join(_REPO_ROOT, "GoldenSet")
-DISSERTACAO_PATH = os.path.join(GOLDENSET_DIR, "disserta\u00e7\u00e3o.pdf")
+DOC_PATH = os.path.join(GOLDENSET_DIR, "Codigo-do-consumidor-FINAL.pdf")
+DOC_SOURCE_TITLE = "Codigo-do-consumidor-FINAL.pdf"
 TEST_PHONE = "+5511966830020"
 FALLBACK_PHONE_HASH = "oh_test_e2e"
 
 
 def _pdf_present() -> bool:
-    return os.path.exists(DISSERTACAO_PATH) and os.path.getsize(DISSERTACAO_PATH) > 1_000_000
+    return os.path.exists(DOC_PATH) and os.path.getsize(DOC_PATH) > 1_000_000
 
 
 def _openai_key_set() -> bool:
@@ -56,7 +57,7 @@ def cleanup_index():
             docs = (
                 db.collection(PRIVATE_COLLECTION + coll_suffix)
                 .where("owner_hash", "==", owner_hash)
-                .where("source_title", "==", "disserta\u00e7\u00e3o.pdf")
+                .where("source_title", "==", DOC_SOURCE_TITLE)
                 .stream()
             )
             batch = db.batch()
@@ -72,19 +73,19 @@ def cleanup_index():
         pass
 
 
-def test_dissertacao_pdf_is_present():
-    """Sanity: GoldenSet/dissertaçao.pdf existe e tem tamanho real."""
+def test_doc_pdf_is_present():
+    """Sanity: GoldenSet/Codigo-do-consumidor-FINAL.pdf existe e tem tamanho real."""
     if not _pdf_present():
-        pytest.skip(f"GoldenSet/dissertaçẽo.pdf nao presente em {DISSERTACAO_PATH}")
-    assert _pdf_present(), f"Esperado PDF em {DISSERTACAO_PATH}"
+        pytest.skip(f"GoldenSet/Codigo-do-consumidor-FINAL.pdf nao presente em {DOC_PATH}")
+    assert _pdf_present(), f"Esperado PDF em {DOC_PATH}"
 
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(
-    not _pdf_present(), reason="GoldenSet/disserta\u00e7\u00e3o.pdf nao presente",
+    not _pdf_present(), reason="GoldenSet/Codigo-do-consumidor-FINAL.pdf nao presente",
 )
-async def test_index_private_document_real_dissertacao(monkeypatch):
-    """E2E: disserta\u00e7\u00e3o.pdf -> embed -> index -> 161 chunks com vectors."""
+async def test_index_private_document_real_doc(monkeypatch):
+    """E2E: Codigo-do-consumidor.pdf -> embed -> index -> chunks com vectors."""
     if not _openai_key_set():
         pytest.skip("OPENAI_API_KEY nao setada - skipping E2E real")
     if not _firestore_available():
@@ -92,7 +93,7 @@ async def test_index_private_document_real_dissertacao(monkeypatch):
 
     from core import rag
 
-    with open(DISSERTACAO_PATH, "rb") as f:
+    with open(DOC_PATH, "rb") as f:
         raw_bytes = f.read()
 
     text = rag.parse_pdf_robust(raw_bytes)
@@ -102,15 +103,15 @@ async def test_index_private_document_real_dissertacao(monkeypatch):
     result = await rag.index_private_document(
         phone=TEST_PHONE,
         text_content=text,
-        source_title="disserta\u00e7\u00e3o.pdf",
+        source_title=DOC_SOURCE_TITLE,
         source_url=None,
-        category="academico",
+        category="legislacao",
         metadata={
-            "filename": "disserta\u00e7\u00e3o.pdf",
+            "filename": DOC_SOURCE_TITLE,
             "mime_type": "application/pdf",
             "test_run": True,
         },
-        class_="academico",
+        class_="legal",
         group="",
         theme="",
     )
@@ -134,9 +135,9 @@ async def test_index_private_document_real_dissertacao(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(
-    not _pdf_present(), reason="GoldenSet/disserta\u00e7\u00e3o.pdf nao presente",
+    not _pdf_present(), reason="GoldenSet/Codigo-do-consumidor-FINAL.pdf nao presente",
 )
-async def test_retrieval_finds_dissertacao_after_index(monkeypatch, cleanup_index):
+async def test_retrieval_finds_doc_after_index(monkeypatch, cleanup_index):
     """Apos indexar, retrieval DEVE retornar o proprio doc."""
     if not _openai_key_set():
         pytest.skip("OPENAI_API_KEY nao setada - skipping E2E real")
@@ -145,22 +146,22 @@ async def test_retrieval_finds_dissertacao_after_index(monkeypatch, cleanup_inde
 
     from core import rag
 
-    with open(DISSERTACAO_PATH, "rb") as f:
+    with open(DOC_PATH, "rb") as f:
         raw_bytes = f.read()
     text = rag.parse_pdf_robust(raw_bytes)
     await rag.index_private_document(
         phone=TEST_PHONE,
         text_content=text,
-        source_title="disserta\u00e7\u00e3o.pdf",
-        category="academico",
+        source_title=DOC_SOURCE_TITLE,
+        category="legislacao",
     )
 
     result = await rag.search_legal_knowledge(
         phone=TEST_PHONE,
-        query="arquitetura data processing",
+        query="direitos do consumidor",
         k=3,
         min_score=0.5,
-        source_title="disserta\u00e7\u00e3o.pdf",
+        source_title=DOC_SOURCE_TITLE,
     )
 
     if result.get("decision") == "no_matches":
@@ -168,7 +169,7 @@ async def test_retrieval_finds_dissertacao_after_index(monkeypatch, cleanup_inde
 
     assert result.get("count", 0) > 0, f"0 resultados: {result}"
     found = any(
-        "disserta" in str(r.get("source_title", ""))
+        "Codigo-do-consumidor" in str(r.get("source_title", ""))
         for r in result.get("results", [])
     )
     assert found, (
@@ -178,10 +179,10 @@ async def test_retrieval_finds_dissertacao_after_index(monkeypatch, cleanup_inde
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(
-    not _pdf_present(), reason="GoldenSet/disserta\u00e7\u00e3o.pdf nao presente",
+    not _pdf_present(), reason="GoldenSet/Codigo-do-consumidor-FINAL.pdf nao presente",
 )
 async def test_embedding_count_matches_chunk_count(monkeypatch):
-    """Para 161 chunks, embed_documents DEVE retornar 161 vectors."""
+    """Para N chunks, embed_documents DEVE retornar N vectors."""
     if not _openai_key_set():
         pytest.skip("OPENAI_API_KEY nao setada - skipping E2E real")
     if not _firestore_available():
@@ -189,7 +190,7 @@ async def test_embedding_count_matches_chunk_count(monkeypatch):
 
     from core import rag
 
-    with open(DISSERTACAO_PATH, "rb") as f:
+    with open(DOC_PATH, "rb") as f:
         raw_bytes = f.read()
     text = rag.parse_pdf_robust(raw_bytes)
     chunks = rag._chunk_text(text)
