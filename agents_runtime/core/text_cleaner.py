@@ -12,9 +12,8 @@ and storage, preventing garbage vectors in Firestore.
 
 from __future__ import annotations
 
+import re
 import unicodedata
-
-_ORDERS = ("after", "before")
 
 CEDA = "\u00B8"
 TILDE = "\u02DC"
@@ -38,20 +37,19 @@ _DIACRITIC_TABLE = [
 def clean_portuguese(text: str) -> str:
     """Reconstitute spacing diacritics into proper Portuguese characters.
 
-    Handles both orders (base+diacritic and diacritic+base) because PDF
-    font positioning can place the glyph in either order.
+    Two-pass strategy:
+    1. Adjacent: ``c + ¸ → ç``  (original str.replace, handles ``c¸`` and ``¸c``)
+    2. With whitespace: ``c + \\s + ¸ → ç`` (regex, handles ``c ¸`` and ``¸ c``)
     """
     if not text:
         return text
 
     for diacritic, base_map in _DIACRITIC_TABLE:
-        for order in _ORDERS:
-            for base, composed in base_map.items():
-                if order == "after":
-                    pattern = base + diacritic
-                else:
-                    pattern = diacritic + base
-                text = text.replace(pattern, composed)
+        for base, composed in base_map.items():
+            _pat_after = re.escape(base) + r"\s*" + re.escape(diacritic)
+            _pat_before = re.escape(diacritic) + r"\s*" + re.escape(base)
+            text = re.sub(_pat_after, composed, text)
+            text = re.sub(_pat_before, composed, text)
 
     text = text.replace(LIG_FI, "fi")
     text = text.replace(LIG_FL, "fl")
