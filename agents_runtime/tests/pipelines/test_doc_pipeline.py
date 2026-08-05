@@ -857,3 +857,51 @@ class TestDeleteFlow:
                 })
         assert "Feito" not in result["reply"]
         assert "higiene" in result["reply"].lower() or "documentos disponiveis" in result["reply"].lower()
+
+    @pytest.mark.asyncio
+    async def test_delete_sem_pdf_nao_usa_disambiguator(self):
+        """Delete sem .pdf deve rotear para 'rag' SEM chamar o disambiguator."""
+        from pipelines.doc_pipeline import run
+        from agent_orchestration import knowledge_retriever
+        from unittest.mock import AsyncMock, patch as mpatch
+
+        fake_sources = ["tese vinicius.pdf"]
+
+        async def fake_delete(**kwargs):
+            return {"deleted": 3, "source_title": "tese vinicius.pdf"}
+
+        with mpatch.object(
+            knowledge_retriever, "_list_known_sources",
+            AsyncMock(return_value=fake_sources),
+        ):
+            with mpatch("pipelines.doc_pipeline._disambiguate_rag_vs_drive") as mock_d:
+                with mpatch("tool_registry.get_tool") as mock_get_tool:
+                    mock_get_tool.return_value = fake_delete
+                    with mpatch("core.evolution_client.send_text", new_callable=AsyncMock):
+                        result = await run({
+                            "instance": "jennifer",
+                            "phone": "5511999",
+                            "text": "Apague a tese vinicius",
+                            "extra": {},
+                        })
+        assert "Feito" in result["reply"]
+        assert "tese vinicius.pdf" in result["reply"]
+        mock_d.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_delete_com_drive_keyword_vai_para_drive(self):
+        """Delete com keyword Drive deve rotear para 'drive' SEM LLM."""
+        from pipelines.doc_pipeline import run
+        from unittest.mock import AsyncMock, patch as mpatch
+
+        with mpatch("pipelines.doc_pipeline._disambiguate_rag_vs_drive") as mock_d:
+            with mpatch("pipelines.doc_pipeline._run_drive") as mock_run_drive:
+                mock_run_drive.return_value = {"reply": "path drive"}
+                result = await run({
+                    "instance": "jennifer",
+                    "phone": "5511999",
+                    "text": "apague contrato.pdf do meu drive",
+                    "extra": {},
+                })
+        assert result["reply"] == "path drive"
+        mock_d.assert_not_awaited()

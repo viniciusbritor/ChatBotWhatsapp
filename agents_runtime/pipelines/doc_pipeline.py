@@ -189,8 +189,6 @@ async def _disambiguate_rag_vs_drive(
         r'\.(?:pdf|docx|xlsx|txt|md|csv)\b', _re.IGNORECASE,
     )
     if _DOC_EXT_RE.search(text) and not any(kw in t for kw in _DRIVE_ONLY_KEYWORDS):
-        if any(kw in t for kw in _DELETE_MARKERS):
-            return "rag"
         return "clarify"
 
     try:
@@ -508,7 +506,13 @@ async def run(payload: Dict[str, Any]) -> Dict[str, Any]:
     except Exception:
         pass
 
-    decision = await _disambiguate_rag_vs_drive(text, recent_context)
+    if has_delete:
+        if any(kw in t for kw in _DRIVE_ONLY_KEYWORDS):
+            decision = "drive"
+        else:
+            decision = "rag"
+    else:
+        decision = await _disambiguate_rag_vs_drive(text, recent_context)
 
     if decision == "clarify":
         return {
