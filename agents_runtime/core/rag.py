@@ -353,12 +353,10 @@ def _chunk_text_semantic(
                 all_chunks.append((section_title or "", "sentence_group", current))
 
     if not all_chunks:
-        return _chunk_text(text, max_chars=1200, overlap=300)
+        legacy = _chunk_text(text, max_chars=1200, overlap=300)
+        return [("", "paragraph", c) for c in legacy]
 
     return all_chunks
-
-
-_CHUNK_TEXT_CALLABLE = _chunk_text_semantic
 
 
 def _vector_filters(

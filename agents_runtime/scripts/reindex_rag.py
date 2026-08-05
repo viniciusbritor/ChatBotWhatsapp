@@ -26,7 +26,7 @@ sys.path.insert(0, str(_AGENTS_RUNTIME))
 
 async def reindex_private(phone: str, dry_run: bool = False) -> dict:
     from core.rag import (
-        _chunk_text,
+        _chunk_text_semantic,
         _get_firestore,
         _owner_hash,
         embed_documents,
@@ -70,14 +70,24 @@ async def reindex_private(phone: str, dry_run: bool = False) -> dict:
             continue
 
         clean_text = clean_portuguese(original_text)
-        chunks = _chunk_text(clean_text, max_chars=1200, overlap=300)
+        raw_chunks = _chunk_text_semantic(clean_text)
+        if not raw_chunks:
+            logger.info("skip_empty_semantic source=%s", source_title)
+            continue
+
+        chunks = [t[2] for t in raw_chunks]
+        section_titles = [t[0] for t in raw_chunks]
+        chunk_types = [t[1] for t in raw_chunks]
         logger.info(
-            "source=%s old_chunks=1 new_chunks=%d text_len=%d",
+            "source=%s old_chunks=1 new_chunks=%d text_len=%d sections=%d",
             source_title, len(chunks), len(original_text),
+            len(set(st for (st, _, _) in raw_chunks if st)),
         )
 
         all_chunks.extend(chunks)
-        for i, chunk in enumerate(chunks):
+        for i, (chunk, section_title, chunk_type) in enumerate(
+            zip(chunks, section_titles, chunk_types)
+        ):
             chunk_id = hashlib.md5(
                 f"{doc.id}:{i}:{chunk[:50]}".encode("utf-8")
             ).hexdigest()[:16]
@@ -87,6 +97,8 @@ async def reindex_private(phone: str, dry_run: bool = False) -> dict:
                 "source_title": source_title,
                 "chunk_index": i,
                 "total_chunks": len(chunks),
+                "section_title": section_title,
+                "chunk_type": chunk_type,
                 "class": data.get("class", ""),
                 "group": data.get("group", ""),
                 "theme": data.get("theme", ""),
