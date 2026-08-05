@@ -32,7 +32,11 @@ async def test_como_listar_arquivos_is_not_rag():
 
 @pytest.mark.asyncio
 async def test_quando_reuniao_is_not_rag():
-    assert await is_rag_query("quando é a proxima reuniao") is False
+    # Sem DEEPSEEK_API_KEY, o tie-breaker LLM nao roda -> determinismo
+    import os
+    from unittest.mock import patch
+    with patch.dict("os.environ", {"DEEPSEEK_API_KEY": ""}, clear=False):
+        assert await is_rag_query("quando é a proxima reuniao") is False
 
 
 @pytest.mark.asyncio

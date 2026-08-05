@@ -72,5 +72,8 @@ async def test_oi_simples_is_not_rag():
 async def test_quais_meus_emails_is_not_rag():
     """'quais meus emails' continua NAO sendo RAG (regressao)."""
     from agent_orchestration.knowledge_retriever import is_rag_query
+    from unittest.mock import patch
 
-    assert await is_rag_query("quais meus emails?") is False
+    # Sem DEEPSEEK_API_KEY, o tie-breaker LLM nao roda -> determinismo
+    with patch.dict("os.environ", {"DEEPSEEK_API_KEY": ""}, clear=False):
+        assert await is_rag_query("quais meus emails?") is False
