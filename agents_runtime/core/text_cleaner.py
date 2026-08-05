@@ -34,12 +34,52 @@ _DIACRITIC_TABLE = [
 ]
 
 
+_COMBINING_COLLAPSE_RE = re.compile(
+    r"(\s)([\u0300-\u036f])(\s*)([a-zA-Z\u00C0-\u024F])"
+)
+
+# "na ̃o" -> "não": a/o + ws + tilde + letra -> a/o + tilde + letra (tilde no 'a')
+_TILDE_ENDING_RE = re.compile(
+    r"(a|A|o|O)\s+(\u0303)\s*([a-zA-Z\u00C0-\u024F])"
+)
+
+
+def _collapse_combining(m: re.Match) -> str:
+    return m.group(4) + m.group(2)
+
+
+def _tilde_ending(m: re.Match) -> str:
+    return m.group(1) + m.group(2) + m.group(3)
+
+
+def _normalize_combining_marks(text: str) -> str:
+    """Reconstitute combining marks (Mn) detached from base letters.
+
+    PDFs like the dissertacao emit U+0301/U+0327/U+0303 as combining
+    marks detached by whitespace: 'necess ́arios', 'H ́elio', 'na ̃o'.
+
+    Rules:
+    1. Tilde in Portuguese endings ('ão', 'õe'): a/o + ws + tilde + letra
+       -> tilde attaches to the a/o (handles 'na ̃o' -> 'não').
+    2. Generic detached mark: ws + mark + letra -> mark attaches to the
+       NEXT letter (handles 'necess ́ arios' -> 'necessários').
+    3. Marks already adjacent to a base letter are left for NFC.
+    """
+    if not text:
+        return text
+    text = unicodedata.normalize("NFKD", text)
+    text = _TILDE_ENDING_RE.sub(_tilde_ending, text)
+    text = _COMBINING_COLLAPSE_RE.sub(_collapse_combining, text)
+    return unicodedata.normalize("NFC", text)
+
+
 def clean_portuguese(text: str) -> str:
     """Reconstitute spacing diacritics into proper Portuguese characters.
 
-    Two-pass strategy:
+    Three-pass strategy:
     1. Adjacent: ``c + ¸ → ç``  (original str.replace, handles ``c¸`` and ``¸c``)
     2. With whitespace: ``c + \\s + ¸ → ç`` (regex, handles ``c ¸`` and ``¸ c``)
+    3. Combining marks: NFKD + space-collapse + NFC (handles ``necess ́arios``)
     """
     if not text:
         return text
@@ -54,7 +94,9 @@ def clean_portuguese(text: str) -> str:
     text = text.replace(LIG_FI, "fi")
     text = text.replace(LIG_FL, "fl")
 
-    return unicodedata.normalize("NFC", text)
+    text = _normalize_combining_marks(text)
+
+    return text
 
 
 __all__ = ["clean_portuguese"]

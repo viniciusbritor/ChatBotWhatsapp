@@ -189,6 +189,8 @@ async def _disambiguate_rag_vs_drive(
         r'\.(?:pdf|docx|xlsx|txt|md|csv)\b', _re.IGNORECASE,
     )
     if _DOC_EXT_RE.search(text) and not any(kw in t for kw in _DRIVE_ONLY_KEYWORDS):
+        if any(kw in t for kw in _DELETE_MARKERS):
+            return "rag"
         return "clarify"
 
     try:
@@ -529,7 +531,8 @@ async def run(payload: Dict[str, Any]) -> Dict[str, Any]:
         if sources:
             t_lower = text.lower()
             for source in sorted(sources, key=len, reverse=True):
-                if source.lower() in t_lower:
+                source_base = source.lower().rsplit(".", 1)[0]
+                if source.lower() in t_lower or source_base in t_lower:
                     instance = payload.get("instance", "jennifer")
                     extra = payload.get("extra", {}) or {}
                     try:
@@ -564,8 +567,21 @@ async def run(payload: Dict[str, Any]) -> Dict[str, Any]:
                         "presence": "composing",
                         "metadata": {"agent_id": "agent-knowledge-retriever", "deleted_count": 0, "skip_image_report": True},
                     }
-        from pipelines._executor import run_agent
-        return await run_agent("agent-knowledge-retriever", text, payload, extra)
+        doc_list = ", ".join(f"'{s}'" for s in sources[:5])
+        return {
+            "reply": (
+                f"Nao identifiquei qual documento da base voce quer apagar. "
+                f"Documentos disponiveis: {doc_list}. "
+                "Pode citar o nome exato do arquivo?"
+            ),
+            "delay_ms": 0,
+            "presence": "composing",
+            "metadata": {
+                "agent_id": "agent-knowledge-retriever",
+                "needs_clarification": True,
+                "skip_image_report": True,
+            },
+        }
 
     if decision == "drive":
         return await _run_drive(payload)

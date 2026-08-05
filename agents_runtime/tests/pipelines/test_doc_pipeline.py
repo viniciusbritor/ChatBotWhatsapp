@@ -759,3 +759,101 @@ class TestDisambiguatorPdfFastPath:
             "o que voce sabe sobre tese.pdf"
         )
         assert result == "rag"
+
+    @pytest.mark.asyncio
+    async def test_delete_com_pdf_vai_para_rag(self):
+        from pipelines.doc_pipeline import _disambiguate_rag_vs_drive
+        result = await _disambiguate_rag_vs_drive(
+            "apague da sua base de conheciemnto tese vinicius.pdf"
+        )
+        assert result == "rag"
+
+    @pytest.mark.asyncio
+    async def test_delete_com_pdf_no_drive_vai_para_drive(self):
+        from pipelines.doc_pipeline import _disambiguate_rag_vs_drive
+        result = await _disambiguate_rag_vs_drive(
+            "apague contrato.pdf do meu drive"
+        )
+        assert result == "drive"
+
+
+class TestDeleteFlow:
+    @pytest.mark.asyncio
+    async def test_delete_sem_extensao_casa_substring(self):
+        from pipelines.doc_pipeline import run
+        from agent_orchestration import knowledge_retriever
+        from unittest.mock import AsyncMock, patch as mpatch
+
+        fake_sources = ["tese vinicius.pdf"]
+
+        async def fake_delete(**kwargs):
+            return {"deleted": 3, "source_title": "tese vinicius.pdf"}
+
+        with mpatch.object(
+            knowledge_retriever, "_list_known_sources",
+            AsyncMock(return_value=fake_sources),
+        ):
+            with mpatch("pipelines.doc_pipeline._disambiguate_rag_vs_drive",
+                        AsyncMock(return_value="rag")):
+                with mpatch("tool_registry.get_tool") as mock_get_tool:
+                    mock_get_tool.return_value = fake_delete
+                    with mpatch("core.evolution_client.send_text", new_callable=AsyncMock):
+                        result = await run({
+                            "instance": "jennifer",
+                            "phone": "5511999",
+                            "text": "apague tese vinicius da sua base",
+                            "extra": {},
+                        })
+        assert "Feito" in result["reply"]
+        assert "tese vinicius.pdf" in result["reply"]
+
+    @pytest.mark.asyncio
+    async def test_delete_com_extensao_casa_substring(self):
+        from pipelines.doc_pipeline import run
+        from agent_orchestration import knowledge_retriever
+        from unittest.mock import AsyncMock, patch as mpatch
+
+        fake_sources = ["tese vinicius.pdf"]
+
+        async def fake_delete(**kwargs):
+            return {"deleted": 3, "source_title": "tese vinicius.pdf"}
+
+        with mpatch.object(
+            knowledge_retriever, "_list_known_sources",
+            AsyncMock(return_value=fake_sources),
+        ):
+            with mpatch("pipelines.doc_pipeline._disambiguate_rag_vs_drive",
+                        AsyncMock(return_value="rag")):
+                with mpatch("tool_registry.get_tool") as mock_get_tool:
+                    mock_get_tool.return_value = fake_delete
+                    with mpatch("core.evolution_client.send_text", new_callable=AsyncMock):
+                        result = await run({
+                            "instance": "jennifer",
+                            "phone": "5511999",
+                            "text": "apague tese vinicius.pdf da sua base",
+                            "extra": {},
+                        })
+        assert "Feito" in result["reply"]
+
+    @pytest.mark.asyncio
+    async def test_delete_sem_match_nao_alucina(self):
+        from pipelines.doc_pipeline import run
+        from agent_orchestration import knowledge_retriever
+        from unittest.mock import AsyncMock, patch as mpatch
+
+        fake_sources = ["tese vinicius.pdf", "Lei_geral_protecao_dados_pessoais_1ed.pdf"]
+
+        with mpatch.object(
+            knowledge_retriever, "_list_known_sources",
+            AsyncMock(return_value=fake_sources),
+        ):
+            with mpatch("pipelines.doc_pipeline._disambiguate_rag_vs_drive",
+                        AsyncMock(return_value="rag")):
+                result = await run({
+                    "instance": "jennifer",
+                    "phone": "5511999",
+                    "text": "apague o documento de higiene",
+                    "extra": {},
+                })
+        assert "Feito" not in result["reply"]
+        assert "higiene" in result["reply"].lower() or "documentos disponiveis" in result["reply"].lower()
