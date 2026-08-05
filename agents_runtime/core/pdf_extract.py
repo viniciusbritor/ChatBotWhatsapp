@@ -288,12 +288,30 @@ _QUALITY_BAD_CHARS = (
     "\u0300\u0301\u0302\u0303\u0327"     # combining marks (Mn)
 )
 
+_CID_CORRUPTION_RE = re.compile(r"\(cid:\d+\)", re.IGNORECASE)
+
 
 def _check_text_quality(text: str) -> float:
-    """Ratio 0..1: 0.98+ = texto limpo. <0.95 = precisa OCR."""
+    """Ratio 0..1: 0.98+ = texto limpo. <0.95 = precisa OCR.
+
+    Penaliza:
+    - caracteres quebrados (spacing diacritics, combining marks, ligaduras)
+    - corrupcao CID font: '(cid:181)' (glyph ID em vez de caractere)
+    - texto sem espacos: razao espacos < 5% indica extracao quebrada
+    """
     if not text or not text.strip():
         return 0.0
+
     bad = sum(1 for c in text if c in _QUALITY_BAD_CHARS)
+
+    cid_matches = _CID_CORRUPTION_RE.findall(text)
+    bad += len(cid_matches) * 10  # cada CID conta como 10 chars ruins
+
+    spaces = text.count(" ")
+    space_ratio = spaces / len(text)
+    if space_ratio < 0.05:
+        bad += int(len(text) * 0.3)  # texto sem espacos = gravemente corrompido
+
     return max(0.0, 1.0 - (bad / len(text)))
 
 

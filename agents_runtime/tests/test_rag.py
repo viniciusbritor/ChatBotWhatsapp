@@ -478,3 +478,118 @@ class TestChunkingWordAware:
         assert len(chunks) >= 1
         for c in chunks:
             assert len(c) > 0
+
+
+class TestBuildSections:
+    def test_build_sections_detects_capitulo(self):
+        from core.rag import _build_sections
+
+        text = (
+            "CAPÍTULO 1. Introducao ao tema da dissertacao.\n\n"
+            "Contexto e motivacao da pesquisa realizada ao longo de varios meses.\n\n"
+            "CAPÍTULO 2. Metodologia utilizada na pesquisa.\n\n"
+            "Descricao detalhada do metodo aplicado na coleta de dados.\n\n"
+            "CAPÍTULO 3. Resultados obtidos ao final do estudo."
+        )
+        sections = _build_sections(text, min_chars=30)
+        assert len(sections) >= 2
+        titles = [t for t, _ in sections]
+        assert any("CAPÍTULO" in t for t in titles)
+
+    def test_build_sections_groups_paragraphs(self):
+        from core.rag import _build_sections
+
+        text = (
+            "Introducao ao tema da pesquisa realizada neste documento.\n\n"
+            "Segundo paragrafo com contexto adicional sobre o assunto.\n\n"
+            "Terceiro paragrafo que completa a secao com mais detalhes."
+        )
+        sections = _build_sections(text, min_chars=30)
+        assert len(sections) >= 1
+        assert len(sections[0][1]) > 50
+
+    def test_build_sections_empty(self):
+        from core.rag import _build_sections
+        assert _build_sections("") == []
+        assert _build_sections("   ") == []
+
+
+class TestIndexPrivateSections:
+    @pytest.mark.asyncio
+    async def test_index_sections_writes_to_sections_collection(self):
+        from core.rag import SECTIONS_COLLECTION, index_private_sections
+
+        fake_db = MagicMock()
+        fake_batch = MagicMock()
+        fake_db.batch.return_value = fake_batch
+
+        with patch("core.rag._get_firestore", return_value=fake_db):
+            with patch("core.rag._owner_hash", return_value="oh_test"):
+                with patch("core.rag._now_brt", return_value=MagicMock(isoformat=lambda: "2026")):
+                    with patch("core.rag.SECTION_MIN_CHARS", 30):
+                        with patch("core.rag.embed_documents", new_callable=AsyncMock, return_value=[[0.1] * 1536]):
+                            result = await index_private_sections(
+                                "+5511", "CAPÍTULO 1. Introducao ao tema.\n\nCAPÍTULO 2. Metodologia.",
+                                "tese.pdf",
+                            )
+        assert result["status"] == "ok"
+        assert result["collection"] == SECTIONS_COLLECTION
+        assert result["count"] >= 1
+
+    @pytest.mark.asyncio
+    async def test_index_sections_embedding_fail(self):
+        from core.rag import index_private_sections
+
+        fake_db = MagicMock()
+        with patch("core.rag._get_firestore", return_value=fake_db):
+            with patch("core.rag.SECTION_MIN_CHARS", 30):
+                with patch("core.rag.embed_documents", new_callable=AsyncMock, return_value=None):
+                    result = await index_private_sections(
+                        "+5511",
+                        "CAPÍTULO 1. Introducao ao tema da dissertacao.\n\n"
+                        "Contexto e motivacao da pesquisa realizada ao longo de varios meses.",
+                        "doc.pdf"
+                    )
+        assert result["status"] == "embedding_failed"
+
+
+class TestSearchSections:
+    @pytest.mark.asyncio
+    async def test_search_sections_returns_sections(self):
+        from core.rag import search_sections
+
+        class FakeDoc:
+            def __init__(self, data, distance):
+                self._data = data
+                self.distance = distance
+            def to_dict(self):
+                return self._data
+
+        docs = [
+            FakeDoc({"text_content": "Cap 2 completo sobre precificacao", "source_title": "tese.pdf",
+                     "section_title": "CAPÍTULO 2", "section_index": 1, "total_sections": 5}, 0.1),
+            FakeDoc({"text_content": "Cap 3 sobre volatilidade", "source_title": "tese.pdf",
+                     "section_title": "CAPÍTULO 3", "section_index": 2, "total_sections": 5}, 0.2),
+        ]
+        fake_db = MagicMock()
+        fake_db.collection.return_value = docs  # simplified; _find_nearest mocked below
+
+        with patch("core.rag._get_firestore", return_value=fake_db):
+            with patch("core.rag.embed_query", new_callable=AsyncMock, return_value=[0.1] * 1536):
+                with patch("core.rag._find_nearest", new_callable=AsyncMock, return_value=docs):
+                    result = await search_sections("+5511", "precificacao de opcoes")
+        assert len(result["results"]) == 2
+        assert result["results"][0]["section_title"] == "CAPÍTULO 2"
+        assert result["collection"] == "agent-knowledge-sections"
+
+    @pytest.mark.asyncio
+    async def test_search_sections_empty_on_error(self):
+        from core.rag import search_sections
+
+        fake_db = MagicMock()
+        with patch("core.rag._get_firestore", return_value=fake_db):
+            with patch("core.rag.embed_query", new_callable=AsyncMock, return_value=[0.1] * 1536):
+                with patch("core.rag._find_nearest", new_callable=AsyncMock, side_effect=Exception("no index")):
+                    result = await search_sections("+5511", "query")
+        assert result["results"] == []
+        assert result.get("fallback") is True

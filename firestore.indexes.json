@@ -86,6 +86,18 @@
         {"fieldPath": "__name__", "order": "ASCENDING"},
         {"fieldPath": "vector_embedding", "vectorConfig": {"dimension": 1536, "flat": {}}}
       ]
+    },
+    {
+      "collectionGroup": "agent-knowledge-sections",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "owner_hash", "order": "ASCENDING"},
+        {"fieldPath": "embedding_model", "order": "ASCENDING"},
+        {"fieldPath": "embedding_dim", "order": "ASCENDING"},
+        {"fieldPath": "schema_version", "order": "ASCENDING"},
+        {"fieldPath": "__name__", "order": "ASCENDING"},
+        {"fieldPath": "vector_embedding", "vectorConfig": {"dimension": 1536, "flat": {}}}
+      ]
     }
   ],
   "fieldOverrides": []

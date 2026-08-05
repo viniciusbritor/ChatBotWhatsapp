@@ -177,11 +177,40 @@ async def reindex_private(phone: str, dry_run: bool = False) -> dict:
             logger.error("write_failed chunk_id=%s exc=%s", chunk_id, exc)
             skipped_errors += 1
 
+    # Etapa 2: indexa secoes (capitulos inteiros) em agent-knowledge-sections
+    from core.rag import index_private_sections
+
+    sections_indexed = 0
+    sections_errors = 0
+    for doc in docs:
+        data = doc.to_dict() or {}
+        original_text = data.get("text_content") or data.get("text") or ""
+        source_title = data.get("source_title", doc.id)
+        if not original_text.strip():
+            continue
+        try:
+            section_result = await index_private_sections(
+                phone=phone,
+                text_content=original_text,
+                source_title=source_title,
+                metadata={"class": data.get("class", ""), "group": data.get("group", ""), "theme": data.get("theme", "")},
+                class_=data.get("class", "") or None,
+                group=data.get("group", "") or None,
+                theme=data.get("theme", "") or None,
+            )
+            if section_result.get("status") == "ok":
+                sections_indexed += section_result.get("count", 0)
+        except Exception as exc:
+            logger.warning("sections_reindex_failed source=%s exc=%s", source_title, exc)
+            sections_errors += 1
+
     return {
         "status": "ok",
         "reindexed": len(old_doc_ids),
         "chunks": len(all_payloads) - skipped_errors,
         "errors": skipped_errors,
+        "sections_indexed": sections_indexed,
+        "sections_errors": sections_errors,
     }
 
 

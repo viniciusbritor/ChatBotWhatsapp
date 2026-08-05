@@ -75,6 +75,11 @@ COLLECTIVE_COLLECTION = os.getenv("RAG_COLLECTIVE_COLLECTION", "collective-knowl
 LEGACY_MEMORY_COLLECTION = os.getenv(
     "RAG_MEMORY_COLLECTION", "conversation-memory-v2"
 )
+SECTIONS_COLLECTION = os.getenv(
+    "RAG_SECTIONS_COLLECTION", "agent-knowledge-sections"
+)
+SECTION_MAX_CHARS = int(os.getenv("RAG_SECTION_MAX_CHARS", "8000"))
+SECTION_MIN_CHARS = int(os.getenv("RAG_SECTION_MIN_CHARS", "1500"))
 
 EMBEDDING_CONCURRENCY = int(os.getenv("RAG_EMBEDDING_CONCURRENCY", "4"))
 EMBED_DOCUMENTS_TIMEOUT_SEC = float(os.getenv("EMBED_DOCUMENTS_TIMEOUT_SEC", "60"))
@@ -357,6 +362,49 @@ def _chunk_text_semantic(
         return [("", "paragraph", c) for c in legacy]
 
     return all_chunks
+
+
+def _build_sections(
+    text: str,
+    max_chars: int = 8000,
+    min_chars: int = 1500,
+) -> List[tuple[str, str]]:
+    """Gera secoes (capitulos) completas de ate max_chars chars.
+
+    Agrupa paragrafos consecutivos da MESMA secao detectada em unidades
+    coerentes. Cada secao e a unidade atomica para embedding e retrieval.
+    """
+    if not text or not text.strip():
+        return []
+
+    sections = _detect_sections(text)
+    result: List[tuple[str, str]] = []
+
+    for section_title, section_body in sections:
+        paragraphs = [p.strip() for p in re.split(r"\n\s*\n", section_body) if p.strip()]
+        if not paragraphs:
+            continue
+
+        current_parts: List[str] = []
+        current_len = 0
+
+        for para in paragraphs:
+            if current_len + len(para) > max_chars and current_parts:
+                result.append((section_title, "\n\n".join(current_parts)))
+                current_parts = []
+                current_len = 0
+            current_parts.append(para)
+            current_len += len(para) + 2
+
+        if current_parts:
+            joined = "\n\n".join(current_parts)
+            if len(joined) >= min_chars or not result:
+                result.append((section_title, joined))
+
+    if not result:
+        result.append(("", text[:max_chars]))
+
+    return [(title, body) for title, body in result if body and len(body) >= min(min_chars, 300)]
 
 
 def _vector_filters(
@@ -807,6 +855,84 @@ async def index_private_document(
     }
 
 
+async def index_private_sections(
+    phone: str,
+    text_content: str,
+    source_title: str,
+    metadata: Optional[Dict[str, Any]] = None,
+    class_: Optional[str] = None,
+    group: Optional[str] = None,
+    theme: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Indexa secoes/capitulos em ``agent-knowledge-sections``.
+
+    Cada secao e uma unidade atomica (ate SECTION_MAX_CHARS) com
+    embedding proprio. Complementa o chunk-based, nao o substitui.
+    """
+    db = _get_firestore()
+    if db is None:
+        return {"error": "firestore_unavailable"}
+
+    from core.text_cleaner import clean_portuguese
+    from core.masker import mask_pii
+
+    clean = clean_portuguese(text_content or "")
+    masked = mask_pii(clean)
+    sections = _build_sections(masked, max_chars=SECTION_MAX_CHARS, min_chars=SECTION_MIN_CHARS)
+    if not sections:
+        return {"status": "no_sections", "count": 0}
+
+    owner_hash = _owner_hash(phone)
+    now = _now_brt().isoformat()
+    protected = {"owner_hash", "text_content", "vector_embedding", "embedding_model", "embedding_dim", "schema_version"}
+    safe_metadata = {k: v for k, v in (metadata or {}).items() if k not in protected}
+    class_value = (class_ or safe_metadata.get("class") or "").strip() or None
+    group_value = (group or safe_metadata.get("group") or "").strip() or None
+    theme_value = (theme or safe_metadata.get("theme") or "").strip() or None
+
+    section_texts = [body for _, body in sections]
+    vectors = await embed_documents(section_texts)
+    if vectors is None or len(vectors) != len(section_texts):
+        return {"status": "embedding_failed", "count": 0}
+
+    from google.cloud.firestore_v1.vector import Vector
+
+    batch = db.batch()
+    ids = []
+    for idx, ((section_title, body), vector) in enumerate(zip(sections, vectors)):
+        section_id = hashlib.sha256(
+            f"{owner_hash}:{source_title}:section:{idx}".encode("utf-8")
+        ).hexdigest()[:32]
+        data = {
+            **safe_metadata,
+            "owner_hash": owner_hash,
+            "text_content": body,
+            "source_title": mask_pii(source_title),
+            "section_title": section_title or f"SECAO {idx + 1}",
+            "section_index": idx,
+            "total_sections": len(sections),
+            "class": class_value,
+            "group": group_value,
+            "theme": theme_value,
+            "language": "pt-BR",
+            "created_at": now,
+            "schema_version": SCHEMA_VERSION,
+            "vector_embedding": Vector(vector),
+            "embedding_model": EMBEDDING_MODEL,
+            "embedding_dim": EMBEDDING_DIM,
+        }
+        batch.set(db.collection(SECTIONS_COLLECTION).document(section_id), data)
+        ids.append(section_id)
+
+    try:
+        await asyncio.to_thread(batch.commit)
+    except Exception as exc:
+        logger.warning("sections_commit_failed error=%s", exc)
+        return {"status": "commit_failed", "count": 0}
+
+    return {"status": "ok", "count": len(sections), "section_ids": ids, "collection": SECTIONS_COLLECTION}
+
+
 async def search_legal_knowledge(
     phone: str,
     query: str,
@@ -911,6 +1037,71 @@ async def search_legal_knowledge(
     except Exception as exc:
         logger.error("Private vector search failed: %s", exc)
         return {"results": [], "error": str(exc)}
+
+
+async def search_sections(
+    phone: str,
+    query: str,
+    k: int = 3,
+    min_score: float = 0.3,
+    source_title: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Busca em ``agent-knowledge-sections`` (capitulos inteiros).
+
+    Fallback silencioso: se a collection nao existe ou falha, devolve
+    vazio para o caller cair no chunk-based.
+    """
+    db = _get_firestore()
+    if db is None:
+        return {"results": [], "error": "firestore_unavailable"}
+    query_vector = await embed_query(query)
+    if query_vector is None:
+        return {"results": [], "error": "embedding_failed"}
+
+    extra_filters: List[Tuple[str, str, Any]] = []
+    if source_title:
+        extra_filters.append(("source_title", "==", source_title))
+
+    try:
+        documents = await _find_nearest(
+            db,
+            SECTIONS_COLLECTION,
+            query_vector,
+            k,
+            _vector_filters(_owner_hash(phone), extra_filters or None),
+        )
+        chunks = []
+        scores = []
+        for document in documents:
+            data = document.to_dict() or {}
+            score = _score_document(document, data)
+            scores.append(score)
+            if score < min_score:
+                continue
+            chunks.append(
+                {
+                    "text": clean_portuguese(data.get("text_content", "")),
+                    "score": score,
+                    "source": data.get("source_title", ""),
+                    "section_title": data.get("section_title", ""),
+                    "section_index": data.get("section_index", 0),
+                    "total_sections": data.get("total_sections", 0),
+                    "class": data.get("class", ""),
+                    "group": data.get("group", ""),
+                    "theme": data.get("theme", ""),
+                }
+            )
+        return {
+            "results": chunks,
+            "query": mask_pii(query),
+            "owner_hash": _owner_hash(phone),
+            "min_score": min_score,
+            "top_score": round(scores[0], 3) if scores else 0.0,
+            "collection": SECTIONS_COLLECTION,
+        }
+    except Exception as exc:
+        logger.warning("sections_search_failed error=%s — falling back to chunks", exc)
+        return {"results": [], "error": str(exc), "fallback": True}
 
 
 async def search_knowledge(query: str, limit: int = 5) -> List[Dict[str, Any]]:

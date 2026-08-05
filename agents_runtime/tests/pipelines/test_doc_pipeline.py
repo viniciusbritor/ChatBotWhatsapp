@@ -905,3 +905,52 @@ class TestDeleteFlow:
                 })
         assert result["reply"] == "path drive"
         mock_d.assert_not_awaited()
+
+
+class TestFullDocumentPath:
+    @pytest.mark.asyncio
+    async def test_retrieve_full_document_orders_chunks(self):
+        """_retrieve_full_document concatena chunks na ordem do chunk_index."""
+        from pipelines.doc_pipeline import _retrieve_full_document
+
+        fake_db = MagicMock()
+
+        class FakeDoc:
+            def __init__(self, data):
+                self._data = data
+            def to_dict(self):
+                return self._data
+
+        docs = [
+            FakeDoc({"chunk_index": 1, "text_content": "segundo chunk"}),
+            FakeDoc({"chunk_index": 0, "text_content": "primeiro chunk"}),
+            FakeDoc({"chunk_index": 2, "text_content": "terceiro chunk"}),
+        ]
+        fake_coll = MagicMock()
+        fake_coll.where.return_value.where.return_value.stream.return_value = docs
+        fake_db.collection.return_value = fake_coll
+
+        with patch("core.rag._get_firestore", return_value=fake_db):
+            result = await _retrieve_full_document("5511999", "tese.pdf")
+        assert "primeiro chunk" in result
+        assert "segundo chunk" in result
+        assert result.index("primeiro") < result.index("segundo") < result.index("terceiro")
+
+    @pytest.mark.asyncio
+    async def test_retrieve_full_document_empty_returns_empty(self):
+        from pipelines.doc_pipeline import _retrieve_full_document
+        result = await _retrieve_full_document("", "doc.pdf")
+        assert result == ""
+        result = await _retrieve_full_document("5511999", "")
+        assert result == ""
+
+    @pytest.mark.asyncio
+    async def test_synthesize_full_document_fallback_when_no_key(self):
+        """Sem DEEPSEEK_API_KEY, full document usa fallback raw chunks."""
+        from pipelines.doc_pipeline import _synthesize_full_document
+        with patch.dict("os.environ", {}, clear=True):
+            result = await _synthesize_full_document(
+                "pergunta", "conteudo completo do documento que sera truncado", "tese.pdf"
+            )
+        assert isinstance(result, str)
+        assert len(result) > 0

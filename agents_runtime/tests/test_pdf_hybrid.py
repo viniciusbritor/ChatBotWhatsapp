@@ -26,6 +26,21 @@ class TestQualityCheck:
         assert _check_text_quality("") == 0.0
         assert _check_text_quality("   ") == 0.0
 
+    def test_cid_corruption_low_quality(self):
+        from core.pdf_extract import _check_text_quality
+        score = _check_text_quality("modelo de tempo continuo (cid:181) da funcao G(S,t) = ln(S) (cid:182)")
+        assert score < 0.95
+
+    def test_no_spaces_low_quality(self):
+        from core.pdf_extract import _check_text_quality
+        score = _check_text_quality("Nocontextodomercadofinanceirodeaçõeseopçõesestadissertação")
+        assert score < 0.95
+
+    def test_normal_text_with_spaces_high_quality(self):
+        from core.pdf_extract import _check_text_quality
+        score = _check_text_quality("No contexto do mercado financeiro de acoes e opcoes")
+        assert score >= 0.95
+
 
 class TestHybrid:
     @patch("core.pdf_extract._parse_pdf_ocr")

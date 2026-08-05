@@ -150,3 +150,21 @@ def test_firestore_indexes_source_title_full_dim():
                     assert f["vectorConfig"]["dimension"] == 1536
                     return
 
+
+def test_firestore_indexes_includes_sections_collection():
+    """agent-knowledge-sections precisa de vector index para o search_sections."""
+    config = _load_config()
+
+    for idx in config["indexes"]:
+        if idx.get("collectionGroup") != "agent-knowledge-sections":
+            continue
+        field_paths = [f["fieldPath"] for f in idx["fields"]]
+        assert "owner_hash" in field_paths
+        assert "vector_embedding" in field_paths
+        for f in idx["fields"]:
+            if "vectorConfig" in f:
+                assert f["vectorConfig"]["dimension"] == 1536
+                return
+
+    assert False, "Nenhum vector index para agent-knowledge-sections em firestore.indexes.json"
+

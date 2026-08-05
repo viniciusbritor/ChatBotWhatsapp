@@ -285,6 +285,33 @@ async def _run_rag(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "metadata": {"agent_id": "agent-knowledge-retriever", "count": 0, "skip_image_report": True},
             }
 
+        # Etapa 1: se documento especifico foi resolvido, usa texto completo do plain
+        resolved_source = None
+        filters = result.get("filters") or {}
+        if isinstance(filters, dict):
+            resolved_source = filters.get("source_title")
+
+        full_text = ""
+        if resolved_source:
+            full_text = await _retrieve_full_document(phone, resolved_source)
+
+        if full_text and len(full_text.strip()) >= 500:
+            resposta = await _synthesize_full_document(text, full_text, resolved_source)
+            await ack_task
+            return {
+                "reply": resposta,
+                "delay_ms": 500,
+                "presence": "composing",
+                "metadata": {
+                    "agent_id": "agent-knowledge-retriever",
+                    "count": len(chunks),
+                    "scope": result.get("scope", "private"),
+                    "mode": "full_document",
+                    "source_title": resolved_source,
+                    "skip_image_report": True,
+                },
+            }
+
         resposta = await _synthesize_rag_answer(text, chunks)
         await ack_task
         return {
@@ -307,6 +334,108 @@ async def _run_rag(payload: Dict[str, Any]) -> Dict[str, Any]:
             "presence": "composing",
             "metadata": {"agent_id": "agent-knowledge-retriever", "error": str(exc)[:200], "skip_image_report": True},
         }
+
+
+async def _retrieve_full_document(
+    phone: str,
+    source_title: str,
+    max_chars: int = 12000,
+) -> str:
+    """Busca texto completo de um documento nomeado no plain collection.
+
+    Quando o usuario nomeia um documento especifico ('a dissertacao',
+    'a tese vinicius'), o RAG por chunks perde contexto. Este path
+    busca todos os chunks do plain collection, ordena por chunk_index,
+    concatena (respeitando max_chars) e devolve o texto completo.
+    """
+    if not phone or not source_title:
+        return ""
+    try:
+        from core.rag import PRIVATE_COLLECTION, _get_firestore, _owner_hash
+        db = _get_firestore()
+        if db is None:
+            return ""
+        owner_hash = _owner_hash(phone)
+
+        def fetch() -> list:
+            return list(
+                db.collection(PRIVATE_COLLECTION + "-plain")
+                .where("owner_hash", "==", owner_hash)
+                .where("source_title", "==", source_title)
+                .stream()
+            )
+
+        import asyncio as _asyncio
+        docs = await _asyncio.to_thread(fetch)
+        if not docs:
+            return ""
+
+        ordered = []
+        for d in docs:
+            data = d.to_dict() or {}
+            ordered.append((int(data.get("chunk_index", 0)), data.get("text_content", "")))
+        ordered.sort(key=lambda x: x[0])
+
+        parts = []
+        total = 0
+        for _, text in ordered:
+            clean = text.strip()
+            if not clean:
+                continue
+            if total + len(clean) > max_chars:
+                break
+            parts.append(clean)
+            total += len(clean)
+
+        from core.text_cleaner import clean_portuguese
+        return clean_portuguese("\n\n".join(parts))
+    except Exception as exc:
+        logger.warning("full_document_retrieval_failed: %s", exc)
+        return ""
+
+
+async def _synthesize_full_document(query: str, full_text: str, source_title: str) -> str:
+    """Sintetiza resposta a partir do texto COMPLETO do documento.
+
+    Diferente do chunk-based, o LLM recebe ate 12000 chars do documento
+    inteiro e pode responder com contexto real, nao fragmentos.
+    """
+    from langchain_openai import ChatOpenAI
+
+    api_key = (os.getenv("DEEPSEEK_API_KEY", "") or "").strip()
+    if not api_key:
+        return _fallback_raw_chunks([{"source": source_title, "text": full_text[:1500]}])
+
+    base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1").strip()
+
+    user_prompt = (
+        f"Pergunta: {query}\n\n"
+        f"Conteudo do documento '{source_title}':\n"
+        f"{full_text[:12000]}\n\n"
+        f"Resposta:"
+    )
+
+    try:
+        llm = ChatOpenAI(
+            model="deepseek-v4-flash",
+            api_key=api_key,
+            base_url=base_url,
+            temperature=0.3,
+            max_tokens=700,
+            timeout=30,
+            model_kwargs={"thinking": {"type": "disabled"}},
+        )
+        response = await asyncio.to_thread(llm.invoke, [
+            {"role": "system", "content": _SYNTHESIS_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ])
+        content = getattr(response, "content", str(response))
+        if isinstance(content, str) and len(content.strip()) >= 30:
+            return content.strip()
+    except Exception as exc:
+        logger.warning("full_document synthesis failed: %s", exc)
+
+    return _fallback_raw_chunks([{"source": source_title, "text": full_text[:1500]}])
 
 
 _SYNTHESIS_SYSTEM_PROMPT = (
