@@ -1,12 +1,11 @@
 # Arquitetura — ChatBotWhatsapp (Agentes Omnichannel)
 
-> Última revisão: **2026-07-31** — diagrama visual completo do caminho
-> ponta-a-ponta (WhatsApp → resposta) com Firestore plain para
-> histórico de chat, Firestore Vector para documentos e anexos memorizados
-> com escopo individual ou de grupo, e grafo
-> **LangGraph** para a orquestração Jennifer → Access Guardian → Manager.
-> **Regra unificada de acesso a conhecimento** (RAG vs Drive vs Chat
-> memory, com branch de grupo) documentada em §0.0.4.
+> Última revisão: **2026-08-05** — unificação de vector stores em `knowledge-database`.
+> Chunking com hierarquia jurídica brasileira (Art., §, Capítulo, Seção, Lei).
+> Retrieval com expansão de contexto vizinho (`search_with_context`).
+> 2 collections core: `knowledge-database` (vector user+grupo) + `message-history` (chat).
+> Regra unificada de acesso a conhecimento (RAG vs Drive vs Chat memory)
+> documentada em §0.0.4.
 > Ver `docs/DIARIO_BORDO.md` para o histórico completo do dia.
 
 ## 0. Diagrama visual (ponta a ponta)
@@ -368,15 +367,15 @@ coherence-ominichannel-fs
 ├── tools/
 ├── config/
 ├── whatsapp_accounts/{id}/      # 1 doc por instancia Evolution
-├── usuarios/{phone}/            # OAuth Google do proprietario
+├── usuarios/{phone}/            # OAuth Google + identidade do proprietario
 ├── apelidos_custom/{owner_hash}
-├── audit/                        # 5 anos de retencao
+├── audit/                        # 5 anos de retencao (LGPD Art. 37)
 ├── message-processing/{id}/      # ledger Pub/Sub (TTL 7 dias)
 ├── message-history/{id}/         # historico de chat (FIRESTORE PLAIN)
-└── *-knowledge-v2/              # Firestore Vector para docs e anexos memorizados
-    ├── agent-knowledge-v2/      # documentos individuais e anexos privados
-    ├── collective-knowledge-v2/ # memória compartilhada de grupos
-    └── public-knowledge-v2/     # base pública
+├── knowledge-database/           # Firestore Vector unificado (1536d)
+│   ├── scope="private" + owner_hash  → conhecimento individual
+│   └── scope="group"   + group_hash  → conhecimento de grupo WhatsApp
+└── pending-actions/              # confirmacoes pendentes (TTL 300s)
 ```
 
 ### 0.3. Inventário de Agentes (18 agentes + 2 resolvers)
@@ -501,16 +500,16 @@ em `agents_runtime/docs/` foram removidas em 22/07/2026.
   `chatbotwhatsapp-dlq`).
 - **Persistência**: Firestore (collections canônicas acima) + GCS para
   arquivos-fonte da base de conhecimento.
-- **Embeddings**: OpenAI `text-embedding-3-small` (1536d), coleção
-  `*-v2`.
-- **Orquestração**: LangGraph `StateGraph` (Fase H, 23/07/2026).
-  Jennifer → `access_guardian` → manager → reply.
-- **LLM**: cascata `MiniMax-M2.7-highspeed` (primário) →
-  `gemini-2.5-flash` (fallback). Regra atualizada em 23/07/2026
-  (GUARDRAILS.md §1).
+- **Embeddings**: OpenAI `text-embedding-3-small` (1536d), collection
+  `knowledge-database`.
+- **Orquestração**: dispatch procedural em `orchestrator.py` (flat,
+  pipeline-based). Jennifer → `access_guardian` → manager → reply.
+- **LLM**: DeepSeek V4 Flash (único provedor desde Fase N).
 - **STT**: Whisper local (`faster-whisper`, `base/int8`). Fallback
   controlado para Gemini 2.5 Flash apenas em falha técnica do Whisper
   **e** com consentimento explícito.
+- **Chunking**: `_chunk_text_semantic()` com detecção de hierarquia
+  jurídica brasileira — Lei, Título, Capítulo, Seção, Art., §, Inciso.
 - **TTS / tick azul**: `markMessagesAsRead` (Evolution v2) automático
   em cada webhook válido.
 - **Segredos**: Google Secret Manager, projeto
