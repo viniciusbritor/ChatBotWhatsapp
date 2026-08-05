@@ -106,7 +106,7 @@ steps:
         URL="https://agents-runtime-test-c5nbfc5meq-uc.a.run.app/health"
         echo "Smoke-testing $URL ..."
         for i in $(seq 1 6); do
-          STATUS=$(curl.exe -s -o /dev/null -w '%{http_code}' --max-time 10 "$URL" || echo "000")
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$URL" || echo "000")
           if [ "$STATUS" = "200" ]; then
             echo "Smoke test PASSED (HTTP $STATUS)"
             exit 0
