@@ -52,9 +52,13 @@ async def reindex_private(phone: str, dry_run: bool = False) -> dict:
         logger.info("no_documents_found")
         return {"status": "ok", "reindexed": 0, "chunks": 0}
 
-    total_chunks = 0
-    reindexed_docs = 0
-    skipped_errors = 0
+    import hashlib
+    import time
+    from google.cloud.firestore_v1.vector import Vector
+
+    all_chunks = []
+    all_payloads = []
+    old_doc_ids = []
 
     for doc in docs:
         data = doc.to_dict() or {}
@@ -72,29 +76,8 @@ async def reindex_private(phone: str, dry_run: bool = False) -> dict:
             source_title, len(chunks), len(original_text),
         )
 
-        if dry_run:
-            total_chunks += len(chunks)
-            reindexed_docs += 1
-            continue
-
-        vectors = await embed_documents(chunks)
-        if vectors is None or len(vectors) != len(chunks):
-            logger.error("embed_failed source=%s chunks=%d", source_title, len(chunks))
-            skipped_errors += 1
-            continue
-
-        try:
-            db.collection(PRIVATE_COLLECTION).document(doc.id).delete()
-        except Exception as exc:
-            logger.warning("delete_failed doc_id=%s exc=%s", doc.id, exc)
-
-        import hashlib
-        import time
-        from core.rag import _vector_filters
-        from google.cloud.firestore_v1.vector import Vector
-
-        now = time.time()
-        for i, (chunk, vector) in enumerate(zip(chunks, vectors)):
+        all_chunks.extend(chunks)
+        for i, chunk in enumerate(chunks):
             chunk_id = hashlib.md5(
                 f"{doc.id}:{i}:{chunk[:50]}".encode("utf-8")
             ).hexdigest()[:16]
@@ -112,28 +95,81 @@ async def reindex_private(phone: str, dry_run: bool = False) -> dict:
                 "embedding_dim": 1536,
                 "schema_version": 2,
                 "created_at": data.get("created_at", ""),
-                "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now)),
             }
-            payload["embedding"] = Vector(vector)
+            all_payloads.append((chunk_id, payload))
+        old_doc_ids.append(doc.id)
 
-            try:
-                new_doc_ref = db.collection(PRIVATE_COLLECTION).document(chunk_id)
-                new_doc_ref.set(payload)
-            except Exception as exc:
-                logger.error("write_failed chunk_id=%s exc=%s", chunk_id, exc)
-                skipped_errors += 1
-                continue
+    logger.info(
+        "collected %d chunks from %d sources for batch embedding",
+        len(all_chunks), len(old_doc_ids),
+    )
 
-            total_chunks += 1
+    if dry_run:
+        return {
+            "status": "ok",
+            "reindexed": len(old_doc_ids),
+            "chunks": len(all_chunks),
+            "errors": 0,
+            "dry_run": True,
+        }
 
-        reindexed_docs += 1
+    if not all_chunks:
+        return {"status": "ok", "reindexed": 0, "chunks": 0}
+
+    batch_size = 10
+    all_vectors = []
+    for batch_start in range(0, len(all_chunks), batch_size):
+        batch = all_chunks[batch_start : batch_start + batch_size]
+        logger.info(
+            "embedding batch %d-%d/%d",
+            batch_start, batch_start + len(batch), len(all_chunks),
+        )
+        vectors = await embed_documents(batch)
+        if vectors is None:
+            logger.error("embed_batch_failed offset=%d", batch_start)
+            return {
+                "status": "error",
+                "reason": "embed_batch_failed",
+                "offset": batch_start,
+                "reindexed": 0,
+                "chunks": 0,
+            }
+        if len(vectors) != len(batch):
+            logger.error(
+                "embed_batch_mismatch expected=%d got=%d offset=%d",
+                len(batch), len(vectors), batch_start,
+            )
+            return {
+                "status": "error",
+                "reason": "embed_batch_mismatch",
+                "offset": batch_start,
+                "reindexed": 0,
+                "chunks": 0,
+            }
+        all_vectors.extend(vectors)
+
+    for doc_id in old_doc_ids:
+        try:
+            db.collection(PRIVATE_COLLECTION).document(doc_id).delete()
+        except Exception as exc:
+            logger.warning("delete_failed doc_id=%s exc=%s", doc_id, exc)
+
+    now = time.time()
+    skipped_errors = 0
+    for (chunk_id, payload), vector in zip(all_payloads, all_vectors):
+        payload["vector_embedding"] = Vector(vector)
+        payload["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now))
+        try:
+            db.collection(PRIVATE_COLLECTION).document(chunk_id).set(payload)
+        except Exception as exc:
+            logger.error("write_failed chunk_id=%s exc=%s", chunk_id, exc)
+            skipped_errors += 1
 
     return {
         "status": "ok",
-        "reindexed": reindexed_docs,
-        "chunks": total_chunks,
+        "reindexed": len(old_doc_ids),
+        "chunks": len(all_payloads) - skipped_errors,
         "errors": skipped_errors,
-        "dry_run": dry_run,
     }
 
 
