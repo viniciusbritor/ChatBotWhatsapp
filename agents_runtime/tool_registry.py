@@ -11,7 +11,7 @@ import logging
 from typing import Dict, Any, Callable, Awaitable
 
 from tools import google_calendar, google_drive, google_gmail, web_search, nickname
-from tools import locomotion, youtube, group, correction
+from tools import locomotion, youtube, group, correction, chat_history
 
 logger = logging.getLogger(__name__)
 
@@ -737,6 +737,41 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
                 "k": {"type": "integer", "description": "Maximo de resultados"},
             },
             "required": ["phone", "query"],
+        },
+    },
+    "chat_history.search": {
+        "function": chat_history.search_chat_history,
+        "implementation": "chat_history",
+        "description": (
+            "Busca no historico de conversas por topico ou palavra-chave. "
+            "Use quando o usuario fizer referencia a algo ja discutido antes, "
+            "como 'voce lembra', 'falamos sobre', 'semana passada'. "
+            "Retorna trechos relevantes com data."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string", "description": "Telefone do usuario"},
+                "query": {"type": "string", "description": "Palavra-chave ou topico a buscar"},
+                "limit": {"type": "integer", "description": "Maximo de resultados (default 5)"},
+            },
+            "required": ["phone", "query"],
+        },
+    },
+    "chat_history.context": {
+        "function": chat_history.get_chat_context,
+        "implementation": "chat_history",
+        "description": (
+            "Retorna os ultimos N turnos da conversa com o usuario. "
+            "Use para recuperar o fio da conversa recente."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string", "description": "Telefone do usuario"},
+                "limit": {"type": "integer", "description": "Numero de turnos (default 10)"},
+            },
+            "required": ["phone"],
         },
     },
 }
