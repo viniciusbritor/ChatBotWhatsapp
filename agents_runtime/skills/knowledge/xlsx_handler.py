@@ -36,7 +36,7 @@ async def extract(envelope: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         for sheet in wb.worksheets:
             chunks.append(f"--- {sheet.title} ---")
             for row in sheet.iter_rows(values_only=True):
-                line = ",".join("" if v is None else str(v) for v in row)
+                line = " | ".join("" if v is None else str(v) for v in row)
                 chunks.append(line)
         text = "\n".join(chunks)
     except Exception as exc:

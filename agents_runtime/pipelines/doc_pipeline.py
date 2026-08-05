@@ -335,9 +335,10 @@ _SYNTHESIS_SYSTEM_PROMPT = (
 
 
 def _fallback_raw_chunks(chunks: list) -> str:
-    """Fallback: dump cru de chunks (comportamento legado)."""
+    """Fallback: dump cru de chunks com clean_portuguese aplicado."""
+    from core.text_cleaner import clean_portuguese
     return "\n\n".join(
-        f"[{c.get('source', '?')[:40]}] {c.get('text', '')[:300]}"
+        f"[{c.get('source', '?')[:40]}] {clean_portuguese(c.get('text', ''))[:300]}"
         for c in chunks[:3]
     )
 

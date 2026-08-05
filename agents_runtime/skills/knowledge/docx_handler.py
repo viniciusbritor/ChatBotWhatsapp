@@ -31,7 +31,13 @@ async def extract(envelope: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         from docx import Document
 
         doc = Document(io.BytesIO(raw_bytes))
-        text = "\n".join(p.text for p in doc.paragraphs if p.text)
+        parts = [p.text for p in doc.paragraphs if p.text]
+        for table in doc.tables:
+            parts.append("[TABELA]")
+            for row in table.rows:
+                cells = [c.text.strip() for c in row.cells]
+                parts.append(" | ".join(cells))
+        text = "\n".join(parts)
     except Exception as exc:
         logger.warning("docx_handler extract failed: %s", exc)
         return None

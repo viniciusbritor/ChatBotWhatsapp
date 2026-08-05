@@ -51,6 +51,7 @@ def _lazy_imports() -> None:
     from skills.knowledge import pdf_handler  # noqa: F401
     from skills.knowledge import docx_handler  # noqa: F401
     from skills.knowledge import xlsx_handler  # noqa: F401
+    from skills.knowledge import pptx_handler  # noqa: F401
     from skills.knowledge import text_handler  # noqa: F401
     from skills.knowledge import google_drive_saver  # noqa: F401
 
