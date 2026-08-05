@@ -661,3 +661,101 @@ class TestBancoSemanticoTerminology:
         result = asyncio.run(_call())
         assert "base de conhecimento (RAG)" not in result["reply"].lower()
         assert "conhecimento (rag)" not in result["reply"].lower()
+
+
+# =============================================================================
+# Fase Kd — Formatacao do conteudo retrieval (WhatsApp)
+# =============================================================================
+
+
+class TestSynthesisFormatPrompt:
+    def test_prompt_contem_negrito(self):
+        from pipelines.doc_pipeline import _SYNTHESIS_SYSTEM_PROMPT
+        assert "*negrito*" in _SYNTHESIS_SYSTEM_PROMPT
+
+    def test_prompt_contem_italico(self):
+        from pipelines.doc_pipeline import _SYNTHESIS_SYSTEM_PROMPT
+        assert "_italico_" in _SYNTHESIS_SYSTEM_PROMPT
+
+    def test_prompt_contem_bullets(self):
+        from pipelines.doc_pipeline import _SYNTHESIS_SYSTEM_PROMPT
+        assert "•" in _SYNTHESIS_SYSTEM_PROMPT
+
+    def test_prompt_contem_tabular(self):
+        from pipelines.doc_pipeline import _SYNTHESIS_SYSTEM_PROMPT
+        assert "tabular" in _SYNTHESIS_SYSTEM_PROMPT.lower()
+
+    def test_prompt_nao_limita_1_paragrafo(self):
+        from pipelines.doc_pipeline import _SYNTHESIS_SYSTEM_PROMPT
+        assert "maximo 1 paragrafo" not in _SYNTHESIS_SYSTEM_PROMPT.lower()
+
+    def test_prompt_cita_fonte_colchetes(self):
+        from pipelines.doc_pipeline import _SYNTHESIS_SYSTEM_PROMPT
+        assert "fonte entre colchetes" in _SYNTHESIS_SYSTEM_PROMPT.lower()
+
+    def test_prompt_anti_alucinacao(self):
+        from pipelines.doc_pipeline import _SYNTHESIS_SYSTEM_PROMPT
+        assert "NAO invente" in _SYNTHESIS_SYSTEM_PROMPT
+
+    def test_fallback_raw_chunks_cita_source(self):
+        from pipelines.doc_pipeline import _fallback_raw_chunks
+        result = _fallback_raw_chunks([{"source": "test.pdf", "text": "conteudo"}])
+        assert "test.pdf" in result
+
+
+# =============================================================================
+# Fase Kd — Roteamento Drive vs RAG com .pdf no query
+# =============================================================================
+
+
+class TestDisambiguatorPdfFastPath:
+    @pytest.mark.asyncio
+    async def test_pdf_sem_keyword_pede_clarify(self):
+        from pipelines.doc_pipeline import _disambiguate_rag_vs_drive
+        result = await _disambiguate_rag_vs_drive(
+            "o que diz o resumo do documento 'dissertação vinicius.pdf'"
+        )
+        assert result == "clarify"
+
+    @pytest.mark.asyncio
+    async def test_docx_sem_keyword_pede_clarify(self):
+        from pipelines.doc_pipeline import _disambiguate_rag_vs_drive
+        result = await _disambiguate_rag_vs_drive(
+            "leia o arquivo relatorio.docx"
+        )
+        assert result == "clarify"
+
+    @pytest.mark.asyncio
+    async def test_drive_keyword_prevalece_sobre_pdf(self):
+        from pipelines.doc_pipeline import _disambiguate_rag_vs_drive
+        result = await _disambiguate_rag_vs_drive(
+            "busque no drive o arquivo tese.pdf"
+        )
+        assert result == "drive"
+
+    @pytest.mark.asyncio
+    async def test_base_de_conhecimento_com_pdf_e_rag(self):
+        from pipelines.doc_pipeline import _disambiguate_rag_vs_drive
+        result = await _disambiguate_rag_vs_drive(
+            "busque na base de conhecimento o documento dissertação.pdf"
+        )
+        assert result == "rag"
+
+    @pytest.mark.asyncio
+    async def test_sem_extensao_sem_keyword_cai_no_llm(self):
+        from pipelines.doc_pipeline import _disambiguate_rag_vs_drive
+        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "fake"}):
+            from langchain_openai import ChatOpenAI
+            with patch.object(ChatOpenAI, "invoke", return_value=type("R", (), {"content": "drive"})()):
+                result = await _disambiguate_rag_vs_drive(
+                    "o que diz o resumo do documento"
+                )
+                assert result == "drive"
+
+    @pytest.mark.asyncio
+    async def test_pdf_com_rag_keyword_nao_pede_clarify(self):
+        from pipelines.doc_pipeline import _disambiguate_rag_vs_drive
+        result = await _disambiguate_rag_vs_drive(
+            "o que voce sabe sobre tese.pdf"
+        )
+        assert result == "rag"

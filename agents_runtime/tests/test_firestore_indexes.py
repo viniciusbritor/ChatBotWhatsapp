@@ -92,3 +92,61 @@ def test_firestore_indexes_includes_filename_class_combo():
         "Bug TASK B: queries com filename+class hint voltam 0 chunks."
     )
 
+
+def test_firestore_indexes_includes_source_title_full():
+    """Index cobrindo owner_hash + embedding_model + embedding_dim +
+    schema_version + source_title + vector_embedding.
+
+    Caso de uso: search_legal_knowledge com source_title filter.
+    Sem este index, queries com filename hint (ex: 'dissertação.pdf')
+    retornam 0 chunks.
+    """
+    config = _load_config()
+
+    required_fields = [
+        "owner_hash",
+        "embedding_model",
+        "embedding_dim",
+        "schema_version",
+        "source_title",
+    ]
+
+    for idx in config["indexes"]:
+        if idx.get("collectionGroup") != "agent-knowledge-v2":
+            continue
+        field_paths = [f["fieldPath"] for f in idx["fields"]]
+        if all(f in field_paths for f in required_fields):
+            assert any("vectorConfig" in f for f in idx["fields"]), (
+                "Index source_title_full precisa ser vector composite"
+            )
+            last_vector = next(
+                f for f in idx["fields"] if "vectorConfig" in f
+            )
+            assert last_vector["fieldPath"] == "vector_embedding"
+            return
+
+    assert False, (
+        f"Nenhum index agent-knowledge-v2 cobre {required_fields} + vector. "
+        "Fase Kd: queries com source_title filter voltam 0 chunks."
+    )
+
+
+def test_firestore_indexes_source_title_full_dim():
+    """Dimensao do source_title_full index = 1536."""
+    config = _load_config()
+
+    required_fields = [
+        "owner_hash", "embedding_model", "embedding_dim",
+        "schema_version", "source_title",
+    ]
+
+    for idx in config["indexes"]:
+        if idx.get("collectionGroup") != "agent-knowledge-v2":
+            continue
+        field_paths = [f["fieldPath"] for f in idx["fields"]]
+        if all(f in field_paths for f in required_fields):
+            for f in idx["fields"]:
+                if "vectorConfig" in f:
+                    assert f["vectorConfig"]["dimension"] == 1536
+                    return
+

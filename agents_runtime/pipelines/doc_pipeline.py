@@ -184,6 +184,13 @@ async def _disambiguate_rag_vs_drive(
         if kw in t:
             return "drive"
 
+    import re as _re
+    _DOC_EXT_RE = _re.compile(
+        r'\.(?:pdf|docx|xlsx|txt|md|csv)\b', _re.IGNORECASE,
+    )
+    if _DOC_EXT_RE.search(text) and not any(kw in t for kw in _DRIVE_ONLY_KEYWORDS):
+        return "clarify"
+
     try:
         from langchain_openai import ChatOpenAI
 
@@ -303,12 +310,25 @@ async def _run_rag(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 _SYNTHESIS_SYSTEM_PROMPT = (
-    "Voce e a Jennifer, assistente virtual. Use APENAS os trechos abaixo "
-    "para responder a pergunta do usuario de forma clara e direta. "
+    "Voce e a Jennifer, assistente virtual no WhatsApp. "
+    "Use APENAS os trechos abaixo para responder a pergunta do usuario. "
     "NAO invente informacao que nao esta nos trechos. "
     "Se os trechos nao contiverem a resposta, diga que nao encontrou. "
-    "Responda em portugues brasileiro, em no maximo 1 paragrafo. "
-    "Sempre cite a fonte entre colchetes."
+    "Responda em portugues brasileiro.\n\n"
+    "FORMATACAO (WhatsApp):\n"
+    "- Use *negrito* para titulos, conceitos-chave e nomes de arquivos. "
+    "Ex: *Tese Vinicius.pdf*\n"
+    "- Use _italico_ para termos tecnicos ou estrangeiros.\n"
+    "- Use bullets com • para listas. Ex:\n"
+    "  • Primeiro item\n"
+    "  • Segundo item\n"
+    "- Separe ideias diferentes com linha em branco (paragrafo).\n"
+    "- Dados numericos ou comparacoes: use formato tabular com "
+    "espacamento fixo (fonte monospace). Ex:\n"
+    "  Variavel      | Valor  | Unidade\n"
+    "  Temperatura   | 25.3   | C\n"
+    "- Limite: maximo 15 linhas no total. Seja conciso.\n"
+    "- Cite a fonte entre colchetes no inicio: [fonte.pdf]"
 )
 
 
