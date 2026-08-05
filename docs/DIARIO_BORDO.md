@@ -3613,9 +3613,46 @@ Cada pipeline deve funcionar com o maximo de componentes disponiveis. Se `_build
 
 ### Próximos passos
 
-- [ ] Reindexar docs: `python -m scripts.reindex_rag --phone <phone>`
-- [ ] Validar retrieval com "quem escreveu tese vinicius" pós-reindex
+- [x] Reindexar docs: `python -m scripts.reindex_rag --phone 5511966830020`
+- [x] Validar retrieval com "quem escreveu tese vinicius" pós-reindex
 
 ---
 
+## 05/08/2026 — Fase Kc: Correção field name reindex_rag.py + batch embeddings + diagnóstico CI/CD
 
+### Problema
+
+1. **`reindex_rag.py:117`** gravava vetor no campo `embedding` em vez de
+   `vector_embedding`. O `_find_nearest()` em `core/rag.py:301` busca
+   `vector_embedding` — docs reindexados ficavam invisíveis.
+
+2. **Timeout**: 162 chamadas sequenciais à OpenAI (1 por doc) estouravam
+   o timeout de 600s do terminal. Cada call ~3s = 486s mínimo, sem
+   contar rate limiting.
+
+3. **CI/CD**: trigger `deploy-agents-runtime-test` funcionando corretamente
+   (2nd-gen, us-central1). Push no branch `test` → ~5.5min → deploy.
+   Conversa do usuário em 04/08 20:19 BRT foi ANTES do deploy da Fase Kb
+   (20:51 BRT), por isso deletion não funcionava na hora.
+
+### Mudanças
+
+| Arquivo | Mudança |
+|---------|---------|
+| `scripts/reindex_rag.py` | `payload["embedding"]` → `payload["vector_embedding"]`. Refatorado para batch: coleta todos chunks → embed em lotes de 10 (paralelo 4x) → delete old docs → write new. Sem estado parcial. |
+| `docs/DIARIO_BORDO.md` | Este registro |
+
+### Resultados
+
+- Reindex: 162 chunks, 0 erros, `vector_embedding` confirmado no Firestore
+- Retrieval: 5 resultados para "quem escreveu tese vinicius", scores 0.29-0.31
+- Scores acima do ADAPTIVE_FLOOR=0.3 (0.306 > 0.3), Jennifer consegue ver
+- Score abaixo de `RAG_RETRIEVE_MIN_SCORE=0.7` mas adaptive floor garante entrega
+
+### Pendências
+
+- [ ] Validar deletion via WhatsApp (Jennifer) — testar "apague Codigo-do-consumidor-FINAL.pdf"
+- [ ] Melhorar source_title hints no `knowledge_retriever` para queries como "quem escreveu tese vinicius" priorizarem docs com "tese" no título
+- [ ] Considerar adicionar "exclua", "excluir", "limpe", "limpar" aos `_DELETE_MARKERS`
+
+---
