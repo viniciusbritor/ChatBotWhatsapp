@@ -282,4 +282,73 @@ def parse_pdf_robust(
     return text
 
 
-__all__ = ["parse_pdf_robust"]
+_QUALITY_BAD_CHARS = (
+    "\ufb00\ufb01\ufb02\ufb03\ufb04"
+    "\u00b8\u02dc\u02c6\u00b4"           # spacing diacritics (Sk)
+    "\u0300\u0301\u0302\u0303\u0327"     # combining marks (Mn)
+)
+
+
+def _check_text_quality(text: str) -> float:
+    """Ratio 0..1: 0.98+ = texto limpo. <0.95 = precisa OCR."""
+    if not text or not text.strip():
+        return 0.0
+    bad = sum(1 for c in text if c in _QUALITY_BAD_CHARS)
+    return max(0.0, 1.0 - (bad / len(text)))
+
+
+def _parse_pdf_ocr(raw: bytes, dpi: int = 150) -> str:
+    """OCR fallback: renderiza PDF como imagem e extrai texto via Tesseract."""
+    try:
+        from pdf2image import convert_from_bytes
+        import pytesseract
+    except Exception as exc:
+        logger.warning("ocr_deps_missing: %s", exc)
+        return ""
+    try:
+        images = convert_from_bytes(raw, dpi=dpi)
+        parts = []
+        for img in images:
+            try:
+                txt = pytesseract.image_to_string(img, lang="por")
+            except Exception as exc:
+                logger.warning("ocr_page_failed: %s", exc)
+                continue
+            if txt:
+                parts.append(txt)
+        return _normalize_unicode("\n".join(parts))
+    except Exception as exc:
+        logger.warning("ocr_failed: %s", exc)
+        return ""
+
+
+def parse_pdf_hybrid(
+    raw: bytes,
+    *,
+    quality_threshold: float = 0.95,
+    return_metadata: bool = False,
+) -> Any:
+    """Tenta parse_pdf_robust; se qualidade < threshold, fallback para OCR.
+
+    Mantém o contrato de retorno: str ou (text, metadata).
+    """
+    text = parse_pdf_robust(raw, return_metadata=False)
+    if _check_text_quality(text) >= quality_threshold:
+        if return_metadata:
+            return text, {"parser": "native", "quality": _check_text_quality(text)}
+        return text
+    logger.info(
+        "pdf_hybrid low_quality=%.3f — falling back to OCR",
+        _check_text_quality(text),
+    )
+    ocr_text = _parse_pdf_ocr(raw)
+    if return_metadata:
+        return ocr_text, {
+            "parser": "ocr",
+            "quality": _check_text_quality(ocr_text),
+            "native_quality": _check_text_quality(text),
+        }
+    return ocr_text
+
+
+__all__ = ["parse_pdf_robust", "parse_pdf_hybrid", "_check_text_quality", "_parse_pdf_ocr"]

@@ -6,6 +6,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     ffmpeg \
     tzdata \
+    tesseract-ocr \
+    tesseract-ocr-por \
+    poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
