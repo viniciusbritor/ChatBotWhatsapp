@@ -641,6 +641,37 @@ async def list_message_history(phone: str, limit: int = 100) -> List[Dict[str, A
     return results
 
 
+async def get_conversation_history(phone: str, limit: int = 10) -> str:
+    if not phone or not str(phone).strip():
+        return ""
+    db = _get_firestore()
+    if db is None:
+        return ""
+    owner_hash = _owner_hash(phone)
+    try:
+
+        def fetch():
+            query_obj = (
+                db.collection(MESSAGE_HISTORY_COLLECTION)
+                .where("owner_hash", "==", owner_hash)
+                .order_by("created_at", direction="DESCENDING")
+                .limit(limit)
+            )
+            return list(query_obj.stream())
+
+        docs = await asyncio.to_thread(fetch)
+    except Exception:
+        return ""
+    msgs = []
+    for d in reversed(list(docs)):
+        data = d.to_dict() or {}
+        direction = data.get("direction", "in")
+        text = (data.get("text_masked") or "")[:80]
+        prefix = "Usuario" if direction == "in" else "Jennifer"
+        msgs.append(f"{prefix}: {text}")
+    return "\n".join(msgs)
+
+
 # ----------------------------------------------------------------------
 # Document ingestion (Firestore Vector)
 # ----------------------------------------------------------------------
