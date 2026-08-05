@@ -530,7 +530,7 @@ async def _match_source_title_dynamic(phone: str, query: str) -> Optional[str]:
         best_score = 0
         for src in sources:
             src_root = _normalize(src).rsplit(".", 1)[0]
-            src_words = set(src_root.split())
+            src_words = set(re.split(r'[\s_\-\.\+]+', src_root))
             common = query_words & src_words
             score = len(common)
             if score > best_score:
@@ -894,6 +894,11 @@ async def retrieve(
     phone = _extract_phone(envelope)
     group_jid = _extract_group_jid(envelope) if is_group else ""
     hints = await _extract_query_hints(phone, query)
+    if not hints.get("source_title") and phone:
+        sources = await _list_known_sources(phone)
+        if sources:
+            from agent_orchestration.source_title_resolver import resolve
+            hints["source_title"] = await resolve(sources, query) or hints.get("source_title")
     enriched_query = hints.get("enriched_query") or query
     started = time.monotonic()
     query_hash = hashlib.md5(

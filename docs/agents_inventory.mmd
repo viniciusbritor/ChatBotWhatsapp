@@ -1,0 +1,47 @@
+graph TD
+    subgraph AGENTS["🔥 13 Agentes Ativos"]
+        J["jennifier<br/>orchestrator"]
+        CAL["manager-calendar<br/>deep agent"]
+        DRV["manager-drive<br/>deep agent"]
+        EML["manager-email<br/>deep agent"]
+        WEB["manager-web<br/>deep agent"]
+        ACC["agent-access-guardian<br/>deterministic"]
+        RET["agent-knowledge-retriever<br/>sub-agent"]
+        CAT["agent-categorizer<br/>sub-agent"]
+        INT["agent-intimacy<br/>specialist"]
+        LRN["agent-learning<br/>specialist"]
+        MOR["agent-morality<br/>specialist"]
+        LOC["agent-locomocao<br/>specialist"]
+        YT["agent-youtube<br/>specialist"]
+    end
+
+    subgraph WORKERS["⚙️ 2 Workers (background)"]
+        ATA["ata-generator"]
+        PRO["agent-proatividade"]
+    end
+
+    subgraph INTERNAL["🔒 3 Internos"]
+        GRP["agent-group-rag"]
+        PRV["agent-privacy-guard"]
+        RES["group-resolver"]
+    end
+
+    subgraph LEGACY["📦 2 Legacy"]
+        RAG["agent-rag"]
+        GRP2["group-resolver"]
+    end
+
+    J --> CAL
+    J --> DRV
+    J --> EML
+    J --> WEB
+    J --> ACC
+    J --> RET
+    J --> CAT
+    J --> INT
+    J --> LRN
+    J --> MOR
+    J --> LOC
+    J --> YT
+    GRP --> DRV
+    RES --> DRV

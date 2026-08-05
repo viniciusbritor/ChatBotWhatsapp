@@ -406,6 +406,55 @@ em grupo. Não afeta RAG.
   `git commit` → `git push origin test` → trigger dispara build → Cloud Run
   deploy. Builds manuais fora da esteira quebram rastreabilidade, reprodutibilidade
   e auditoria. Violação registrada em 25/07/2026 (builds `97a5128d` e `ef2640bb`).
+
+### §10.1 — Escape de `$` em scripts bash no cloudbuild YAML (ANTI-QUEBRA DA ESTEIRA)
+
+**Regra**: Em Cloud Build **2ª geração**, todo `$` dentro de scripts bash
+em `cloudbuild*.yaml` que NÃO for uma substituição do Cloud Build
+(`$PROJECT_ID`, `$BUILD_ID`, `$SHORT_SHA`, `$_DEPLOYED_AT`, `$COMMIT_SHA`,
+`$REF_NAME`, `$REPO_NAME`, `$REVISION_ID`, `$TRIGGER_NAME`) DEVE ser escapado
+com `$$`.
+
+**Causa do incidente 05/08/2026**: Bash script inline em step `smoke-test`
+usava `$(curl ...)`, `$STATUS`, `${http_code}` sem escape. O Cloud Build
+2nd-gen tentou resolver essas expressões como substituições de build
+durante o parse do YAML (ANTES do fetch do source code). Como `seq`,
+`curl`, `http_code` não são substituições válidas, o parse falhou
+silenciosamente. Resultado: 5 builds FAILURE consecutivos sem
+`SHORT_SHA` nem `TRIGGER_NAME` — builds-fantasma que quebram
+rastreabilidade e bloqueiam deploy.
+
+**Exemplo CORRETO**:
+```yaml
+- name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+  entrypoint: "bash"
+  args:
+    - "-c"
+    - |
+      echo "Deploying $$SHORT_SHA to $$URL"
+      STATUS=$$(curl -s -w '%{http_code}' "$$URL")
+```
+
+**Exemplo INCORRETO**:
+```yaml
+- name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+  entrypoint: "bash"
+  args:
+    - "-c"
+    - |
+      STATUS=$(curl -s "$URL")     # QUEBRA A ESTEIRA!
+```
+
+**Validação automática**: O script `scripts/check_cloudbuild_dollar.py`
+valida TODOS os `cloudbuild*.yaml` do projeto e bloqueia o deploy se
+encontrar `$(` não escapado. Executado no primeiro step do
+`cloudbuild-test.yaml`.
+
+### §10.2 — Scripts complexos em arquivo `.sh` separado
+
+Para scripts bash com mais de 3 linhas, extraia para `scripts/build/*.sh`
+e chame via `bash scripts/build/meu_script.sh`. Isso evita o problema de
+escape de `$` e melhora a legibilidade.
 - **DeepAgents é o harness de produção para managers** (Fase L, 25/07/2026).
   O tool calling loop manual em `core/llm_provider.py::chat_with_tools` é
   fallback legacy. Tool executors SEMPRE usam `asyncio.wait_for(..., timeout=30s)`

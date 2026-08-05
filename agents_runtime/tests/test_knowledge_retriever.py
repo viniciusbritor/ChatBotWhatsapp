@@ -787,7 +787,23 @@ class TestSourceTitleAlias:
     async def test_static_alias_no_match(self):
         from agent_orchestration.knowledge_retriever import _match_source_title_alias
 
-        assert _match_source_title_alias("dissertacao vinicius rocha") is None
+        assert _match_source_title_alias("manual de higiene hospitalar") is None
+
+    @pytest.mark.asyncio
+    async def test_static_alias_tese(self):
+        from agent_orchestration.knowledge_retriever import _match_source_title_alias
+
+        assert _match_source_title_alias("o que diz a tese do vinicius?") == (
+            "tese vinicius.pdf"
+        )
+
+    @pytest.mark.asyncio
+    async def test_static_alias_dissertacao(self):
+        from agent_orchestration.knowledge_retriever import _match_source_title_alias
+
+        assert _match_source_title_alias("me fale sobre a dissertacao") == (
+            "dissertação vinicius.pdf"
+        )
 
 
 class TestSourceTitleDynamic:
@@ -847,16 +863,15 @@ class TestSourceTitleDynamic:
     async def test_query_hints_uses_dynamic_fallback(self):
         from agent_orchestration import knowledge_retriever
 
-        fake_sources = ["dissertacao vinicius.pdf"]
+        fake_sources = ["ata_reuniao_2024.pdf"]
         with patch.object(
             knowledge_retriever, "_list_known_sources",
             AsyncMock(return_value=fake_sources),
         ):
             hints = await knowledge_retriever._extract_query_hints(
-                "5511999", "sobre o que se trata a dissertacao vinicius?"
+                "5511999", "sobre o que se trata a ata de reuniao de 2024?"
             )
-        assert hints.get("source_title") == "dissertacao vinicius.pdf"
-        assert hints.get("class") == "academico"
+        assert hints.get("source_title") == "ata_reuniao_2024.pdf"
 
 
 class TestLLMQueryEnrichment:
