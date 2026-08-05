@@ -98,6 +98,65 @@
         {"fieldPath": "__name__", "order": "ASCENDING"},
         {"fieldPath": "vector_embedding", "vectorConfig": {"dimension": 1536, "flat": {}}}
       ]
+    },
+    {
+      "collectionGroup": "knowledge-database",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "scope", "order": "ASCENDING"},
+        {"fieldPath": "owner_hash", "order": "ASCENDING"},
+        {"fieldPath": "source_title", "order": "ASCENDING"},
+        {"fieldPath": "chunk_index", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "knowledge-database",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "scope", "order": "ASCENDING"},
+        {"fieldPath": "owner_hash", "order": "ASCENDING"},
+        {"fieldPath": "source_title", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "knowledge-database",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "scope", "order": "ASCENDING"},
+        {"fieldPath": "group_hash", "order": "ASCENDING"},
+        {"fieldPath": "embedding_model", "order": "ASCENDING"},
+        {"fieldPath": "embedding_dim", "order": "ASCENDING"},
+        {"fieldPath": "schema_version", "order": "ASCENDING"},
+        {"fieldPath": "__name__", "order": "ASCENDING"},
+        {"fieldPath": "vector_embedding", "vectorConfig": {"dimension": 1536, "flat": {}}}
+      ]
+    },
+    {
+      "collectionGroup": "knowledge-database",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "scope", "order": "ASCENDING"},
+        {"fieldPath": "owner_hash", "order": "ASCENDING"},
+        {"fieldPath": "embedding_model", "order": "ASCENDING"},
+        {"fieldPath": "embedding_dim", "order": "ASCENDING"},
+        {"fieldPath": "schema_version", "order": "ASCENDING"},
+        {"fieldPath": "__name__", "order": "ASCENDING"},
+        {"fieldPath": "vector_embedding", "vectorConfig": {"dimension": 1536, "flat": {}}}
+      ]
+    },
+    {
+      "collectionGroup": "knowledge-database",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "scope", "order": "ASCENDING"},
+        {"fieldPath": "owner_hash", "order": "ASCENDING"},
+        {"fieldPath": "embedding_model", "order": "ASCENDING"},
+        {"fieldPath": "embedding_dim", "order": "ASCENDING"},
+        {"fieldPath": "schema_version", "order": "ASCENDING"},
+        {"fieldPath": "source_title", "order": "ASCENDING"},
+        {"fieldPath": "__name__", "order": "ASCENDING"},
+        {"fieldPath": "vector_embedding", "vectorConfig": {"dimension": 1536, "flat": {}}}
+      ]
     }
   ],
   "fieldOverrides": []
