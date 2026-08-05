@@ -25,9 +25,9 @@ async def extract(envelope: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return None
     text = ""
     try:
-        from core.pdf_extract import parse_pdf_robust
+        from core.pdf_extract import parse_pdf_hybrid
 
-        text = parse_pdf_robust(raw_bytes)
+        text = parse_pdf_hybrid(raw_bytes)
     except Exception as exc:
         logger.warning("pdf_handler extract failed: %s", exc)
         return None

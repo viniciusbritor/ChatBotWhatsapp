@@ -115,6 +115,32 @@ class TestPptxHandler:
         assert result["text"] == ""
 
 
+class TestPdfHandlerHybrid:
+    @pytest.mark.asyncio
+    async def test_pdf_handler_usa_parse_pdf_hybrid(self):
+        """pdf_handler.extract DEVE usar parse_pdf_hybrid (OCR conectado)."""
+        from skills.knowledge import pdf_handler
+
+        with patch("core.pdf_extract.parse_pdf_hybrid") as mock_hybrid:
+            mock_hybrid.return_value = "texto limpo extraido"
+            with patch.object(pdf_handler, "_download_bytes", new_callable=AsyncMock, return_value=b"fake"):
+                result = await pdf_handler.extract({"extra": {}, "instance": "x"})
+        mock_hybrid.assert_called_once_with(b"fake")
+        assert result["text"] == "texto limpo extraido"
+
+    @pytest.mark.asyncio
+    async def test_pdf_handler_ocr_clean_corrupted(self):
+        """OCR deve retornar texto limpo para PDF corrompido."""
+        from skills.knowledge import pdf_handler
+
+        with patch("core.pdf_extract.parse_pdf_hybrid") as mock_hybrid:
+            mock_hybrid.return_value = "necessários para a obtenção do grau"
+            with patch.object(pdf_handler, "_download_bytes", new_callable=AsyncMock, return_value=b"fake"):
+                result = await pdf_handler.extract({"extra": {}, "instance": "x"})
+        assert "necessários" in result["text"]
+        assert "\u0301" not in result["text"]
+
+
 class TestSynthesisFallbackClean:
     def test_fallback_cleans_diacritics(self):
         from pipelines.doc_pipeline import _fallback_raw_chunks
@@ -123,3 +149,47 @@ class TestSynthesisFallbackClean:
         result = _fallback_raw_chunks(chunks)
         assert "necess\u00e1rios" in result
         assert "\u0301" not in result
+
+    def test_fallback_includes_section(self):
+        from pipelines.doc_pipeline import _fallback_raw_chunks
+
+        chunks = [{"source": "tese.pdf", "text": "conteudo do resumo", "section_title": "RESUMO"}]
+        result = _fallback_raw_chunks(chunks)
+        assert "RESUMO" in result
+
+    def test_fallback_empty_chunks(self):
+        from pipelines.doc_pipeline import _fallback_raw_chunks
+        result = _fallback_raw_chunks([])
+        assert "nao encontrei" in result.lower()
+
+
+class TestPrioritizeContentChunks:
+    def test_about_query_prioritizes_resumo_chunk(self):
+        from pipelines.doc_pipeline import _prioritize_content_chunks
+
+        chunks = [
+            {"source": "tese.pdf", "text": "Vinicius Brito Rocha ficha catalografica", "section_title": ""},
+            {"source": "tese.pdf", "text": "Este trabalho propoe utilizar informacao para estimar volatilidade", "section_title": "RESUMO"},
+        ]
+        result = _prioritize_content_chunks("sobre o que se trata a dissertacao", chunks)
+        assert result[0]["section_title"] == "RESUMO"
+
+    def test_non_about_query_keeps_order(self):
+        from pipelines.doc_pipeline import _prioritize_content_chunks
+
+        chunks = [
+            {"source": "tese.pdf", "text": "primeiro chunk", "section_title": ""},
+            {"source": "tese.pdf", "text": "segundo chunk", "section_title": "RESUMO"},
+        ]
+        result = _prioritize_content_chunks("qual o valor de volatilidade", chunks)
+        assert result == chunks
+
+    def test_introducao_chunk_boosted(self):
+        from pipelines.doc_pipeline import _prioritize_content_chunks
+
+        chunks = [
+            {"source": "tese.pdf", "text": "ficha catalografica", "section_title": ""},
+            {"source": "tese.pdf", "text": "A introducao apresenta o contexto do mercado", "section_title": "1 INTRODUCAO"},
+        ]
+        result = _prioritize_content_chunks("qual o tema da dissertacao", chunks)
+        assert "INTRODUCAO" in result[0]["section_title"]

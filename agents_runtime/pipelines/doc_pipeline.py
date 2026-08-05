@@ -333,12 +333,20 @@ _SYNTHESIS_SYSTEM_PROMPT = (
 
 
 def _fallback_raw_chunks(chunks: list) -> str:
-    """Fallback: dump cru de chunks com clean_portuguese aplicado."""
+    """Fallback: dump estruturado de chunks com clean_portuguese aplicado."""
     from core.text_cleaner import clean_portuguese
-    return "\n\n".join(
-        f"[{c.get('source', '?')[:40]}] {clean_portuguese(c.get('text', ''))[:300]}"
-        for c in chunks[:3]
-    )
+    lines = []
+    for c in chunks[:4]:
+        clean = clean_portuguese(c.get("text", "")).strip()
+        if not clean:
+            continue
+        source = c.get("source", "?")
+        section = c.get("section_title", "")
+        prefix = f"[{source[:40]}]"
+        if section:
+            prefix = f"[{source[:40]} | {section}]"
+        lines.append(f"{prefix} {clean[:350]}")
+    return "\n\n".join(lines) if lines else "Nao encontrei nada sobre isso na base de conhecimento."
 
 
 def _format_chunk_context(c: dict) -> str:
@@ -398,12 +406,49 @@ async def _call_llm_synthesis(
     return content.strip()
 
 
+_CONTENT_HINT_KEYWORDS = (
+    "resumo", "abstract", "introdu", "propoe", "propõe", "apresenta",
+    "este trabalho", "este estudo", "esta disserta", "este documento",
+    "o objetivo", "os objetivos", "metodologia", "resultados",
+    "conclui", "conclus", "tema", "trata", "aborda", "objetivo",
+    "palavras-chave", "palavras chave", "keywords",
+)
+
+
+def _prioritize_content_chunks(query: str, chunks: list) -> list:
+    """Reordena chunks priorizando conteudo substantivo para about queries.
+
+    Quando a query pergunta 'sobre o que e / qual o tema / quem e o autor',
+    chunks de resumo/introducao/abstract sao mais relevantes que a ficha
+    catalografica. Detecta pelo section_title e pelo texto do chunk.
+    """
+    from agent_orchestration.knowledge_retriever import _is_about_query
+    if not chunks or not _is_about_query(query):
+        return chunks
+
+    def score(c: dict) -> int:
+        s = 0
+        section = (c.get("section_title") or "").lower()
+        text = (c.get("text") or "").lower()
+        if any(kw in section for kw in ("resumo", "abstract", "introdu")):
+            s += 3
+        if any(kw in section for kw in ("conclus", "metodologia", "referen")):
+            s += 2
+        if any(kw in text for kw in _CONTENT_HINT_KEYWORDS):
+            s += 1
+        return s
+
+    return sorted(chunks, key=score, reverse=True)
+
+
 async def _synthesize_rag_answer(query: str, chunks: list) -> str:
     """Sintetiza resposta a partir dos chunks.
     Flash (primary) → Pro (fallback) → raw chunks (last resort).
     """
     if not chunks:
         return "Nao encontrei nada sobre isso na base de conhecimento."
+
+    chunks = _prioritize_content_chunks(query, chunks)
 
     # --- Tentativa 1: V4 Flash (thinking disabled) ---
     try:
