@@ -1327,6 +1327,21 @@ def _get_conversation_history(phone: str, limit: int = 10) -> str:
         return ""
 
 
+async def _get_context_for_prompt(phone: str, limit: int = 10) -> str:
+    try:
+        from core.rag import get_conversation_history
+
+        result = await get_conversation_history(phone, limit)
+        if result:
+            return result
+    except Exception:
+        pass
+    try:
+        return _get_conversation_history(phone, limit)
+    except Exception:
+        return ""
+
+
 async def _search_memory(phone: str, query: str, limit: int = 5) -> str:
     try:
         from core.rag import search_conversation_memory
@@ -1757,12 +1772,13 @@ async def _handle_morality(payload: dict, masked_text: str, sender_name: str,
     if agent:
         result = await _execute_agent(dict(agent), masked_text, payload, payload.get("extra", {}))
         return await _finalize_orchestration(payload, masked_text, sender_name, result, path, cache_key)
-    return {
+    result = {
         "reply": "Mensagem bloqueada por violar as politicas de respeito.",
         "delay_ms": 0,
         "presence": "composing",
         "metadata": {"agent_id": "morality-guard", "blocked": True},
     }
+    return await _finalize_orchestration(payload, masked_text, sender_name, result, path, cache_key)
 
 
 async def _handle_correction(payload: dict, masked_text: str, sender_name: str,
@@ -1773,12 +1789,13 @@ async def _handle_correction(payload: dict, masked_text: str, sender_name: str,
     if agent:
         result = await _execute_agent(dict(agent), masked_text, payload, payload.get("extra", {}))
         return await _finalize_orchestration(payload, masked_text, sender_name, result, path, cache_key)
-    return {
+    result = {
         "reply": "Obrigado pela correcao! Vou aprender com isso.",
         "delay_ms": 0,
         "presence": "composing",
         "metadata": {"agent_id": "correction-handler"},
     }
+    return await _finalize_orchestration(payload, masked_text, sender_name, result, path, cache_key)
 
 
 async def _handle_intimacy(payload: dict, masked_text: str, sender_name: str,
@@ -1798,12 +1815,13 @@ async def _handle_intimacy(payload: dict, masked_text: str, sender_name: str,
             )
         result = await _execute_agent(agent_copy, masked_text, payload, payload.get("extra", {}))
         return await _finalize_orchestration(payload, masked_text, sender_name, result, path, cache_key)
-    return {
+    result = {
         "reply": f"Oi {first_name}! Como posso te chamar?",
         "delay_ms": 0,
         "presence": "composing",
         "metadata": {"agent_id": "intimacy-handler"},
     }
+    return await _finalize_orchestration(payload, masked_text, sender_name, result, path, cache_key)
 
 
 async def _handle_web(payload: dict, masked_text: str, sender_name: str,
@@ -1870,6 +1888,9 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
     payload["first_name"] = first_name
     masked_text = mask_pii(text)
     confirmation = _short_confirmation(masked_text)
+
+    chat_context = await _get_context_for_prompt(phone, limit=10)
+    payload["chat_context"] = chat_context
 
     # ========================
     # PENDING ACTIONS (pre-routing)
@@ -2391,7 +2412,7 @@ async def _execute_agent(
 
     history = ""
     try:
-        history = _get_conversation_history(phone, limit=10) or ""
+        history = await _get_context_for_prompt(phone, limit=10) or ""
     except Exception as exc:
         logger.warning("history_fetch_failed agent_id=%s exc=%s", agent_id, exc)
 
