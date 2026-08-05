@@ -56,6 +56,7 @@ _DRIVE_ONLY_KEYWORDS = (
 _DELETE_MARKERS = (
     "retire", "retirar", "apague", "apagar", "deletar", "delete",
     "remover", "remova", "remove",
+    "exclua", "excluir", "limpe", "limpar",
 )
 
 _LIST_KEYWORDS = (

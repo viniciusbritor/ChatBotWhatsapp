@@ -487,6 +487,10 @@ _SOURCE_TITLE_ALIASES = {
     "codigo de defesa do consumidor": "Codigo-do-consumidor-FINAL.pdf",
     "defesa do consumidor": "Codigo-do-consumidor-FINAL.pdf",
     "consumidor": "Codigo-do-consumidor-FINAL.pdf",
+    "tese": "tese vinicius.pdf",
+    "dissertacao": "dissertação vinicius.pdf",
+    "tese vinicius": "tese vinicius.pdf",
+    "dissertacao vinicius": "dissertação vinicius.pdf",
 }
 
 
