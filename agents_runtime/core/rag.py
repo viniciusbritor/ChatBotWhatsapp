@@ -273,8 +273,23 @@ def _chunk_text(text: str, max_chars: int = 1200, overlap: int = 300) -> List[st
 
 _HEADING_PATTERNS = re.compile(
     r"^("
-    r"(?:CAP[ÍI]TULO|Cap[ií]tulo|SE[ÇC][ÃA]O|Se[çc][ãa]o|PARTE|Parte|ANEXO|Anexo)"
-    r"\s+[IVXLCDM\d]+[\s\.\-\u2013\u2014].*"
+    r"(?:LEI|DECRETO|MEDIDA\s+PROVIS[ÓO]RIA)\s+(?:COMPLEMENTAR\s+)?(?:N[º°]|n[º°])\s*[\d\.\,]+\b[^\n]*"
+    r"|"
+    r"(?:T[ÍI]TULO|T[ií]tulo)\s+[IVXLCDM\d]+\b[^\n]*"
+    r"|"
+    r"(?:CAP[ÍI]TULO|Cap[ií]tulo)\s+[IVXLCDM\d]+[^\n]*"
+    r"|"
+    r"(?:SE[ÇC][ÃA]O|Se[çc][ãa]o)\s+[IVXLCDM\d]+[^\n]*"
+    r"|"
+    r"(?:PARTE|Parte|ANEXO|Anexo)\s+[IVXLCDM\d]+[^\n]*"
+    r"|"
+    r"Art\.?\s*[\d]+[º°]?\b[^\n]*"
+    r"|"
+    r"§\s*[\d]+[º°]?\b[^\n]*"
+    r"|"
+    r"Par[áa]grafo\s+(?:[úu]nico|[\d]+)\b[^\n]*"
+    r"|"
+    r"^[IVXLCDM]+\s*[–\-]\s*[^\n]*"
     r"|"
     r"^\d+(?:\.\d+)*[\s\.\-\u2013\u2014]+\s*[A-Z\u00C0-\u00DC][A-Z\u00C0-\u00DC\s]{3,}"
     r"|"
@@ -285,6 +300,69 @@ _HEADING_PATTERNS = re.compile(
     r")",
     re.MULTILINE,
 )
+
+
+def _extract_legal_hierarchy(section_title: str) -> Dict[str, str]:
+    hierarchy: Dict[str, str] = {}
+    t = section_title.strip()
+
+    m = re.match(r"(LEI|DECRETO|MEDIDA\s+PROVIS[ÓO]RIA).*(?:N[º°]?|n[º°]?)\s*([\d\.\,]+)", t, re.IGNORECASE)
+    if m:
+        hierarchy["level"] = "lei"
+        hierarchy["number"] = m.group(2)
+        hierarchy["title"] = t
+        return hierarchy
+
+    m = re.match(r"(T[ÍI]TULO|T[ií]tulo)\s+([IVXLCDM\d]+)", t)
+    if m:
+        hierarchy["level"] = "titulo"
+        hierarchy["number"] = m.group(2)
+        hierarchy["title"] = t
+        return hierarchy
+
+    m = re.match(r"(CAP[ÍI]TULO|Cap[ií]tulo)\s+([IVXLCDM\d]+)", t)
+    if m:
+        hierarchy["level"] = "capitulo"
+        hierarchy["number"] = m.group(2)
+        hierarchy["title"] = t
+        return hierarchy
+
+    m = re.match(r"(SE[ÇC][ÃA]O|Se[çc][ãa]o)\s+([IVXLCDM\d]+)", t)
+    if m:
+        hierarchy["level"] = "secao"
+        hierarchy["number"] = m.group(2)
+        hierarchy["title"] = t
+        return hierarchy
+
+    m = re.match(r"Art\.?\s*([\d]+)[º°]?", t)
+    if m:
+        hierarchy["level"] = "artigo"
+        hierarchy["number"] = m.group(1)
+        hierarchy["title"] = t
+        return hierarchy
+
+    m = re.match(r"(§)\s*([\d]+)[º°]?", t)
+    if m:
+        hierarchy["level"] = "paragrafo"
+        hierarchy["number"] = m.group(2)
+        hierarchy["title"] = t
+        return hierarchy
+
+    m = re.match(r"Par[áa]grafo\s+(?:[úu]nico|([\d]+))", t, re.IGNORECASE)
+    if m:
+        hierarchy["level"] = "paragrafo"
+        hierarchy["number"] = m.group(1) or "unico"
+        hierarchy["title"] = t
+        return hierarchy
+
+    m = re.match(r"([IVXLCDM]+)\s*[–\-]", t)
+    if m:
+        hierarchy["level"] = "inciso"
+        hierarchy["number"] = m.group(1)
+        hierarchy["title"] = t
+        return hierarchy
+
+    return {"level": "texto", "number": "", "title": section_title}
 
 
 def _detect_sections(text: str) -> List[tuple[str, str]]:
@@ -1145,6 +1223,78 @@ async def search_sections(
     except Exception as exc:
         logger.warning("sections_search_failed error=%s — falling back to chunks", exc)
         return {"results": [], "error": str(exc), "fallback": True}
+
+
+async def search_with_context(
+    phone: str,
+    query: str,
+    k: int = 5,
+    expand: int = 2,
+    min_score: float = 0.5,
+    source_title: Optional[str] = None,
+) -> Dict[str, Any]:
+    base = await search_legal_knowledge(
+        phone=phone, query=query, k=k,
+        min_score=min_score, source_title=source_title,
+    )
+    results = base.get("results", []) if isinstance(base, dict) else []
+    if not results:
+        return base
+
+    db = _get_firestore()
+    if db is None:
+        return base
+
+    owner_hash = _owner_hash(phone)
+    enriched = []
+    for r in results:
+        ctx_before = ""
+        ctx_after = ""
+        src = r.get("source", "")
+        idx = r.get("chunk_index", 0) if isinstance(r, dict) else 0
+
+        if src and isinstance(idx, int):
+            try:
+                for delta in range(expand, 0, -1):
+                    def fetch_before():
+                        return list(
+                            db.collection(KNOWLEDGE_DATABASE)
+                            .where("scope", "==", "private")
+                            .where("owner_hash", "==", owner_hash)
+                            .where("source_title", "==", src)
+                            .where("chunk_index", "==", idx - delta)
+                            .limit(1)
+                            .stream()
+                        )
+                    before = await asyncio.to_thread(fetch_before)
+                    if before:
+                        d = before[0].to_dict() or {}
+                        ctx_before = d.get("text_content", "")[:500] + "\n" + ctx_before
+            except Exception:
+                pass
+
+            try:
+                for delta in range(1, expand + 1):
+                    def fetch_after():
+                        return list(
+                            db.collection(KNOWLEDGE_DATABASE)
+                            .where("scope", "==", "private")
+                            .where("owner_hash", "==", owner_hash)
+                            .where("source_title", "==", src)
+                            .where("chunk_index", "==", idx + delta)
+                            .limit(1)
+                            .stream()
+                        )
+                    after = await asyncio.to_thread(fetch_after)
+                    if after:
+                        d = after[0].to_dict() or {}
+                        ctx_after += d.get("text_content", "")[:500] + "\n"
+            except Exception:
+                pass
+
+        enriched.append({**r, "context_before": ctx_before.strip(), "context_after": ctx_after.strip()})
+
+    return {**base, "results": enriched, "mode": "context_expanded", "expand": expand}
 
 
 async def search_knowledge(query: str, limit: int = 5) -> List[Dict[str, Any]]:
