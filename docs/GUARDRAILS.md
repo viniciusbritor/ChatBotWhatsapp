@@ -1,7 +1,134 @@
 # Guardrails e Regras Inegociáveis — ChatBotWhatsapp
 
 > Regras DURAS que todos os agentes IA e humanos devem obedecer neste projeto.
-> Última atualização: **2026-07-31**.
+> Última atualização: **2026-08-06** — Harness CI/CD + Arquitetura de Agentes + Retrieval.
+
+## 0. Harness de CI/CD (Regra Zero — violar = bloqueio)
+
+### §0.0 — Gate de Qualidade por Fase
+
+```powershell
+# Antes de QUALQUER commit em branch:
+cd agents_runtime
+python -m pytest -q tests/ `
+  --ignore=tests/test_audio_transcribe.py `
+  --ignore=tests/test_google_*.py `
+  --ignore=tests/test_oauth_per_user.py `
+  --ignore=tests/test_llm_provider.py `
+  --ignore=tests/test_pubsub.py `
+  --ignore=tests/test_webhook*.py `
+  --ignore=tests/test_evolution_webhook.py `
+  --ignore=tests/load/ `
+  --ignore=tests/integration/ `
+  -rs
+
+# DEVE retornar: 0 failed, 0 errors
+# Warnings permitidos apenas: Firestore positional, Google auth, extra_body cache
+# NUNCA passar de fase com falhas ou warnings novos
+```
+
+### §0.1 — Workflow de Branch
+
+```
+git checkout test
+git checkout -b feat/<nome>
+# implementar fase → pytest tests/ completo → 0 fails
+git add <arquivos>
+git commit -m "tipo(escopo): descricao"
+# repetir até todas fases prontas
+git checkout test
+git merge feat/<nome> --no-edit
+git push origin test
+git branch -d feat/<nome>
+```
+
+**NUNCA:** merge sem suite completa passando. Push com testes quebrados localmente. Continuar build após failures no Cloud Build.
+
+### §0.2 — DeepSeek Cache (obrigatório)
+
+Todo `ChatOpenAI(...)` DEVE incluir:
+```python
+model_kwargs={"extra_body": {"cache_mode": "default"}}
+```
+Se já tem `model_kwargs`, merge: `{**existing, "extra_body": {"cache_mode": "default"}}`.
+
+---
+
+## 0.5. Arquitetura de Coleções (Vector + Plain)
+
+### §0.5.0 — Schema Final
+
+| # | Collection | Tipo | Escopo | Isolamento |
+|---|---|---|---|---|
+| 1 | `knowledge-database` | Vector (1536d) | User + grupo | `scope` + hash |
+| 2 | `message-history` | Plain | Chat history | `owner_hash` |
+
+### §0.5.1 — Schema do knowledge-database
+
+Todo documento DEVE ter:
+- `scope`: `"private"` ou `"group"`
+- `owner_hash` (private) ou `group_hash` (group)
+- `text_content`, `vector_embedding`, `source_title`, `section_title`
+- `document_title` — título real extraído na ingestão (via `_extract_document_title`)
+- `hierarchy` — `_extract_legal_hierarchy()` para textos jurídicos
+- `class`, `group`, `theme`, `chunk_index`, `chunk_type`
+
+**NUNCA:** criar nova collection vector sem aprovação explícita. Armazenar chat history com embedding (custo proibitivo). Duplicar texto em `-plain` ou `-sections`.
+
+### §0.5.2 — Collections PROIBIDAS (deletadas)
+
+- `agent-knowledge-v2`, `agent-knowledge-v2-plain`, `agent-knowledge-sections`
+- `group-knowledge-v2`, `public-knowledge-v2`, `collective-knowledge-v2`
+- `conversation-memory-v2`, `contatos/*/historico`, `ata_runs`
+
+---
+
+## 0.6. Arquitetura de Agentes
+
+### §0.6.0 — Classificador LLM (obrigatório)
+
+Toda query passa por `_classify_intent_llm()` ANTES de qualquer pipeline:
+- Modelo: DeepSeek Flash, temperature=0, max_tokens=5
+- Cache via `message_id` (já existe em `orchestrate()`)
+- Retorna: `juridicas | editais | academica | anotacoes | ferramentas | conversa`
+
+**NUNCA:** usar keyword detection como rota primária. Keyword = apenas sub-detect para `ferramentas`.
+
+### §0.6.1 — Agentes Especialistas (Firestore)
+
+| Agent ID | Domínio | Tools | System Prompt |
+|---|---|---|---|
+| `juridicas-agent` | Leis, códigos, normas | `knowledge.retrieve`, `chat_history.search` | Editável via Portal |
+| `editais-agent` | Licitações, concursos | `knowledge.retrieve`, `chat_history.search` | Editável via Portal |
+| `academica-agent` | Teses, papers | `knowledge.retrieve`, `chat_history.search` | Editável via Portal |
+| `anotacoes-agent` | Notas, lembretes | `knowledge.retrieve`, `chat_history.search` | Editável via Portal |
+
+**NUNCA:** hardcodar system prompt de agente em código. Agentes DEVEM ser editáveis via Portal (`/admin/dashboard` → aba Agentes).
+
+### §0.6.2 — Agentes Desabilitados
+
+- `agent-rag` → substituído pelos 4 especialistas
+- `agent-knowledge-retriever` → redundante
+
+---
+
+## 0.7. Retrieval (RAG)
+
+### §0.7.0 — Regras de Retrieval
+
+1. `min_score` default = 0.4 (ajustável via env `RAG_RETRIEVE_MIN_SCORE`)
+2. `ADAPTIVE_FLOOR` = 0.3 (ajustável via env `RAG_ADAPTIVE_FLOOR`)
+3. Chunking: `min_chars=50`, `max_chars=2000`, overlap via `_chunk_text_semantic`
+4. Full document fallback: ativa quando ≤2 docs na base E retrieval vazio
+5. `_retrieve_full_document()` lê de `knowledge-database` (NÃO de `-plain`)
+
+### §0.7.1 — Guardrails de Ingestão
+
+1. `_extract_document_title()` OBRIGATÓRIO em toda ingestão
+2. Hierarquia jurídica (`_extract_legal_hierarchy()`) armazenada como `hierarchy` no chunk
+3. `source_title` nunca vazio — fallback para filename sem extensão
+4. Texto de imagem NUNCA armazenado como bytes (extrair texto, descartar imagem)
+5. Formatos suportados: PDF, DOCX, XLSX, TXT, IMG (texto extraído)
 
 ## 1. Segurança
 
