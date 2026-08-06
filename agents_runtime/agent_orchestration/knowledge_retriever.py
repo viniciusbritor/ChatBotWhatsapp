@@ -277,6 +277,21 @@ def _is_user_member(db, group_jid: str, phone: str) -> bool:
     return False
 
 
+def _extract_title_fallback(data: Dict[str, Any]) -> str:
+    sec = (data.get("section_title") or "").strip()
+    if sec and len(sec) > 10:
+        if not re.search(
+            r"senado federal|mesa diretora|bi[êe]nio|coordena[çc][ãa]o de edi[çc][õo]es|"
+            r"secretaria de editora[çc][ãa]o|ficha catalogr[áa]fica|sum[áa]rio|"
+            r"presidente|vice-presidente",
+            sec, re.IGNORECASE,
+        ):
+            return sec[:80]
+    src = data.get("source_title") or ""
+    base = src.rsplit(".", 1)[0].replace("_", " ").strip()
+    return base[:80] if base else src[:80]
+
+
 async def _list_known_sources(phone: str, limit: int = 10) -> List[Dict[str, str]]:
     """Return distinct documentos com titulo real e source_title.
     
@@ -295,7 +310,7 @@ async def _list_known_sources(phone: str, limit: int = 10) -> List[Dict[str, str
             return []
 
         owner_hash = _owner_hash(phone)
-        grouped: Dict[str, List[str]] = {}
+        grouped: Dict[str, str] = {}
 
         def fetch():
             return list(
@@ -311,37 +326,15 @@ async def _list_known_sources(phone: str, limit: int = 10) -> List[Dict[str, str
         for doc in docs:
             data = doc.to_dict() or {}
             src = data.get("source_title") or ""
-            sec = (data.get("section_title") or "").strip()
-            if src:
-                if src not in grouped:
-                    grouped[src] = []
-                if sec:
-                    grouped[src].append(sec)
-
-        _FRONT_MATTER = re.compile(
-            r"senado federal|mesa diretora|bi[êe]nio|coordena[çc][ãa]o de edi[çc][õo]es|"
-            r"secretaria de editora[çc][ãa]o|ficha catalogr[áa]fica|sum[áa]rio|"
-            r"presidente|vice-presidente",
-            re.IGNORECASE,
-        )
-
-        def _extract_title(source: str, sections: List[str]) -> str:
-            data_title = None
-            for sec in sections:
-                if data_title is None and not _FRONT_MATTER.search(sec) and len(sec) > 10:
-                    data_title = sec
-            if data_title:
-                return data_title[:80]
-            base = source.rsplit(".", 1)[0]
-            base = base.replace("_", " ").strip()
-            return base[:80] if base else source[:80]
+            doc_title = data.get("document_title") or ""
+            if src and src not in grouped:
+                grouped[src] = doc_title if doc_title else _extract_title_fallback(data)
 
         results: List[Dict[str, str]] = []
         for source_title in grouped:
-            document_title = _extract_title(source_title, grouped[source_title])
             results.append({
                 "source_title": source_title,
-                "document_title": document_title,
+                "document_title": grouped[source_title] or source_title,
             })
             if len(results) >= limit:
                 break
