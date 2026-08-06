@@ -492,7 +492,7 @@ def _fallback_raw_chunks(chunks: list) -> str:
 def _format_chunk_context(c: dict) -> str:
     section = c.get("section_title", "")
     source = c.get("source", "?")
-    text = c.get("text", "")[:800]
+    text = c.get("text", "")[:1500]
     if section:
         return f"[Fonte: {source} | Seção: {section}] {text}"
     return f"[Fonte: {source}] {text}"

@@ -428,7 +428,10 @@ def _chunk_text_semantic(
                 else:
                     if len(current) >= min_chars:
                         all_chunks.append((section_title or "", "sentence_group", current))
-                        current = sent
+                        words = current.split()
+                        overlap_words = min(len(words), overlap_chars // 5)
+                        current = " ".join(words[-overlap_words:]) if overlap_words else ""
+                        current = (current + " " + sent).strip() if current else sent
                     else:
                         current = (current + " " + sent).strip()
 
@@ -866,6 +869,7 @@ async def index_private_document(
                 "chunk_index": index,
                 "chunk_type": chunk_types[index],
                 "section_title": section_titles[index],
+                "hierarchy": _extract_legal_hierarchy(section_titles[index]),
                 "language": "pt-BR",
                 "created_at": now,
                 "schema_version": SCHEMA_VERSION,
@@ -909,6 +913,9 @@ async def index_private_document(
                 "group": group_value,
                 "theme": theme_value,
                 "chunk_index": index,
+                "chunk_type": chunk_types[index],
+                "section_title": section_titles[index],
+                "hierarchy": _extract_legal_hierarchy(section_titles[index]),
                 "language": "pt-BR",
                 "created_at": now,
                 "schema_version": SCHEMA_VERSION,
