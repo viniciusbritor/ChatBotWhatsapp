@@ -1867,15 +1867,12 @@ _CLASSIFIER_PROMPT = (
 
 
 async def _classify_intent_llm(text: str) -> str:
-    api_key = os.getenv("DEEPSEEK_API_KEY", "")
-    if not api_key:
-        return "conversa"
-
     from langchain_openai import ChatOpenAI
+
     base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
     llm = ChatOpenAI(
         model="deepseek-v4-flash",
-        api_key=api_key,
+        api_key=os.getenv("DEEPSEEK_API_KEY", ""),
         base_url=base_url,
         temperature=0,
         max_tokens=5,

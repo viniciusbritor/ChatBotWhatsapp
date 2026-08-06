@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
@@ -383,9 +384,15 @@ async def _retrieve_full_document(
 
         parts = []
         total = 0
+        _skip_re = re.compile(
+            r"senado federal|mesa diretora|bi[êe]nio|coordena[çc][ãa]o\s+de\s+edi[çc]|"
+            r"secretaria de editora|ficha catalogr[áa]fica|suplentes?\s+de\s+secret[áa]rio|"
+            r"quarto-secret[áa]rio|presidente|vice-presidente|sum[áa]rio",
+            re.IGNORECASE,
+        )
         for _, text in ordered:
             clean = text.strip()
-            if not clean:
+            if not clean or _skip_re.search(clean):
                 continue
             if total + len(clean) > max_chars:
                 break
