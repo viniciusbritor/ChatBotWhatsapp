@@ -248,7 +248,7 @@ async def embed_documents(texts: List[str]) -> Optional[List[List[float]]]:
         )
     if none_count == len(texts):
         return None
-    return [vector for vector in vectors if vector is not None]
+    return vectors
 
 
 def _chunk_text(text: str, max_chars: int = 1200, overlap: int = 300) -> List[str]:
@@ -396,7 +396,7 @@ def _detect_sections(text: str) -> List[tuple[str, str]]:
 def _chunk_text_semantic(
     text: str,
     max_chars: int = 2000,
-    min_chars: int = 200,
+    min_chars: int = 50,
     overlap_chars: int = 100,
 ) -> List[tuple[str, str, str]]:
     if not text or not text.strip():

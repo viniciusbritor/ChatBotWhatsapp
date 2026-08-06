@@ -361,7 +361,7 @@ async def _retrieve_full_document(
     if not phone or not source_title:
         return ""
     try:
-        from core.rag import PRIVATE_COLLECTION, _get_firestore, _owner_hash
+        from core.rag import KNOWLEDGE_DATABASE, _get_firestore, _owner_hash
         db = _get_firestore()
         if db is None:
             return ""
@@ -369,7 +369,8 @@ async def _retrieve_full_document(
 
         def fetch() -> list:
             return list(
-                db.collection(PRIVATE_COLLECTION + "-plain")
+                db.collection(KNOWLEDGE_DATABASE)
+                .where("scope", "==", "private")
                 .where("owner_hash", "==", owner_hash)
                 .where("source_title", "==", source_title)
                 .stream()

@@ -930,22 +930,16 @@ async def admin_owners_list():
 @app.get("/admin/knowledge")
 async def admin_knowledge_documents(request: Request):
     from agent_loader import _get_firestore_client
-    from core.rag import (
-        MEMORY_COLLECTION,
-        PRIVATE_COLLECTION,
-        SHARED_COLLECTION,
-    )
+    from core.rag import KNOWLEDGE_DATABASE
 
     limit = min(int(request.query_params.get("limit", "50")), 200)
     db = _get_firestore_client()
     documents: list = []
     grouped: Dict[str, Dict[str, Any]] = {}
     if db is not None:
-        plain_pairs = (
-            (PRIVATE_COLLECTION + "-plain", PRIVATE_COLLECTION),
-            (SHARED_COLLECTION + "-plain", SHARED_COLLECTION),
-            (MEMORY_COLLECTION, MEMORY_COLLECTION),
-        )
+        plain_pairs = [
+            (KNOWLEDGE_DATABASE, KNOWLEDGE_DATABASE),
+        ]
         for plain_collection, vector_collection in plain_pairs:
             try:
                 stream = db.collection(plain_collection).limit(limit * 4).stream()
@@ -995,13 +989,9 @@ async def admin_knowledge_documents(request: Request):
 async def admin_knowledge_document_detail(source_title: str, request: Request):
     """Return all chunks for a single document, identified by source_title."""
     from agent_loader import _get_firestore_client
-    from core.rag import (
-        MEMORY_COLLECTION,
-        PRIVATE_COLLECTION,
-        SHARED_COLLECTION,
-    )
+    from core.rag import KNOWLEDGE_DATABASE
 
-    collection = request.query_params.get("collection") or PRIVATE_COLLECTION + "-plain"
+    collection = request.query_params.get("collection") or KNOWLEDGE_DATABASE
     db = _get_firestore_client()
     chunks: list = []
     metadata = {
@@ -1014,15 +1004,11 @@ async def admin_knowledge_document_detail(source_title: str, request: Request):
         "created_at": "",
         "source_url": "",
         "chunk_count": 0,
-        "vector_collection": "",
+        "vector_collection": KNOWLEDGE_DATABASE,
     }
     if db is not None:
         try:
-            plain_refs = (
-                PRIVATE_COLLECTION + "-plain",
-                SHARED_COLLECTION + "-plain",
-                MEMORY_COLLECTION,
-            )
+            plain_refs = (KNOWLEDGE_DATABASE,)
             found_any = False
             for plain_coll in plain_refs:
                 query = db.collection(plain_coll).where("source_title", "==", source_title)
