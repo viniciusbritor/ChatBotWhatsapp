@@ -68,6 +68,8 @@ MESSAGE_HISTORY_RETENTION_DAYS = int(
     os.getenv("RAG_MESSAGE_HISTORY_RETENTION_DAYS", "365")
 )
 
+ADAPTIVE_FLOOR = float(os.getenv("RAG_ADAPTIVE_FLOOR", "0.3"))
+
 # Firestore Vector — knowledge-database (documentos, nao chat turns).
 # scope="private" + owner_hash | scope="group" + group_hash
 KNOWLEDGE_DATABASE = os.getenv("RAG_KNOWLEDGE_DATABASE", "knowledge-database")
@@ -1097,7 +1099,6 @@ async def search_legal_knowledge(
             k,
             _vector_filters(_owner_hash(phone), extra_filters or None),
         )
-        ADAPTIVE_FLOOR = 0.3
         chunks = []
         scores = []
         for document in documents:

@@ -629,7 +629,7 @@ async def _extract_query_hints(phone: str, query: str) -> Dict[str, str]:
     enrichment = await _llm_enrich_query(query)
     hints["enriched_query"] = enrichment["enriched_query"]
     if not hints.get("source_title") and enrichment.get("source_hint"):
-        hints["llm_source_hint"] = enrichment["source_hint"]
+        hints["source_title"] = enrichment["source_hint"]
     if not hints.get("class") and enrichment.get("class_hint"):
         hints["class"] = enrichment["class_hint"]
 
