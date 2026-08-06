@@ -272,7 +272,12 @@ async def _run_rag(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         result = await retrieve(envelope, text)
 
-        if result.get("clarification_prompt"):
+        resolved_source = None
+        filters = result.get("filters") or {}
+        if isinstance(filters, dict):
+            resolved_source = filters.get("source_title")
+
+        if result.get("clarification_prompt") and not resolved_source:
             await ack_task
             return {
                 "reply": result["clarification_prompt"],
@@ -286,7 +291,7 @@ async def _run_rag(payload: Dict[str, Any]) -> Dict[str, Any]:
             }
 
         chunks = result.get("results", [])
-        if not chunks:
+        if not chunks and not resolved_source:
             await ack_task
             return {
                 "reply": "Nao encontrei nada sobre isso na base de conhecimento.",
@@ -295,11 +300,7 @@ async def _run_rag(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "metadata": {"agent_id": "agent-knowledge-retriever", "count": 0, "skip_image_report": True},
             }
 
-        # Etapa 1: se documento especifico foi resolvido, usa texto completo do plain
-        resolved_source = None
-        filters = result.get("filters") or {}
-        if isinstance(filters, dict):
-            resolved_source = filters.get("source_title")
+        # Etapa 1: se documento especifico foi resolvido, usa texto completo
 
         full_text = ""
         if resolved_source:
