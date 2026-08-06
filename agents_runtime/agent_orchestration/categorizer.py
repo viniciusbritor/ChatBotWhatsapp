@@ -137,6 +137,7 @@ async def _llm_categorize(
             temperature=0,
             max_tokens=120,
             timeout=10,
+            model_kwargs={"extra_body": {"cache_mode": "default"}},
         )
         sample = (text or "")[:2500]
         user_prompt = (
