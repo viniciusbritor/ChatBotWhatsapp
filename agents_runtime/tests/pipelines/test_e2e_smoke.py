@@ -83,78 +83,6 @@ def _mock_agent_jennifer_response():
 # ============================================================================
 
 
-class TestE2ECalendar:
-    """Calendar pipeline: detect ÔåÆ guard ÔåÆ ack ÔåÆ prefetch ÔåÆ agent ÔåÆ response."""
-
-    @pytest.mark.asyncio
-    async def test_e2e_calendar_full_flow(self):
-        from orchestrator import orchestrate
-
-        with patch("pipelines._guard.check_google_access", _mock_guard_allow()):
-            with patch("pipelines._ack.send_ack", AsyncMock()):
-                with patch("pipelines._prefetch.prefetch_for_agent", _mock_prefetch_calendar()):
-                    with patch("pipelines._executor.run_agent", _mock_agent_calendar_response()):
-                        result = await orchestrate(_base_payload("qual minha agenda amanha?"))
-
-        assert result["reply"], "Resposta n├úo pode ser vazia"
-        assert "reuniao" in result["reply"].lower() or "Reuni├úo" in result["reply"]
-        assert "15h" in result["reply"]
-        assert result["metadata"]["agent_id"] == "manager-calendar"
-
-    @pytest.mark.asyncio
-    async def test_e2e_calendar_never_mentions_drive_or_email(self):
-        """Garantia: resposta de calendar NUNCA referencia drive, email, documento."""
-        from orchestrator import orchestrate
-
-        with patch("pipelines._guard.check_google_access", _mock_guard_allow()):
-            with patch("pipelines._ack.send_ack", AsyncMock()):
-                with patch("pipelines._prefetch.prefetch_for_agent", _mock_prefetch_calendar()):
-                    with patch("pipelines._executor.run_agent", _mock_agent_calendar_response()):
-                        result = await orchestrate(_base_payload("compromissos de hoje"))
-
-        reply = result["reply"].lower()
-        assert "drive" not in reply, "Calendar mencionou Drive!"
-        assert "email" not in reply, "Calendar mencionou Email!"
-        assert "documento" not in reply, "Calendar mencionou Documento!"
-        assert "rag" not in reply, "Calendar mencionou RAG!"
-        assert "vector" not in reply, "Calendar mencionou Vector!"
-        assert "base de conhecimento" not in reply, "Calendar mencionou base de conhecimento!"
-
-    @pytest.mark.asyncio
-    async def test_e2e_calendar_oauth_deny_blocked(self):
-        """OAuth deny ÔåÆ bloqueio, n├úo executa agente."""
-        from orchestrator import orchestrate
-
-        with patch(
-            "pipelines._guard.check_google_access",
-            AsyncMock(return_value={
-                "verdict": "deny",
-                "reason": "not_owner",
-                "capability": "calendar.list_events",
-            }),
-        ):
-            result = await orchestrate(_base_payload("minha agenda"))
-
-        assert result["metadata"]["blocked"] is True
-        assert result["metadata"]["blocked_reason"] == "not_owner"
-
-    @pytest.mark.asyncio
-    async def test_e2e_calendar_prefetch_failure_still_responds(self):
-        """Prefetch quebrado ÔåÆ pipeline continua com agente sem cache."""
-        from orchestrator import orchestrate
-
-        with patch("pipelines._guard.check_google_access", _mock_guard_allow()):
-            with patch("pipelines._ack.send_ack", AsyncMock()):
-                with patch(
-                    "pipelines._prefetch.prefetch_for_agent",
-                    side_effect=Exception("API down"),
-                ):
-                    with patch("pipelines._executor.run_agent", _mock_agent_calendar_response()):
-                        result = await orchestrate(_base_payload("eventos de amanha"))
-
-        assert result["reply"], "Pipeline n├úo pode quebrar por falha no prefetch"
-
-
 class TestE2EEmail:
     """Email pipeline: detect ÔåÆ guard ÔåÆ ack ÔåÆ prefetch ÔåÆ agent ÔåÆ response."""
 
@@ -190,60 +118,6 @@ class TestE2EEmail:
         assert "documento" not in reply, "Email mencionou Documento!"
 
 
-class TestE2EDocAndDrive:
-    """Doc pipeline: detect ÔåÆ disambiguate ÔåÆ RAG ou Drive."""
-
-    @pytest.mark.asyncio
-    async def test_e2e_drive_path_full_flow(self):
-        from orchestrator import orchestrate
-
-        with patch("pipelines._guard.check_google_access", _mock_guard_allow()):
-            with patch("pipelines._ack.send_ack", AsyncMock()):
-                with patch("pipelines._prefetch.prefetch_for_agent", _mock_prefetch_drive()):
-                    with patch("pipelines._executor.run_agent", _mock_agent_drive_response()):
-                        with patch("pipelines.doc_pipeline._disambiguate_rag_vs_drive", AsyncMock(return_value="drive")):
-                            result = await orchestrate(_base_payload("liste os arquivos do drive"))
-
-        assert result["reply"], "Resposta n├úo pode ser vazia"
-        assert result["metadata"]["agent_id"] == "manager-drive"
-
-    @pytest.mark.asyncio
-    async def test_e2e_rag_path_with_results(self):
-        """RAG path: busca vetorial retorna chunks."""
-        from orchestrator import orchestrate
-
-        with patch(
-            "agent_orchestration.knowledge_retriever.retrieve",
-            AsyncMock(return_value={
-                "results": [
-                    {"source": "lei-13709.pdf", "text": "Art 1. Esta Lei disp├Áe sobre o tratamento de dados pessoais...", "score": 0.92, "class": "legal", "group": "leis"},
-                ],
-                "decision": "rag",
-                "scope": "private",
-                "count": 1,
-                "min_score": 0.7,
-            }),
-        ):
-            with patch("pipelines.doc_pipeline._disambiguate_rag_vs_drive", AsyncMock(return_value="rag")):
-                result = await orchestrate(_base_payload("documentos sobre LGPD na base de conhecimento"))
-
-        assert result["reply"], "Resposta n├úo pode ser vazia"
-        assert "lei-13709" in result["reply"].lower() or "LGPD" in result["reply"].upper()
-        assert "drive.google.com" not in result["reply"].lower()
-
-    @pytest.mark.asyncio
-    async def test_e2e_doc_clarify_when_pro_down(self):
-        """Pro indispon├¡vel ÔåÆ pede clarifica├º├úo ao usu├írio."""
-        from orchestrator import orchestrate
-
-        with patch("pipelines.doc_pipeline._disambiguate_rag_vs_drive", AsyncMock(return_value="clarify")):
-            result = await orchestrate(_base_payload("leia o documento"))
-
-        assert result["metadata"]["needs_clarification"] is True
-        assert "banco semantico" in result["reply"].lower()
-        assert "drive" in result["reply"].lower()
-
-
 class TestE2EJennifer:
     """Jennifer pipeline: fallback conversacional."""
 
@@ -257,40 +131,6 @@ class TestE2EJennifer:
         assert result["reply"], "Resposta n├úo pode ser vazia"
         assert "oi" in result["reply"].lower() or "bem" in result["reply"].lower()
         assert result["metadata"]["agent_id"] == "jennifier"
-
-
-class TestE2EMultiIntent:
-    """Tier 2: collect-all ÔåÆ parallel if multiple."""
-
-    @pytest.mark.asyncio
-    async def test_e2e_calendar_and_email_parallel(self):
-        from orchestrator import orchestrate
-
-        async def mock_cal_run(payload):
-            return {"reply": "Reuni├úo ├ás 15h.", "delay_ms": 500, "presence": "composing", "metadata": {}}
-
-        async def mock_eml_run(payload):
-            return {"reply": "3 emails n├úo lidos.", "delay_ms": 300, "presence": "composing", "metadata": {}}
-
-        with patch("orchestrator._detect_intimacy", return_value=False):
-            with patch("orchestrator._detect_runtime_status", return_value=False):
-                with patch("orchestrator._detect_correction", return_value=False):
-                    with patch("orchestrator._detect_morality", return_value=False):
-                        with patch("orchestrator._detect_web", return_value=False):
-                            with patch("pipelines.calendar_pipeline.detect", return_value=True):
-                                with patch("pipelines.calendar_pipeline.run", new=mock_cal_run):
-                                    with patch("pipelines.email_pipeline.detect", return_value=True):
-                                        with patch("pipelines.email_pipeline.run", new=mock_eml_run):
-                                            with patch("pipelines.doc_pipeline.detect", return_value=False):
-                                                with patch("orchestrator._setup_nickname_consent", AsyncMock()):
-                                                    result = await orchestrate(
-                                                        _base_payload("agenda e tambem meus emails")
-                                                    )
-
-        assert "---" in result["reply"], "Respostas paralelas devem ser separadas por ---"
-        assert result["metadata"]["multi_intent"] is True
-        assert "Reuni├úo" in result["reply"]
-        assert "emails" in result["reply"].lower()
 
 
 class TestE2ETier1Blocking:

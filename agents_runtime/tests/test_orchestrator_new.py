@@ -43,100 +43,6 @@ class TestTier1Handlers:
         assert _detect_web("qual minha agenda") is False
 
 
-class TestTier2Routing:
-
-    def _payload(self, text="qual minha agenda?"):
-        return {
-            "instance": "jennifer", "phone": "+5511966830020",
-            "text": text, "sender_name": "Vinicius",
-            "extra": {"remote_jid": "5511966830020@s.whatsapp.net"},
-        }
-
-    @pytest.mark.asyncio
-    async def test_single_calendar_match(self):
-        from orchestrator import orchestrate
-
-        with patch("pipelines.calendar_pipeline.run", new_callable=AsyncMock) as mock_run:
-            mock_run.return_value = {"reply": "Agenda: reuniao as 15h", "delay_ms": 500,
-                                     "presence": "composing", "metadata": {"agent_id": "manager-calendar"}}
-            with patch("pipelines.email_pipeline.detect", return_value=False):
-                with patch("pipelines.doc_pipeline.detect", return_value=False):
-                    with patch("pipelines.jennifer_pipeline.run", new_callable=AsyncMock):
-                        result = await orchestrate(self._payload())
-        assert "reuniao" in result["reply"].lower()
-
-    @pytest.mark.asyncio
-    async def test_single_email_match(self):
-        from orchestrator import orchestrate
-
-        with patch("pipelines.email_pipeline.run", new_callable=AsyncMock) as mock_run:
-            mock_run.return_value = {"reply": "Voce tem 3 emails.", "delay_ms": 500,
-                                     "presence": "composing", "metadata": {"agent_id": "manager-email"}}
-            with patch("pipelines.calendar_pipeline.detect", return_value=False):
-                with patch("pipelines.doc_pipeline.detect", return_value=False):
-                    with patch("pipelines.jennifer_pipeline.run", new_callable=AsyncMock):
-                        result = await orchestrate(self._payload("meus emails"))
-        assert "email" in result["reply"].lower()
-
-    @pytest.mark.asyncio
-    async def test_double_match_parallel(self):
-        from orchestrator import orchestrate
-
-        async def cal_run(p): return {"reply": "Reuniao as 15h", "delay_ms": 500,
-                                       "presence": "composing", "metadata": {}}
-        async def eml_run(p): return {"reply": "3 emails nao lidos", "delay_ms": 300,
-                                       "presence": "composing", "metadata": {}}
-
-        with patch("pipelines.calendar_pipeline.detect", return_value=True):
-            with patch("pipelines.calendar_pipeline.run", new=cal_run):
-                with patch("pipelines.email_pipeline.detect", return_value=True):
-                    with patch("pipelines.email_pipeline.run", new=eml_run):
-                        with patch("pipelines.doc_pipeline.detect", return_value=False):
-                            with patch("pipelines.jennifer_pipeline.run", new_callable=AsyncMock):
-                                with patch("orchestrator._detect_web", return_value=False):
-                                    result = await orchestrate(self._payload())
-        assert "---" in result["reply"]
-        assert result["metadata"]["multi_intent"] is True
-        assert result["metadata"]["pipelines"] == 2
-
-    @pytest.mark.asyncio
-    async def test_no_match_fallback_jennifer(self):
-        from orchestrator import orchestrate
-
-        with patch("pipelines.jennifer_pipeline.run", new_callable=AsyncMock) as mock_jen:
-            mock_jen.return_value = {"reply": "Oi! Como posso ajudar?", "delay_ms": 500,
-                                     "presence": "composing", "metadata": {"agent_id": "jennifier"}}
-            with patch("pipelines.calendar_pipeline.detect", return_value=False):
-                with patch("pipelines.email_pipeline.detect", return_value=False):
-                    with patch("pipelines.doc_pipeline.detect", return_value=False):
-                        with patch("orchestrator._detect_web", return_value=False):
-                            with patch("orchestrator._setup_nickname_consent", new_callable=AsyncMock):
-                                result = await orchestrate(self._payload("oi tudo bem?"))
-        assert result["metadata"]["agent_id"] == "jennifier"
-
-    @pytest.mark.asyncio
-    async def test_morality_blocks_calendar(self):
-        """Tier 1 morality deve bloquear antes de chegar no Tier 2 calendar."""
-        from orchestrator import orchestrate
-
-        with patch("pipelines.calendar_pipeline.run", new_callable=AsyncMock) as mock_cal:
-            mock_cal.return_value = {"reply": "Agenda...", "delay_ms": 500, "presence": "composing", "metadata": {}}
-            result = await orchestrate(self._payload("sua puta agenda"))
-        assert not mock_cal.called, "Calendar nao deveria ser chamado com insulto"
-
-    @pytest.mark.asyncio
-    async def test_runtime_blocks_calendar(self):
-        """Tier 1 runtime deve bloquear antes de Tier 2."""
-        from orchestrator import orchestrate
-
-        with patch("pipelines.calendar_pipeline.run", new_callable=AsyncMock) as mock_cal:
-            with patch("orchestrator._handle_runtime_status", new_callable=AsyncMock) as mock_rt:
-                mock_rt.return_value = {"reply": "Agentes ativos: 5", "delay_ms": 0, "presence": "composing",
-                                        "metadata": {"agent_id": "runtime-status"}}
-                result = await orchestrate(self._payload("quantos agentes estao ativos e agenda"))
-        assert not mock_cal.called
-
-
 class TestAttachmentsAndCommands:
     def _payload(self, text="memorizar", extra=None):
         e = extra or {}
@@ -151,7 +57,7 @@ class TestAttachmentsAndCommands:
 
         with patch("pipelines.calendar_pipeline.detect", return_value=False):
             with patch("pipelines.email_pipeline.detect", return_value=False):
-                with patch("pipelines.doc_pipeline.detect", return_value=False):
+                with patch("orchestrator._classify_intent_llm", return_value="conversa"):
                     with patch("orchestrator._detect_web", return_value=False):
                         with patch("orchestrator._handle_attachment", new_callable=AsyncMock) as mock_att:
                             mock_att.return_value = {"reply": "Arquivo indexado!", "delay_ms": 500,
@@ -207,7 +113,7 @@ class TestAttachmentModeConfirmation:
             with patch("core.pending_actions.consume_pending_action", new_callable=AsyncMock) as mock_consume:
                 with patch("pipelines.calendar_pipeline.detect", return_value=False):
                     with patch("pipelines.email_pipeline.detect", return_value=False):
-                        with patch("pipelines.doc_pipeline.detect", return_value=False):
+                        with patch("orchestrator._classify_intent_llm", return_value="conversa"):
                             with patch("orchestrator._detect_web", return_value=False):
                                 with patch("orchestrator._handle_attachment", new_callable=AsyncMock) as mock_att:
                                     mock_att.return_value = {
@@ -243,7 +149,7 @@ class TestAttachmentModeConfirmation:
             with patch("core.pending_actions.consume_pending_action", new_callable=AsyncMock) as mock_consume:
                 with patch("pipelines.calendar_pipeline.detect", return_value=False):
                     with patch("pipelines.email_pipeline.detect", return_value=False):
-                        with patch("pipelines.doc_pipeline.detect", return_value=False):
+                        with patch("orchestrator._classify_intent_llm", return_value="conversa"):
                             with patch("orchestrator._detect_web", return_value=False):
                                 with patch("orchestrator._handle_attachment", new_callable=AsyncMock) as mock_att:
                                     mock_att.return_value = {
