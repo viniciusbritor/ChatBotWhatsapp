@@ -103,14 +103,6 @@ class TestDocPipelinePublicApi:
         params = list(sig.parameters.keys())
         assert params == ["payload"], f"run() assinatura mudou: {params}"
 
-    def test_doc_pipeline_detect_signature(self):
-        """doc_pipeline.detect() mantem assinatura: (text) -> bool."""
-        from pipelines.doc_pipeline import detect
-
-        sig = inspect.signature(detect)
-        params = list(sig.parameters.keys())
-        assert params == ["text"], f"detect() assinatura mudou: {params}"
-
     def test_doc_pipeline_run_returns_dict(self):
         """doc_pipeline.run() sempre retorna dict com 'reply'."""
         import asyncio

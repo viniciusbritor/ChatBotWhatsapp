@@ -1,4 +1,4 @@
-"""Testes do novo orchestrator — Tier 1 + Tier 2 + multi-intent."""
+﻿"""Testes do novo orchestrator ÔÇö Tier 1 + Tier 2 + multi-intent."""
 from __future__ import annotations
 
 import os

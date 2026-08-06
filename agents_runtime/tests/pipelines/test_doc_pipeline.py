@@ -964,20 +964,6 @@ class TestFullDocumentPath:
         assert len(result) > 0
 
 
-class TestDetectDelete:
-    def test_detect_captures_bare_delete(self):
-        from pipelines.doc_pipeline import detect
-        assert detect("apague tese vinicius") is True
-
-    def test_detect_captures_delete_with_excluir(self):
-        from pipelines.doc_pipeline import detect
-        assert detect("exclua a lei de dados") is True
-
-    def test_detect_does_not_capture_normal_query(self):
-        from pipelines.doc_pipeline import detect
-        assert detect("qual o horario da reuniao") is False
-
-
 class TestComenteContentMarker:
     @pytest.mark.asyncio
     async def test_comente_nao_lista_documentos(self):

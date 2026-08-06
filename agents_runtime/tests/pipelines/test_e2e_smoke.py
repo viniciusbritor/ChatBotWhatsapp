@@ -1,7 +1,7 @@
-"""E2E smoke tests — fluxo completo detect() → run() → response.
+﻿"""E2E smoke tests ÔÇö fluxo completo detect() ÔåÆ run() ÔåÆ response.
 
-Validam a integração real entre orquestrador e pipelines.
-Mockam apenas dependências externas: Firestore, DeepSeek API, Evolution API, agent execution.
+Validam a integra├º├úo real entre orquestrador e pipelines.
+Mockam apenas depend├¬ncias externas: Firestore, DeepSeek API, Evolution API, agent execution.
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ def _base_payload(text="qual minha agenda amanha?"):
 
 
 # ---------------------------------------------------------------------------
-# Stubs compartilhados para mock de dependências externas
+# Stubs compartilhados para mock de depend├¬ncias externas
 # ---------------------------------------------------------------------------
 
 def _mock_guard_allow():
@@ -44,7 +44,7 @@ def _mock_prefetch_drive():
 
 def _mock_agent_calendar_response():
     return AsyncMock(return_value={
-        "reply": "Amanhã você tem Reunião às 15h na sala 3.",
+        "reply": "Amanh├ú voc├¬ tem Reuni├úo ├ás 15h na sala 3.",
         "delay_ms": 500,
         "presence": "composing",
         "metadata": {"agent_id": "manager-calendar"},
@@ -53,7 +53,7 @@ def _mock_agent_calendar_response():
 
 def _mock_agent_email_response():
     return AsyncMock(return_value={
-        "reply": "Você tem 3 emails não lidos. O mais recente é 'Aprovação budget Q3'.",
+        "reply": "Voc├¬ tem 3 emails n├úo lidos. O mais recente ├® 'Aprova├º├úo budget Q3'.",
         "delay_ms": 500,
         "presence": "composing",
         "metadata": {"agent_id": "manager-email"},
@@ -84,7 +84,7 @@ def _mock_agent_jennifer_response():
 
 
 class TestE2ECalendar:
-    """Calendar pipeline: detect → guard → ack → prefetch → agent → response."""
+    """Calendar pipeline: detect ÔåÆ guard ÔåÆ ack ÔåÆ prefetch ÔåÆ agent ÔåÆ response."""
 
     @pytest.mark.asyncio
     async def test_e2e_calendar_full_flow(self):
@@ -96,8 +96,8 @@ class TestE2ECalendar:
                     with patch("pipelines._executor.run_agent", _mock_agent_calendar_response()):
                         result = await orchestrate(_base_payload("qual minha agenda amanha?"))
 
-        assert result["reply"], "Resposta não pode ser vazia"
-        assert "reuniao" in result["reply"].lower() or "Reunião" in result["reply"]
+        assert result["reply"], "Resposta n├úo pode ser vazia"
+        assert "reuniao" in result["reply"].lower() or "Reuni├úo" in result["reply"]
         assert "15h" in result["reply"]
         assert result["metadata"]["agent_id"] == "manager-calendar"
 
@@ -122,7 +122,7 @@ class TestE2ECalendar:
 
     @pytest.mark.asyncio
     async def test_e2e_calendar_oauth_deny_blocked(self):
-        """OAuth deny → bloqueio, não executa agente."""
+        """OAuth deny ÔåÆ bloqueio, n├úo executa agente."""
         from orchestrator import orchestrate
 
         with patch(
@@ -140,7 +140,7 @@ class TestE2ECalendar:
 
     @pytest.mark.asyncio
     async def test_e2e_calendar_prefetch_failure_still_responds(self):
-        """Prefetch quebrado → pipeline continua com agente sem cache."""
+        """Prefetch quebrado ÔåÆ pipeline continua com agente sem cache."""
         from orchestrator import orchestrate
 
         with patch("pipelines._guard.check_google_access", _mock_guard_allow()):
@@ -152,11 +152,11 @@ class TestE2ECalendar:
                     with patch("pipelines._executor.run_agent", _mock_agent_calendar_response()):
                         result = await orchestrate(_base_payload("eventos de amanha"))
 
-        assert result["reply"], "Pipeline não pode quebrar por falha no prefetch"
+        assert result["reply"], "Pipeline n├úo pode quebrar por falha no prefetch"
 
 
 class TestE2EEmail:
-    """Email pipeline: detect → guard → ack → prefetch → agent → response."""
+    """Email pipeline: detect ÔåÆ guard ÔåÆ ack ÔåÆ prefetch ÔåÆ agent ÔåÆ response."""
 
     @pytest.mark.asyncio
     async def test_e2e_email_full_flow(self):
@@ -168,8 +168,8 @@ class TestE2EEmail:
                     with patch("pipelines._executor.run_agent", _mock_agent_email_response()):
                         result = await orchestrate(_base_payload("meus ultimos emails"))
 
-        assert result["reply"], "Resposta não pode ser vazia"
-        assert "email" in result["reply"].lower() or "Aprovação" in result["reply"]
+        assert result["reply"], "Resposta n├úo pode ser vazia"
+        assert "email" in result["reply"].lower() or "Aprova├º├úo" in result["reply"]
         assert result["metadata"]["agent_id"] == "manager-email"
 
     @pytest.mark.asyncio
@@ -191,7 +191,7 @@ class TestE2EEmail:
 
 
 class TestE2EDocAndDrive:
-    """Doc pipeline: detect → disambiguate → RAG ou Drive."""
+    """Doc pipeline: detect ÔåÆ disambiguate ÔåÆ RAG ou Drive."""
 
     @pytest.mark.asyncio
     async def test_e2e_drive_path_full_flow(self):
@@ -204,7 +204,7 @@ class TestE2EDocAndDrive:
                         with patch("pipelines.doc_pipeline._disambiguate_rag_vs_drive", AsyncMock(return_value="drive")):
                             result = await orchestrate(_base_payload("liste os arquivos do drive"))
 
-        assert result["reply"], "Resposta não pode ser vazia"
+        assert result["reply"], "Resposta n├úo pode ser vazia"
         assert result["metadata"]["agent_id"] == "manager-drive"
 
     @pytest.mark.asyncio
@@ -216,7 +216,7 @@ class TestE2EDocAndDrive:
             "agent_orchestration.knowledge_retriever.retrieve",
             AsyncMock(return_value={
                 "results": [
-                    {"source": "lei-13709.pdf", "text": "Art 1. Esta Lei dispõe sobre o tratamento de dados pessoais...", "score": 0.92, "class": "legal", "group": "leis"},
+                    {"source": "lei-13709.pdf", "text": "Art 1. Esta Lei disp├Áe sobre o tratamento de dados pessoais...", "score": 0.92, "class": "legal", "group": "leis"},
                 ],
                 "decision": "rag",
                 "scope": "private",
@@ -227,13 +227,13 @@ class TestE2EDocAndDrive:
             with patch("pipelines.doc_pipeline._disambiguate_rag_vs_drive", AsyncMock(return_value="rag")):
                 result = await orchestrate(_base_payload("documentos sobre LGPD na base de conhecimento"))
 
-        assert result["reply"], "Resposta não pode ser vazia"
+        assert result["reply"], "Resposta n├úo pode ser vazia"
         assert "lei-13709" in result["reply"].lower() or "LGPD" in result["reply"].upper()
         assert "drive.google.com" not in result["reply"].lower()
 
     @pytest.mark.asyncio
     async def test_e2e_doc_clarify_when_pro_down(self):
-        """Pro indisponível → pede clarificação ao usuário."""
+        """Pro indispon├¡vel ÔåÆ pede clarifica├º├úo ao usu├írio."""
         from orchestrator import orchestrate
 
         with patch("pipelines.doc_pipeline._disambiguate_rag_vs_drive", AsyncMock(return_value="clarify")):
@@ -254,23 +254,23 @@ class TestE2EJennifer:
         with patch("pipelines.jennifer_pipeline.run", _mock_agent_jennifer_response()):
             result = await orchestrate(_base_payload("oi, tudo bem?"))
 
-        assert result["reply"], "Resposta não pode ser vazia"
+        assert result["reply"], "Resposta n├úo pode ser vazia"
         assert "oi" in result["reply"].lower() or "bem" in result["reply"].lower()
         assert result["metadata"]["agent_id"] == "jennifier"
 
 
 class TestE2EMultiIntent:
-    """Tier 2: collect-all → parallel if multiple."""
+    """Tier 2: collect-all ÔåÆ parallel if multiple."""
 
     @pytest.mark.asyncio
     async def test_e2e_calendar_and_email_parallel(self):
         from orchestrator import orchestrate
 
         async def mock_cal_run(payload):
-            return {"reply": "Reunião às 15h.", "delay_ms": 500, "presence": "composing", "metadata": {}}
+            return {"reply": "Reuni├úo ├ás 15h.", "delay_ms": 500, "presence": "composing", "metadata": {}}
 
         async def mock_eml_run(payload):
-            return {"reply": "3 emails não lidos.", "delay_ms": 300, "presence": "composing", "metadata": {}}
+            return {"reply": "3 emails n├úo lidos.", "delay_ms": 300, "presence": "composing", "metadata": {}}
 
         with patch("orchestrator._detect_intimacy", return_value=False):
             with patch("orchestrator._detect_runtime_status", return_value=False):
@@ -289,7 +289,7 @@ class TestE2EMultiIntent:
 
         assert "---" in result["reply"], "Respostas paralelas devem ser separadas por ---"
         assert result["metadata"]["multi_intent"] is True
-        assert "Reunião" in result["reply"]
+        assert "Reuni├úo" in result["reply"]
         assert "emails" in result["reply"].lower()
 
 
@@ -298,7 +298,7 @@ class TestE2ETier1Blocking:
 
     @pytest.mark.asyncio
     async def test_e2e_morality_blocks_pipeline(self):
-        """Profanidade no Tier 1 → bloqueia, nunca chama pipeline."""
+        """Profanidade no Tier 1 ÔåÆ bloqueia, nunca chama pipeline."""
         from orchestrator import orchestrate
 
         with patch("orchestrator._handle_morality", AsyncMock(return_value={

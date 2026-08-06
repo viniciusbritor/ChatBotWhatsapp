@@ -1851,6 +1851,46 @@ def _merge_pipeline_results(results: list) -> dict:
     }
 
 
+_KNOWLEDGE_INTENTS = frozenset({"juridicas", "editais", "academica", "anotacoes"})
+
+_CLASSIFIER_PROMPT = (
+    "Classifique em UMA palavra:\n"
+    "juridicas  - leis, codigos, artigos, decretos, normas, jurisprudencia\n"
+    "editais    - licitacoes, concursos, pregoes, editais publicos\n"
+    "academica  - teses, dissertacoes, artigos cientificos, papers\n"
+    "anotacoes  - lembretes, notas, memorias pessoais\n"
+    "ferramentas - agenda, email, drive, pesquisa web\n"
+    "conversa   - saudacoes, ajuda, perguntas genericas\n\n"
+    "Pergunta: {text}\n\n"
+    "Categoria:"
+)
+
+
+async def _classify_intent_llm(text: str) -> str:
+    api_key = os.getenv("DEEPSEEK_API_KEY", "")
+    if not api_key:
+        return "conversa"
+
+    from langchain_openai import ChatOpenAI
+    base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
+    llm = ChatOpenAI(
+        model="deepseek-v4-flash",
+        api_key=api_key,
+        base_url=base_url,
+        temperature=0,
+        max_tokens=5,
+        timeout=5,
+        model_kwargs={"extra_body": {"cache_mode": "default"}},
+    )
+    prompt = _CLASSIFIER_PROMPT.format(text=text[:500])
+    result = await asyncio.to_thread(llm.invoke, prompt)
+    raw = getattr(result, "content", str(result)).strip().lower()
+    valid = {"juridicas", "editais", "academica", "anotacoes", "ferramentas", "conversa"}
+    if raw in valid:
+        return raw
+    return "conversa"
+
+
 async def _setup_nickname_consent(payload: dict, first_name: str, phone: str) -> None:
     if not first_name or has_nickname(phone):
         return
@@ -2019,38 +2059,33 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
         return await _handle_morality(payload, masked_text, sender_name, cache_key, instance, phone)
 
     # ========================
-    # TIER 2: Functional (collect-all, parallel if multiple)
+    # TIER 2: LLM Classifier (Flash, 1 call, ~200ms)
     # ========================
-    import asyncio as _asyncio
-    from pipelines.calendar_pipeline import detect as cal_detect, run as cal_run
-    from pipelines.email_pipeline import detect as eml_detect, run as eml_run
-    from pipelines.doc_pipeline import detect as doc_detect, run as doc_run
+    intent_class = await _classify_intent_llm(masked_text)
+    from pipelines.doc_pipeline import run as doc_run
 
-    matches = []
-    if cal_detect(masked_text):
-        matches.append(("calendar", cal_run))
-    if eml_detect(masked_text):
-        matches.append(("email", eml_run))
-    if _detect_web(masked_text):
-        result = await _handle_web(payload, masked_text, sender_name, cache_key)
-        return await _finalize_orchestration(payload, masked_text, sender_name, result,
-                                              [{"step": 1, "phase": "web_handler"}], cache_key)
-    if doc_detect(masked_text):
-        matches.append(("doc", doc_run))
-
-    path = [{"step": 1, "phase": "pipeline_routing", "matches": [m[0] for m in matches]}]
-
-    if len(matches) == 0:
+    if intent_class in ("juridicas", "editais", "academica", "anotacoes"):
+        payload["intent_class"] = intent_class
+        result = await doc_run(payload)
+    elif intent_class == "ferramentas":
+        from pipelines.calendar_pipeline import detect as cal_detect, run as cal_run
+        from pipelines.email_pipeline import detect as eml_detect, run as eml_run
+        from pipelines.doc_pipeline import detect_drive_attachment, run as doc_run
+        if cal_detect(masked_text):
+            result = await cal_run(payload)
+        elif eml_detect(masked_text):
+            result = await eml_run(payload)
+        elif detect_drive_attachment(masked_text):
+            result = await doc_run(payload)
+        else:
+            from pipelines.jennifer_pipeline import run as jen_run
+            result = await jen_run(payload)
+    else:
         from pipelines.jennifer_pipeline import run as jen_run
         await _setup_nickname_consent(payload, first_name, phone)
         result = await jen_run(payload)
-    elif len(matches) == 1:
-        await _setup_nickname_consent(payload, first_name, phone)
-        result = await matches[0][1](payload)
-    else:
-        results = await _asyncio.gather(*[p[1](payload) for p in matches])
-        result = _merge_pipeline_results(list(results))
 
+    path = [{"step": 1, "phase": "pipeline_routing", "intent_class": intent_class}]
     return await _finalize_orchestration(payload, masked_text, sender_name, result, path, cache_key)
 
 

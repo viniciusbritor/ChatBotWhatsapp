@@ -17,33 +17,7 @@ from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
 
-DOC_KEYWORDS = (
-    "documento", "documentos", "arquivo", "arquivos", "pdf", "docx",
-    "xlsx", "planilha", "ata", "atas", "minuta", "relatorio",
-    "apresentacao", "apresentação", "pasta", "upload",
-    "leia o arquivo", "leia a ata", "abra o arquivo",
-    "buscar arquivo", "buscar arquivos", "procurar documento",
-    "conteudo do arquivo", "conteudo da pasta",
-    "base de conhecimento", "base de dados", "conhecimento",
-    "busque", "buscar", "busca", "procure", "procurar",
-    "ache", "achar", "encontre", "encontrar",
-    "localize", "localizar", "pesquise", "pesquisar",
-    "gdrive", "meu drive", "no drive",
-    "meus arquivos", "meus documentos", "minha pasta",
-    "custo", "custos", "orcamento", "orçamento",
-)
-
-_RAG_ONLY_KEYWORDS = (
-    "base de conhecimento", "knowledge base", "memorizou", "memorizado",
-    "indexou", "indexado", "no vector", "no firestore", "no rag",
-    "sua memoria", "sua base", "voce guardou", "voce salvou",
-    "que voce sabe sobre", "o que voce tem sobre",
-    "vc memorizou", "vc guardou", "vc salvou",
-    "documentos salvos", "documentos indexados", "arquivos salvos",
-    "seus documentos", "meus documentos", "no conhecimento",
-)
-
-_DRIVE_ONLY_KEYWORDS = (
+_DRIVE_KEYWORDS = (
     "meu drive", "no drive", "no gdrive", "google drive",
     "pasta do drive", "arquivos do drive", "liste os arquivos",
     "meu gdrive", "salvar no drive", "guarda no drive",
@@ -52,35 +26,6 @@ _DRIVE_ONLY_KEYWORDS = (
     "gdrive", "no omnichannel", "na omnichannel", "pasta omnichannel",
     "meu omnichannel",
 )
-
-_DELETE_MARKERS = (
-    "retire", "retirar", "apague", "apagar", "deletar", "delete",
-    "remover", "remova", "remove",
-    "exclua", "excluir", "limpe", "limpar",
-)
-
-_LIST_KEYWORDS = (
-    "o que voce sabe", "o que você sabe", "o que vc sabe",
-    "liste os documentos", "lista os documentos", "listar documentos",
-    "qual o conteudo da base", "qual o conteúdo da base",
-    "quais documentos voce tem", "quais documentos você tem",
-    "o que tem na base", "o que esta na base", "o que está na base",
-    "documentos na base", "documentos salvos", "documentos indexados",
-    "me mostre o que tem", "mostre os documentos",
-    "mostre o que voce tem", "mostre o que você tem",
-    "o que voce tem", "o que você tem",
-    "o que ja foi indexado", "o que foi memorizado", "o que foi guardado",
-    "base de conhecimento", "sua base", "minha base",
-    "o que tem ai", "o que tem aí",
-    "sua memoria", "sua memória",
-    "o que voce lembra", "o que você lembra",
-    "tem documento", "quais documentos",
-    "o que esta salvo", "o que está salvo",
-    "o que foi guardado", "liste a base",
-    "liste sua base", "lista sua base",
-)
-
-
 async def _list_knowledge_base(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Lista todos os documentos indexados na base de conhecimento."""
     instance = payload.get("instance", "jennifer")
@@ -145,28 +90,55 @@ _DOC_EXCLUDE_PATTERNS = (
 )
 
 
-def detect(text: str) -> bool:
+_DRIVE_SUBDETECT_KW = (
+    "drive", "gdrive", "pasta", "upload", "meus arquivos",
+    "meus documentos", "minha pasta", "lista os arquivos",
+    "liste os arquivos", "arquivos do drive",
+)
+
+_RAG_ONLY_KEYWORDS = (
+    "base de conhecimento", "knowledge base", "memorizou", "memorizado",
+    "indexou", "indexado", "no vector", "no firestore", "no rag",
+    "sua memoria", "sua base", "voce guardou", "voce salvou",
+    "que voce sabe sobre", "o que voce tem sobre",
+    "vc memorizou", "vc guardou", "vc salvou",
+    "documentos salvos", "documentos indexados", "arquivos salvos",
+    "seus documentos", "meus documentos", "no conhecimento",
+)
+
+_DRIVE_ONLY_KEYWORDS = (
+    "meu drive", "no drive", "no gdrive", "google drive",
+    "pasta do drive", "arquivos do drive", "liste os arquivos",
+    "meu gdrive", "salvar no drive", "guarda no drive",
+    "dentro do drive", "dentro desse drive", "nesse drive",
+    "faca upload", "upload", "salva no drive",
+    "gdrive", "no omnichannel", "na omnichannel", "pasta omnichannel",
+    "meu omnichannel",
+)
+
+
+def detect_drive_attachment(text: str) -> bool:
+    """Keyword sub-detect para ferramentas → Drive."""
     t = text.lower()
     has_calendar_or_email = any(ex in t for ex in _DOC_EXCLUDE_PATTERNS)
-
-    for kw in _LIST_KEYWORDS:
-        if kw in t:
+    for kw in _DRIVE_SUBDETECT_KW:
+        if kw in t and not has_calendar_or_email:
             return True
-    for kw in DOC_KEYWORDS:
-        if kw in t:
-            if has_calendar_or_email:
-                return False
-            return True
-    if any(kw in t for kw in _DELETE_MARKERS):
+    if any(kw in t for kw in ("memorize", "memorizar", "guarde", "guardar", "indexe", "indexar", "armazene", "armazenar")):
         return True
-    is_attachment = any(
-        kw in t for kw in (
-            "memorize", "memorizar", "guarde", "guardar",
-            "indexe", "indexar", "salve isso", "salvar isso",
-            "guarda isso", "armazene", "armazenar",
-        )
-    )
-    return is_attachment
+    return False
+
+
+_LIST_WORDS = (
+    "o que voce sabe", "o que você sabe", "o que vc sabe",
+    "liste os documentos", "lista os documentos", "listar documentos",
+    "quais documentos voce tem", "quais documentos você tem",
+    "o que tem na base", "documentos na base",
+    "me mostre o que tem", "mostre os documentos",
+    "o que voce tem", "o que você tem",
+    "base de conhecimento", "sua base", "minha base",
+    "tem documento", "quais documentos",
+)
 
 
 async def _disambiguate_rag_vs_drive(
@@ -685,116 +657,30 @@ async def _run_drive(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def run(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Detect → disambiguate → route to RAG or Drive."""
     text = payload.get("text", "")
     phone = payload.get("phone", "")
-    extra = payload.get("extra", {}) or {}
 
     if not text.strip():
         return await _run_rag(payload)
 
-    # Fast path: listar documentos da base (somente se nao for query de conteudo, busca ou exclusao)
-    t = text.lower()
-    _CONTENT_MARKERS = ("diz", "fala", "capitulo", "artigo", "lei", "sobre", "resuma", "explique", "qual o", "quais os", "comente", "comentar", "descreva", "introducao", "introdução", "conteudo", "conteúdo")
-    _SEARCH_MARKERS = ("busque", "buscar", "procure", "procurar", "pesquise", "pesquisar", "ache", "achar", "encontre", "encontrar")
-    has_list_kw = any(kw in t for kw in _LIST_KEYWORDS)
-    has_content = any(mk in t for mk in _CONTENT_MARKERS)
-    has_search = any(mk in t for mk in _SEARCH_MARKERS)
-    has_delete = any(kw in t for kw in _DELETE_MARKERS)
-    if has_list_kw and not has_content and not has_search and not has_delete:
-        return await _list_knowledge_base(payload)
+    intent_class = payload.get("intent_class") or ""
 
-    recent_context = ""
-    try:
-        from orchestrator import _get_conversation_history
-        recent_context = (
-            _get_conversation_history(phone, limit=2) or ""
-        )
-    except Exception:
-        pass
+    if not intent_class:
+        t = text.lower()
+        for kw in _DRIVE_ONLY_KEYWORDS:
+            if kw in t:
+                return await _run_drive(payload)
+        return await _run_rag(payload)
 
-    if has_delete:
-        if any(kw in t for kw in _DRIVE_ONLY_KEYWORDS):
-            decision = "drive"
-        else:
-            decision = "rag"
-    else:
-        decision = await _disambiguate_rag_vs_drive(text, recent_context)
-
-    if decision == "clarify":
-        return {
-            "reply": (
-                "Nao entendi se voce quer buscar no:\n\n"
-                "• Banco semantico (editais, leis, teses que indexei)\n"
-                "• Google Drive (seus arquivos, PPTs, planilhas)\n\n"
-                "E so me dizer: 'banco semantico' ou 'drive'?"
-            ),
-            "delay_ms": 0,
-            "presence": "composing",
-            "metadata": {
-                "agent_id": "doc-disambiguator",
-                "needs_clarification": True,
-            },
-        }
-
-    if has_delete and decision == "rag":
-        from agent_orchestration.knowledge_retriever import _list_known_sources
-        sources = await _list_known_sources(phone)
-        if sources:
-            t_lower = text.lower()
-            for source in sorted(sources, key=len, reverse=True):
-                source_base = source.lower().rsplit(".", 1)[0]
-                if source.lower() in t_lower or source_base in t_lower:
-                    instance = payload.get("instance", "jennifer")
-                    extra = payload.get("extra", {}) or {}
-                    try:
-                        from core.delay_calculator import calculate_delay_ms
-                        from core.evolution_client import send_text
-                        ack_msg = f"Entendido, vou remover '{source}' da base de conhecimento..."
-                        delay_ms = max(1500, calculate_delay_ms(ack_msg))
-                        await send_text(
-                            instance=instance,
-                            phone=phone,
-                            text=ack_msg,
-                            delay_ms=delay_ms,
-                            presence="composing",
-                            remote_jid=extra.get("remote_jid", ""),
-                        )
-                    except Exception:
-                        pass
-                    from tool_registry import get_tool
-                    delete_fn = get_tool("knowledge.delete")
-                    result = await delete_fn(source_title=source, phone=phone)
-                    deleted = result.get("deleted", 0)
-                    if deleted > 0:
-                        return {
-                            "reply": f"Feito! Removi '{source}' da base de conhecimento.",
-                            "delay_ms": 0,
-                            "presence": "composing",
-                            "metadata": {"agent_id": "agent-knowledge-retriever", "deleted_count": deleted, "source_title": source, "skip_image_report": True},
-                        }
-                    return {
-                        "reply": f"Nao encontrei '{source}' na base de conhecimento.",
-                        "delay_ms": 0,
-                        "presence": "composing",
-                        "metadata": {"agent_id": "agent-knowledge-retriever", "deleted_count": 0, "skip_image_report": True},
-                    }
-        doc_list = ", ".join(f"'{s}'" for s in sources[:5])
-        return {
-            "reply": (
-                f"Nao identifiquei qual documento da base voce quer apagar. "
-                f"Documentos disponiveis: {doc_list}. "
-                "Pode citar o nome exato do arquivo?"
-            ),
-            "delay_ms": 0,
-            "presence": "composing",
-            "metadata": {
-                "agent_id": "agent-knowledge-retriever",
-                "needs_clarification": True,
-                "skip_image_report": True,
-            },
-        }
-
-    if decision == "drive":
+    if intent_class in ("juridicas", "editais", "academica", "anotacoes"):
+        return await _run_rag(payload)
+    if intent_class == "ferramentas":
         return await _run_drive(payload)
+
+    t = text.lower()
+    if any(kw in t for kw in _LIST_WORDS):
+        has_content = any(mk in t for mk in ("diz", "fala", "capitulo", "artigo", "lei", "sobre", "resuma", "explique", "qual o", "quais os"))
+        if not has_content:
+            return await _list_knowledge_base(payload)
+
     return await _run_rag(payload)
