@@ -95,6 +95,7 @@ async def _llm_classify_intent(text: str) -> Optional[str]:
             temperature=0,
             max_tokens=8,
             timeout=8,
+            model_kwargs={"extra_body": {"cache_mode": "default"}},
         )
         prompt = (
             "Classifique o pedido do usuario sobre um arquivo anexo em UMA palavra:\n"
