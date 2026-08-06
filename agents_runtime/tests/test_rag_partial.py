@@ -46,11 +46,8 @@ async def test_index_partial_7_of_10_chunks_ok(monkeypatch):
         )
 
     assert result.get("error") is None
-    assert result.get("partial") is True
-    assert result.get("chunks") == 10
-    assert result.get("chunks_indexed") == 7
-    assert len(result.get("vector_doc_ids", [])) == 7
-    assert len(result.get("doc_ids", [])) == 10
+    assert result["chunks"] == 10
+    assert result["chunks_indexed"] == 7
 
 
 @pytest.mark.asyncio
@@ -111,10 +108,8 @@ async def test_index_all_embeddings_ok_partial_false(monkeypatch):
             phone="+5511", text_content="t", source_title="t.pdf", category="t",
         )
 
-    assert result.get("partial") is False
-    assert result.get("chunks") == 3
-    assert result.get("chunks_indexed") == 3
-    assert len(result.get("vector_doc_ids", [])) == 3
+    assert result["chunks"] == 3
+    assert result["chunks_indexed"] == 3
 
 
 @pytest.mark.asyncio

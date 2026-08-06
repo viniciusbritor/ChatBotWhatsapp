@@ -935,7 +935,7 @@ class TestFullDocumentPath:
             FakeDoc({"chunk_index": 2, "text_content": "terceiro chunk"}),
         ]
         fake_coll = MagicMock()
-        fake_coll.where.return_value.where.return_value.stream.return_value = docs
+        fake_coll.where.return_value.where.return_value.where.return_value.stream.return_value = docs
         fake_db.collection.return_value = fake_coll
 
         with patch("core.rag._get_firestore", return_value=fake_db):

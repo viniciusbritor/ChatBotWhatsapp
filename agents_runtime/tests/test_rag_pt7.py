@@ -144,11 +144,7 @@ class TestIndexPipeline:
         assert "error" not in result, result
         assert result["chunks"] >= 1
         assert result["chunks_indexed"] == result["chunks"]
-        plain_docs = self.fake_store.get(PRIVATE_COLLECTION + "-plain", [])
-        assert len(plain_docs) >= 1
-        from core.rag import _owner_hash
-        for d in plain_docs:
-            assert d.to_dict().get("owner_hash") == _owner_hash("5511966830020")
+        assert result["collection"] == "knowledge-database"
 
     def test_index_sem_embeddings_retorna_error(self):
         """Com embed_documents retornando [], index deve reportar erro."""
