@@ -277,13 +277,11 @@ def _is_user_member(db, group_jid: str, phone: str) -> bool:
     return False
 
 
-async def _list_known_sources(phone: str, limit: int = 10) -> List[str]:
-    """Return distinct ``source_title`` do owner em ``agent-knowledge-v2``.
-
-    Usado pela UX da ``clarification_prompt`` para orientar o user
-    a buscar dentro de algo que ele DE FATO tem na base. Best-effort:
-    se o Firestore esta offline, devolve [].
-    """
+async def _list_known_sources(phone: str, limit: int = 10) -> List[Dict[str, str]]:
+    """Return distinct documentos com titulo real e source_title.
+    
+    Extrai document_title do melhor section_title (primeiro nao-front-matter).
+    Usado pela UX da listagem e clarification_prompt."""
     try:
         from core.rag import PRIVATE_COLLECTION, _owner_hash
 
@@ -297,15 +295,14 @@ async def _list_known_sources(phone: str, limit: int = 10) -> List[str]:
             return []
 
         owner_hash = _owner_hash(phone)
-        titles: List[str] = []
-        seen = set()
+        grouped: Dict[str, List[str]] = {}
 
         def fetch():
             return list(
                 db_ref.collection(PRIVATE_COLLECTION)
                 .where("scope", "==", "private")
                 .where("owner_hash", "==", owner_hash)
-                .limit(200)
+                .limit(300)
                 .stream()
             )
 
@@ -313,26 +310,61 @@ async def _list_known_sources(phone: str, limit: int = 10) -> List[str]:
         docs = await _asyncio.to_thread(fetch)
         for doc in docs:
             data = doc.to_dict() or {}
-            title = data.get("source_title") or ""
-            if title and title not in seen:
-                seen.add(title)
-                titles.append(title)
-                if len(titles) >= limit:
-                    break
-        return titles
+            src = data.get("source_title") or ""
+            sec = (data.get("section_title") or "").strip()
+            if src:
+                if src not in grouped:
+                    grouped[src] = []
+                if sec:
+                    grouped[src].append(sec)
+
+        _FRONT_MATTER = re.compile(
+            r"senado federal|mesa diretora|bi[êe]nio|coordena[çc][ãa]o de edi[çc][õo]es|"
+            r"secretaria de editora[çc][ãa]o|ficha catalogr[áa]fica|sum[áa]rio|"
+            r"presidente|vice-presidente",
+            re.IGNORECASE,
+        )
+
+        def _extract_title(source: str, sections: List[str]) -> str:
+            data_title = None
+            for sec in sections:
+                if data_title is None and not _FRONT_MATTER.search(sec) and len(sec) > 10:
+                    data_title = sec
+            if data_title:
+                return data_title[:80]
+            base = source.rsplit(".", 1)[0]
+            base = base.replace("_", " ").strip()
+            return base[:80] if base else source[:80]
+
+        results: List[Dict[str, str]] = []
+        for source_title in grouped:
+            document_title = _extract_title(source_title, grouped[source_title])
+            results.append({
+                "source_title": source_title,
+                "document_title": document_title,
+            })
+            if len(results) >= limit:
+                break
+        return results
     except Exception:
         return []
 
 
-def _build_clarification_prompt(known_sources: List[str], query: str) -> str:
+def _build_clarification_prompt(known_sources: List[Dict[str, str]], query: str) -> str:
     """Mensagem de clarification quando retrieval retorna 0 hits.
 
-    Lista os ``source_title`` conhecidos do owner se houver, dando
+    Lista os titulos reais conhecidos do owner se houver, dando
     ao user uma ancora concreta para refinar a busca.
     """
     base = "N\u00e3o encontrei nada sobre isso no que memorizei at\u00e9 agora."
     if known_sources:
-        lista = ", ".join(f"'{t}'" for t in known_sources[:8])
+        names = []
+        for s in known_sources[:8]:
+            if isinstance(s, dict):
+                names.append(s.get("document_title") or s.get("source_title", ""))
+            else:
+                names.append(str(s))
+        lista = ", ".join(f"'{n}'" for n in names)
         return (
             f"{base} Voc\u00ea tem esses documentos salvos na sua base: {lista}. "
             "Quer tentar uma busca mais espec\u00edfica, citando o nome do "
@@ -530,13 +562,14 @@ async def _match_source_title_dynamic(phone: str, query: str) -> Optional[str]:
         best_match = None
         best_score = 0
         for src in sources:
-            src_root = _normalize(src).rsplit(".", 1)[0]
+            source_name = src["source_title"] if isinstance(src, dict) else str(src)
+            src_root = _normalize(source_name).rsplit(".", 1)[0]
             src_words = set(re.split(r'[\s_\-\.\+]+', src_root))
             common = query_words & src_words
             score = len(common)
             if score > best_score:
                 best_score = score
-                best_match = src
+                best_match = source_name
         return best_match if best_score >= 2 else None
     except Exception:
         return None

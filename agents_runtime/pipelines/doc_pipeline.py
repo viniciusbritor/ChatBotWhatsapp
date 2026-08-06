@@ -105,8 +105,8 @@ async def _list_knowledge_base(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "presence": "composing",
                 "metadata": {"agent_id": "agent-knowledge-retriever", "list_documents": True, "count": 0, "skip_image_report": True},
             }
-        lista = "\n".join(f"• {s}" for s in sources)
-        prompt = f"Pergunte sobre qualquer um deles! Ex: 'o que diz {sources[0]}?'" if sources else ""
+        lista = "\n".join(f"• {s.get('document_title', s.get('source_title', ''))}" for s in sources)
+        prompt = f"Pergunte sobre qualquer um deles! Ex: 'o que diz {sources[0].get('document_title', sources[0].get('source_title',''))}?'" if sources else ""
         return {
             "reply": (
                 f"📚 Documentos na minha base de conhecimento:\n\n{lista}\n\n{prompt}"

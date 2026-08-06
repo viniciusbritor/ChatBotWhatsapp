@@ -25,8 +25,17 @@ _PROMPT = (
 )
 
 
-async def resolve(sources: List[str], query: str) -> Optional[str]:
+async def resolve(sources: List[str] | List[Dict[str, str]], query: str) -> Optional[str]:
     if not sources or not query or not query.strip():
+        return None
+
+    source_list: List[str] = []
+    for s in sources:
+        if isinstance(s, dict):
+            source_list.append(s["source_title"])
+        else:
+            source_list.append(s)
+    if not source_list:
         return None
 
     api_key = (os.getenv("DEEPSEEK_API_KEY", "") or "").strip()
@@ -50,7 +59,7 @@ async def resolve(sources: List[str], query: str) -> Optional[str]:
             model_kwargs={"thinking": {"type": "disabled"}},
         )
 
-        sources_text = "\n".join(f"- {s}" for s in sources[:20])
+        sources_text = "\n".join(f"- {s}" for s in source_list[:20])
         prompt = _PROMPT.format(sources=sources_text, query=query.strip()[:400])
 
         result = await asyncio.to_thread(llm.invoke, prompt)
@@ -61,10 +70,10 @@ async def resolve(sources: List[str], query: str) -> Optional[str]:
         )
         candidate = raw.strip().strip(".,;:!?()\"' \t\n\r")
 
-        if candidate and candidate in sources:
+        if candidate and candidate in source_list:
             return candidate
         if candidate:
-            for src in sources:
+            for src in source_list:
                 if src.lower() == candidate.lower():
                     return src
         return None
