@@ -367,6 +367,24 @@ def _extract_legal_hierarchy(section_title: str) -> Dict[str, str]:
     return {"level": "texto", "number": "", "title": section_title}
 
 
+_FRONT_MATTER_RE = re.compile(
+    r"senado federal|mesa diretora|bi[êe]nio|coordena[çc][ãa]o de edi[çc][õo]es|"
+    r"secretaria de editora[çc][ãa]o|ficha catalogr[áa]fica|sum[áa]rio|"
+    r"presidente|vice-presidente",
+    re.IGNORECASE,
+)
+
+
+def _extract_document_title(section_titles: List[str], source_title: str) -> str:
+    for sec in section_titles:
+        sec = (sec or "").strip()
+        if not _FRONT_MATTER_RE.search(sec) and len(sec) > 10:
+            return sec[:120]
+    base = source_title.rsplit(".", 1)[0]
+    base = base.replace("_", " ").strip()
+    return base[:120] if base else source_title[:120]
+
+
 def _detect_sections(text: str) -> List[tuple[str, str]]:
     matches = list(_HEADING_PATTERNS.finditer(text))
     if not matches:
@@ -824,6 +842,8 @@ async def index_private_document(
     group_value = (group or safe_metadata.get("group") or "").strip() or None
     theme_value = (theme or safe_metadata.get("theme") or "").strip() or None
 
+    _doc_title = _extract_document_title(section_titles, source_title)
+
     for index, chunk in enumerate(chunks):
         document_id = hashlib.sha256(
             f"{owner_hash}:{source_title}:{index}:{chunk[:100]}".encode("utf-8")
@@ -832,6 +852,7 @@ async def index_private_document(
             **safe_metadata,
             "scope": "private",
             "owner_hash": owner_hash,
+            "document_title": _doc_title,
             "text_content": chunk,
             "source_title": mask_pii(source_title),
             "source_url": source_url,
@@ -907,6 +928,7 @@ async def index_private_document(
                 **safe_metadata,
                 "scope": "private",
                 "owner_hash": owner_hash,
+                "document_title": _doc_title,
                 "text_content": chunk,
                 "source_title": mask_pii(source_title),
                 "source_url": source_url,
