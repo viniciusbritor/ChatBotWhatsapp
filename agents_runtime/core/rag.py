@@ -375,13 +375,18 @@ _FRONT_MATTER_RE = re.compile(
 )
 
 
-def _extract_document_title(section_titles: List[str], source_title: str) -> str:
+def _extract_document_title(section_titles: List[str], source_title: str, full_text: str = "") -> str:
     for sec in section_titles:
         sec = (sec or "").strip()
-        if not _FRONT_MATTER_RE.search(sec) and len(sec) > 10:
-            return sec[:120]
+        if not sec:
+            continue
+        if re.match(r"(C[ÓO]DIGO\s+(?:DE\s+)?(?:PROTE[ÇC][ÃA]O\s+E\s+)?DEFESA|LEI\s+N[º°]|DECRETO\s+N[º°])", sec, re.IGNORECASE):
+            return re.sub(r"\s+", " ", sec)[:120]
+
     base = source_title.rsplit(".", 1)[0]
-    base = base.replace("_", " ").strip()
+    base = base.replace("_", " ").replace("-", " ").strip()
+    base = re.sub(r"([a-z])([A-Z])", r"\1 \2", base)
+    base = re.sub(r"\s+", " ", base).strip()
     return base[:120] if base else source_title[:120]
 
 
@@ -842,7 +847,7 @@ async def index_private_document(
     group_value = (group or safe_metadata.get("group") or "").strip() or None
     theme_value = (theme or safe_metadata.get("theme") or "").strip() or None
 
-    _doc_title = _extract_document_title(section_titles, source_title)
+    _doc_title = _extract_document_title(section_titles, source_title, text_content)
 
     for index, chunk in enumerate(chunks):
         document_id = hashlib.sha256(
