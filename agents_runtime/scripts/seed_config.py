@@ -11,8 +11,8 @@ os.environ["GCP_PROJECT"] = "coherence-ominichannel-fs"
 
 from google.cloud import firestore
 db = firestore.Client(project="coherence-ominichannel-fs")
-datetime_module = __import__("datetime")
-now = datetime_module.now_brt().isoformat()
+from core.timezone import now_brt
+now = now_brt().isoformat()
 
 # === CONFIG/ROUTING ===
 routing_rules = [
@@ -88,11 +88,36 @@ new_agents = [
      "skills": [], "tools": ["group.get_info", "drive.search_files"],
      "system_prompt": "Voce resolve qual grupo/pasta do Drive corresponde a um grupo do WhatsApp. Dado um group_jid, busque no Firestore qual pasta usar.",
      "instances": ["jennifer"], "system_prompt_version": 1, "updated_at": now},
+    {"id": "juridicas-agent", "name": "Juridico", "role": "specialist", "parent_id": "jennifier",
+     "model": "deepseek-v4-flash", "thinking": "disabled", "enabled": True,
+     "skills": [], "tools": ["knowledge.retrieve", "chat_history.search"],
+     "system_prompt": "Voce e um jurista especializado. Analise leis, codigos, decretos e normas. Cite artigos e jurisprudencia com precisao. Tom formal e objetivo. Sempre indique a fonte entre colchetes: [documento | secao]. NUNCA invente leis ou artigos que nao estao nos trechos.",
+     "instances": ["jennifer"], "system_prompt_version": 1, "updated_at": now},
+    {"id": "editais-agent", "name": "Licitacoes", "role": "specialist", "parent_id": "jennifier",
+     "model": "deepseek-v4-flash", "thinking": "disabled", "enabled": True,
+     "skills": [], "tools": ["knowledge.retrieve", "chat_history.search"],
+     "system_prompt": "Voce e especialista em licitacoes e editais publicos. Destaque prazos, modalidades, requisitos e valores. Tom tecnico e preciso. Organize a resposta por secoes do edital. Sempre indique a fonte entre colchetes: [documento | secao].",
+     "instances": ["jennifer"], "system_prompt_version": 1, "updated_at": now},
+    {"id": "academica-agent", "name": "Academico", "role": "specialist", "parent_id": "jennifier",
+     "model": "deepseek-v4-flash", "thinking": "disabled", "enabled": True,
+     "skills": [], "tools": ["knowledge.retrieve", "chat_history.search"],
+     "system_prompt": "Voce e um orientador academico. Contextualize teses, dissertacoes e artigos cientificos. Destaque metodologia, resultados e referencias. Tom didatico e rigoroso. Sempre indique a fonte entre colchetes: [documento | secao].",
+     "instances": ["jennifer"], "system_prompt_version": 1, "updated_at": now},
+    {"id": "anotacoes-agent", "name": "Anotacoes", "role": "specialist", "parent_id": "jennifier",
+     "model": "deepseek-v4-flash", "thinking": "disabled", "enabled": True,
+     "skills": [], "tools": ["knowledge.retrieve", "chat_history.search"],
+     "system_prompt": "Voce gerencia notas, lembretes e memorias pessoais do usuario. Tom informal e direto, como um assistente pessoal. Respostas curtas e objetivas. Consulte o historico de conversas para contexto.",
+     "instances": ["jennifer"], "system_prompt_version": 1, "updated_at": now},
 ]
 
 for agent in new_agents:
     db.collection("agents").document(agent["id"]).set(agent, merge=True)
 print(f"Agents seeded: {len(new_agents)}")
+
+# Disable legacy agents replaced by specialists
+for legacy_id in ("agent-rag", "agent-knowledge-retriever"):
+    db.collection("agents").document(legacy_id).set({"enabled": False, "updated_at": now}, merge=True)
+    print(f"Agent disabled: {legacy_id}")
 
 # === NOVAS SKILLS ===
 new_skills = [
