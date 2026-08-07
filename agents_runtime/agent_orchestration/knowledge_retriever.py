@@ -328,20 +328,57 @@ async def _list_known_sources(phone: str, limit: int = 10) -> List[Dict[str, str
             data = doc.to_dict() or {}
             src = data.get("source_title") or ""
             doc_title = data.get("document_title") or ""
-            if src and src not in grouped:
-                grouped[src] = doc_title if doc_title else _extract_title_fallback(data)
+            if src not in grouped:
+                grouped[src] = {
+                    "document_title": doc_title if doc_title else _extract_title_fallback(data),
+                    "class": data.get("class", ""),
+                    "group": data.get("group", ""),
+                    "theme": data.get("theme", ""),
+                    "chunk_count": 0,
+                }
+            grouped[src]["chunk_count"] += 1
 
         results: List[Dict[str, str]] = []
-        for source_title in grouped:
+        for source_title in sorted(grouped):
+            meta = grouped[source_title]
             results.append({
                 "source_title": source_title,
-                "document_title": grouped[source_title] or source_title,
+                "document_title": meta.get("document_title") or source_title,
+                "class": meta.get("class") or "",
+                "group": meta.get("group") or "",
+                "theme": meta.get("theme") or "",
+                "chunk_count": meta.get("chunk_count", 0),
             })
             if len(results) >= limit:
                 break
         return results
     except Exception:
         return []
+
+
+async def _list_knowledge_stats(phone: str) -> Dict[str, Any]:
+    if not phone:
+        return {"stats": {}}
+    sources = await _list_known_sources(phone, limit=500)
+    class_counts: Dict[str, int] = {}
+    group_counts: Dict[str, int] = {}
+    total_docs = 0
+    total_chunks = 0
+    for s in sources:
+        if not isinstance(s, dict):
+            continue
+        total_docs += 1
+        total_chunks += s.get("chunk_count", 0)
+        cls = s.get("class") or "outros"
+        grp = s.get("group") or "outros"
+        class_counts[cls] = class_counts.get(cls, 0) + 1
+        group_counts[f"{cls}/{grp}"] = group_counts.get(f"{cls}/{grp}", 0) + 1
+    return {
+        "total_documents": total_docs,
+        "total_chunks": total_chunks,
+        "by_class": dict(sorted(class_counts.items(), key=lambda x: -x[1])),
+        "by_group": dict(sorted(group_counts.items(), key=lambda x: -x[1])),
+    }
 
 
 def _build_clarification_prompt(known_sources: List[Dict[str, str]], query: str) -> str:
@@ -1168,6 +1205,8 @@ __all__ = [
     "_is_about_query",
     "_llm_enrich_query",
     "_match_source_title_dynamic",
+    "_list_known_sources",
+    "_list_knowledge_stats",
     "retrieve",
     "share_pending_action_consume",
     "RAG_RETRIEVE_MIN_SCORE",

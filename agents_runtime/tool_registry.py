@@ -125,6 +125,54 @@ async def _delete_knowledge(**kwargs):
     }
 
 
+async def _list_knowledge(**kwargs):
+    from agent_orchestration.knowledge_retriever import _list_known_sources
+
+    phone = kwargs.get("phone", "")
+    if not phone:
+        return {"error": "phone is required", "documents": []}
+    sources = await _list_known_sources(phone, limit=200)
+    return {"documents": sources, "count": len(sources)}
+
+
+async def _stats_knowledge(**kwargs):
+    from agent_orchestration.knowledge_retriever import _list_knowledge_stats
+
+    phone = kwargs.get("phone", "")
+    if not phone:
+        return {"error": "phone is required", "stats": {}}
+    return await _list_knowledge_stats(phone)
+
+
+async def _sections_knowledge(**kwargs):
+    phone = kwargs.get("phone", "")
+    source_title = kwargs.get("source_title", "")
+    if not phone or not source_title:
+        return {"error": "phone and source_title are required", "text": ""}
+
+    from pipelines.doc_pipeline import _retrieve_full_document
+
+    text = await _retrieve_full_document(phone, source_title, max_chars=30000)
+    return {"source_title": source_title, "text": text, "chars": len(text)}
+
+
+async def _search_all_knowledge(**kwargs):
+    from core.rag import search_legal_knowledge
+
+    phone = kwargs.get("phone", "")
+    query = kwargs.get("query", "")
+    limit = kwargs.get("limit", 10)
+    min_score = kwargs.get("min_score", 0.35)
+    if not phone or not query:
+        return {"error": "phone and query are required", "results": []}
+    return await search_legal_knowledge(
+        phone=phone,
+        query=query,
+        k=limit,
+        min_score=min_score,
+    )
+
+
 async def _render_image_report(**kwargs):
     from tools.image_report import render_report
 
@@ -551,6 +599,82 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
                 "phone": {"type": "string", "description": "Telefone do usuario owner"},
             },
             "required": ["source_title", "phone"],
+        },
+    },
+    "knowledge.list": {
+        "function": _list_knowledge,
+        "implementation": "knowledge_lister",
+        "description": (
+            "Lista todos os documentos indexados na base de conhecimento "
+            "do usuario (agent-knowledge-v2). Retorna source_title, "
+            "document_title, class, group, theme e total de chunks por doc. "
+            "Use quando o usuario perguntar 'quais documentos tenho?' ou "
+            "'o que esta na minha base?'."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string", "description": "Telefone do usuario"},
+            },
+            "required": ["phone"],
+        },
+    },
+    "knowledge.stats": {
+        "function": _stats_knowledge,
+        "implementation": "knowledge_stats",
+        "description": (
+            "Retorna estatisticas agregadas da base de conhecimento: "
+            "quantos documentos por class (legal, academico, edital, etc.) "
+            "e por group (legislacao, tese, licitacao, etc.). "
+            "Use quando o usuario perguntar 'que tipo de documento tenho?' "
+            "ou 'quantas leis eu indexei?'."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string", "description": "Telefone do usuario"},
+            },
+            "required": ["phone"],
+        },
+    },
+    "knowledge.sections": {
+        "function": _sections_knowledge,
+        "implementation": "knowledge_sections",
+        "description": (
+            "Recupera o texto COMPLETO de um documento nomeado da base, "
+            "concatenando todos os chunks em ordem (ate 30000 chars). "
+            "Use quando o usuario pedir detalhes de um documento especifico "
+            "por nome exato: 'me mostre a tese vinicius.pdf' ou 'extraia "
+            "o capitulo 3 do lgpd'."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string", "description": "Telefone do usuario"},
+                "source_title": {"type": "string", "description": "Nome exato do arquivo"},
+            },
+            "required": ["phone", "source_title"],
+        },
+    },
+    "knowledge.search_all": {
+        "function": _search_all_knowledge,
+        "implementation": "knowledge_search_all",
+        "description": (
+            "Busca semantica na base de conhecimento SEM filtros de class, "
+            "group ou source_title. Retorna os top-N chunks mais similares "
+            "com score >= min_score (default 0.35). "
+            "Use como escape hatch quando knowledge.retrieve retorna 0 hits "
+            "ou quando o usuario quer buscar 'tudo' sem restricao."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string", "description": "Telefone do usuario"},
+                "query": {"type": "string", "description": "Pergunta ou termo de busca"},
+                "limit": {"type": "integer", "description": "Maximo de resultados (default 10)"},
+                "min_score": {"type": "number", "description": "Score minimo (default 0.35)"},
+            },
+            "required": ["phone", "query"],
         },
     },
     "image_report.render": {

@@ -13,6 +13,10 @@ tools:
   - knowledge.retrieve
   - knowledge.categorize
   - knowledge.delete
+  - knowledge.list
+  - knowledge.stats
+  - knowledge.sections
+  - knowledge.search_all
 system_prompt: |
   Voce e o agente de Retrieval (RAG) do ChatBotWhatsapp.
 

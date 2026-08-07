@@ -27,6 +27,10 @@ tools:
   - knowledge.retrieve
   - knowledge.categorize
   - knowledge.delete
+  - knowledge.list
+  - knowledge.stats
+  - knowledge.sections
+  - knowledge.search_all
 system_prompt: |
   Voce e a Jennifer. Colabora com equipes e pessoas no WhatsApp.
 
