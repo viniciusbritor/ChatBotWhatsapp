@@ -141,6 +141,58 @@ _LIST_WORDS = (
     "tem documento", "quais documentos",
 )
 
+_STATS_WORDS = (
+    "quantas leis", "quantos documentos", "quantas teses",
+    "quantos editais", "que tipo de documento", "que tipos de documento",
+    "quais tipos", "tipos de documento", "qual a classe",
+    "categoria de documento", "classificacao dos documentos",
+    "estatisticas da base", "resumo da base",
+    "quantas", "quantos",
+)
+
+
+async def _stats_knowledge_pipeline(payload: Dict[str, Any]) -> Dict[str, Any]:
+    instance = payload.get("instance", "jennifer")
+    phone = payload.get("phone", "")
+    extra = payload.get("extra", {}) or {}
+
+    try:
+        from pipelines._ack import send_ack
+        await send_ack(instance, phone, "rag", extra)
+        await asyncio.sleep(0.8)
+    except Exception:
+        pass
+
+    try:
+        from agent_orchestration.knowledge_retriever import _list_knowledge_stats
+        stats = await _list_knowledge_stats(phone)
+        if not stats or stats.get("total_documents", 0) == 0:
+            return {
+                "reply": "Nao tenho nenhum documento na base ainda. Envie um PDF ou documento que eu memorizo!",
+                "delay_ms": 0,
+                "presence": "composing",
+                "metadata": {"agent_id": "agent-knowledge-retriever", "stats": True, "count": 0, "skip_image_report": True},
+            }
+        by_class = stats.get("by_class", {})
+        class_lines = "\n".join(f"  • {cls}: {count} documento(s)" for cls, count in by_class.items())
+        return {
+            "reply": (
+                f"📊 *Resumo da sua base de conhecimento:*\n"
+                f"Total: {stats['total_documents']} documentos, {stats['total_chunks']} chunks\n\n"
+                f"Por classe:\n{class_lines}"
+            ),
+            "delay_ms": 0,
+            "presence": "composing",
+            "metadata": {"agent_id": "agent-knowledge-retriever", "stats": True, "count": stats["total_documents"], "skip_image_report": True},
+        }
+    except Exception as exc:
+        return {
+            "reply": "Desculpe, nao consegui analisar a base agora.",
+            "delay_ms": 0,
+            "presence": "composing",
+            "metadata": {"agent_id": "agent-knowledge-retriever", "error": str(exc)[:200]},
+        }
+
 
 async def _disambiguate_rag_vs_drive(
     text: str,
@@ -714,6 +766,9 @@ async def run(payload: Dict[str, Any]) -> Dict[str, Any]:
         return await _run_drive(payload)
 
     t = text.lower()
+    if any(kw in t for kw in _STATS_WORDS):
+        return await _stats_knowledge_pipeline(payload)
+
     if any(kw in t for kw in _LIST_WORDS):
         has_content = any(mk in t for mk in ("diz", "fala", "capitulo", "artigo", "lei", "sobre", "resuma", "explique", "qual o", "quais os"))
         if not has_content:

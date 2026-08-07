@@ -136,4 +136,4 @@ class TestRetrieverSystemPrompt:
         assert "nunca invente" in sp
 
     def test_version_incremented(self, retriever_yaml):
-        assert retriever_yaml.get("system_prompt_version") == 2
+        assert retriever_yaml.get("system_prompt_version") == 3
