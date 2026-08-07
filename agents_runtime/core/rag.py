@@ -418,6 +418,23 @@ def _detect_sections(text: str) -> List[tuple[str, str]]:
     return [(title, body) for title, body in sections if body and len(body) >= 50]
 
 
+_TOC_PATTERN = re.compile(r"\.{3,}\s*\d+$", re.MULTILINE)
+_TOC_LINE_PATTERN = re.compile(r"^.{5,80}\.{3,}\s*\d+\s*$", re.MULTILINE)
+
+
+def _is_toc_chunk(text: str) -> bool:
+    if not text or len(text) < 20:
+        return False
+    lines = text.strip().split("\n")
+    if len(lines) < 2:
+        return False
+    toc_lines = 0
+    for line in lines:
+        if _TOC_LINE_PATTERN.match(line.strip()) or _TOC_PATTERN.search(line.strip()):
+            toc_lines += 1
+    return toc_lines >= max(1, len(lines) * 0.5)
+
+
 def _chunk_text_semantic(
     text: str,
     max_chars: int = 2000,
@@ -439,7 +456,8 @@ def _chunk_text_semantic(
 
             if len(para_text) <= max_chars:
                 chunk_title = section_title or ""
-                all_chunks.append((chunk_title, "paragraph", para_text))
+                if not _is_toc_chunk(para_text):
+                    all_chunks.append((chunk_title, "paragraph", para_text))
                 continue
 
             sentences = re.split(r"(?<=[.!?])\s+", para_text)
@@ -452,7 +470,8 @@ def _chunk_text_semantic(
                     current = (current + " " + sent).strip()
                 else:
                     if len(current) >= min_chars:
-                        all_chunks.append((section_title or "", "sentence_group", current))
+                        if not _is_toc_chunk(current):
+                            all_chunks.append((section_title or "", "sentence_group", current))
                         words = current.split()
                         overlap_words = min(len(words), overlap_chars // 5)
                         current = " ".join(words[-overlap_words:]) if overlap_words else ""

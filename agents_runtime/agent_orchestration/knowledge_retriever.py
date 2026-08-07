@@ -85,6 +85,31 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", without_accents).strip()
 
 
+_TOC_LINE_RE = re.compile(r"^.{5,80}\.{3,}\s*\d+\s*$")
+
+
+def _is_toc_chunk(text: str) -> bool:
+    if not text or len(text) < 20:
+        return False
+    lines = text.strip().split("\n")
+    if len(lines) < 2:
+        return False
+    toc_lines = 0
+    for line in lines:
+        if _TOC_LINE_RE.match(line.strip()):
+            toc_lines += 1
+    return toc_lines >= max(1, len(lines) * 0.5)
+
+
+def _results_are_toc_only(chunks: List[Dict[str, Any]]) -> bool:
+    if not chunks:
+        return False
+    if len(chunks) == 1 and _is_toc_chunk(chunks[0].get("text", "")):
+        return True
+    toc_count = sum(1 for c in chunks if _is_toc_chunk(c.get("text", "")))
+    return toc_count >= len(chunks) * 0.5
+
+
 RAG_KEYWORDS_RAW = {
     "memorizei", "memorizado", "memorizada", "memorizou", "memorizaram",
     "indexado", "indexada", "indexados", "no rag", "no vector",
@@ -1216,6 +1241,8 @@ __all__ = [
     "_match_source_title_dynamic",
     "_list_known_sources",
     "_list_knowledge_stats",
+    "_is_toc_chunk",
+    "_results_are_toc_only",
     "retrieve",
     "share_pending_action_consume",
     "RAG_RETRIEVE_MIN_SCORE",

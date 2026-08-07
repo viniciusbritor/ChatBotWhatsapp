@@ -484,3 +484,78 @@ class TestBuildSections:
         from core.rag import _build_sections
         assert _build_sections("") == []
         assert _build_sections("   ") == []
+
+
+class TestTocChunkDetection:
+    def test_detects_toc_chunk_with_dots(self):
+        from core.rag import _is_toc_chunk
+
+        toc = (
+            "Consumo .......................................................................10\n"
+            "da Prevencao e da Reparacao dos Danos .....................14\n"
+            "Produto e do Servico ................................................15\n"
+        )
+        assert _is_toc_chunk(toc) is True
+
+    def test_rejects_content_chunk(self):
+        from core.rag import _is_toc_chunk
+
+        content = (
+            "Art. 42. Na cobranca de debitos, o consumidor inadimplente nao "
+            "sera exposto a ridiculo, nem sera submetido a qualquer tipo de "
+            "constrangimento ou ameaca."
+        )
+        assert _is_toc_chunk(content) is False
+
+    def test_empty_or_short(self):
+        from core.rag import _is_toc_chunk
+
+        assert _is_toc_chunk("") is False
+        assert _is_toc_chunk("oi") is False
+        assert _is_toc_chunk("Consumo ........ 10") is False  # too short (1 line)
+
+    def test_single_line_dots_only_not_toc(self):
+        from core.rag import _is_toc_chunk
+
+        assert _is_toc_chunk(".......................................... 42") is False
+
+    def test_toc_filter_removes_toc_from_chunking(self):
+        from core.rag import _is_toc_chunk
+
+        toc_text = (
+            "Consumo .......................................................................10\n"
+            "da Prevencao e da Reparacao dos Danos .....................14\n"
+        )
+        assert _is_toc_chunk(toc_text) is True
+
+        content_text = (
+            "Art. 42. Na cobranca de debitos, o consumidor inadimplente nao "
+            "sera exposto a ridiculo, nem sera submetido a qualquer tipo de "
+            "constrangimento ou ameaca."
+        )
+        assert _is_toc_chunk(content_text) is False
+
+
+class TestResultsAreTocOnly:
+    def test_all_toc_returns_true(self):
+        from agent_orchestration.knowledge_retriever import _results_are_toc_only
+
+        chunks = [
+            {"text": "Consumo .......................................................10\n"
+                     "da Prevencao .................................................14\n"},
+        ]
+        assert _results_are_toc_only(chunks) is True
+
+    def test_mixed_content_returns_false(self):
+        from agent_orchestration.knowledge_retriever import _results_are_toc_only
+
+        chunks = [
+            {"text": "Art. 42. Na cobranca de debitos, o consumidor inadimplente nao sera exposto a ridiculo."},
+            {"text": "Art. 71. O descumprimento das normas de defesa do consumidor sujeitara o infrator a sancao."},
+        ]
+        assert _results_are_toc_only(chunks) is False
+
+    def test_empty_returns_false(self):
+        from agent_orchestration.knowledge_retriever import _results_are_toc_only
+
+        assert _results_are_toc_only([]) is False
