@@ -685,7 +685,7 @@ async def _retrieve_private(
         language=language,
         since=since,
     )
-    # Fallback: se o filtro de classe zerou a busca, tentar sem ele
+    # Fallback 1: se o filtro de classe zerou a busca, tentar sem ele
     chunks = result.get("results", []) if isinstance(result, dict) else []
     if not chunks and class_:
         logger.info("class_filter_blocked_retrieval class=%s — retrying without", class_)
@@ -700,7 +700,23 @@ async def _retrieve_private(
             language=language,
             since=since,
         )
-    chunks = result.get("results", []) if isinstance(result, dict) else []
+        chunks = result.get("results", []) if isinstance(result, dict) else []
+    # Fallback 2: se ainda 0 hits, reduzir threshold progressivamente (piso 0.35)
+    if not chunks and min_score > 0.35:
+        relaxed = max(0.35, round(min_score * 0.6, 2))
+        logger.info("score_threshold_blocked_retrieval min_score=%s — retrying with %s", min_score, relaxed)
+        result = await search_legal_knowledge(
+            phone=phone,
+            query=query,
+            k=limit,
+            min_score=relaxed,
+            source_title=source_title,
+            class_=class_,
+            group=group,
+            language=language,
+            since=since,
+        )
+        chunks = result.get("results", []) if isinstance(result, dict) else []
     return {
         "scope": "private",
         "results": chunks,

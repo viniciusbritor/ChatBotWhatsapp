@@ -57,7 +57,7 @@ PRIVATE_CHARS_SOFT_LIMIT = int(
 # Minimum similarity score for retrieval (Phase F4d.6). Default 0.7
 # (precisao ajustavel); tunable via env.
 RAG_RETRIEVE_MIN_SCORE = float(
-    os.getenv("RAG_RETRIEVE_MIN_SCORE", "0.4")
+    os.getenv("RAG_RETRIEVE_MIN_SCORE", "0.6")
 )
 
 # Plain Firestore collections.
@@ -1132,7 +1132,7 @@ async def search_legal_knowledge(
             data = document.to_dict()
             score = _score_document(document, data)
             scores.append(score)
-            if score < min_score and score < ADAPTIVE_FLOOR:
+            if score < min_score or score < ADAPTIVE_FLOOR:
                 continue
             chunks.append(
                 {
