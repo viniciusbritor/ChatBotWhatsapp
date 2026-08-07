@@ -542,8 +542,10 @@ async def _find_nearest(
 
     def execute() -> List[Any]:
         query = db.collection(collection_name)
+        filter_fields = []
         for field, operator, value in filters or []:
             query = query.where(filter=FieldFilter(field, operator, value))
+            filter_fields.append(f"{field}{operator}{str(value)[:30]}")
         vector_query = query.find_nearest(
             vector_field="vector_embedding",
             query_vector=Vector(query_vector),
@@ -551,7 +553,12 @@ async def _find_nearest(
             distance_measure=DistanceMeasure.COSINE,
             distance_result_field="vector_distance",
         )
-        return list(vector_query.get())
+        results = list(vector_query.get())
+        logger.info(
+            "vector_find_nearest collection=%s limit=%d filters=%s results=%d",
+            collection_name, limit, filter_fields, len(results),
+        )
+        return results
 
     return await asyncio.to_thread(execute)
 

@@ -783,6 +783,78 @@ Antes do smoke test integrado:
 
 O Firestore Emulator nao oferece validacao equivalente para consultas vetoriais. Testes locais usam mocks; o smoke test vetorial utiliza exclusivamente o projeto GCP de teste.
 
+### Composite Indexes para Firestore Vector (knowledge-database)
+
+O Firestore Vector (`collection: knowledge-database`) requer composite indexes
+para consultas com filtros de igualdade no `find_nearest`. Sem esses indexes,
+o Firestore retorna erro `FAILED_PRECONDITION: The query requires a composite index`.
+
+**Indices obrigatórios (criar via `gcloud firestore indexes composite create`):**
+
+```bash
+PROJECT="coherence-ominichannel-fs"
+COLLECTION="knowledge-database"
+
+# Index 1: filtro class + owner_hash (mais usado pelo knowledge.retrieve)
+gcloud firestore indexes composite create \
+    --collection-group=$COLLECTION \
+    --field-config=field-path=scope,order=ASCENDING \
+    --field-config=field-path=owner_hash,order=ASCENDING \
+    --field-config=field-path=class,order=ASCENDING \
+    --field-config=field-path=embedding_model,order=ASCENDING \
+    --field-config=field-path=embedding_dim,order=ASCENDING \
+    --field-config=field-path=schema_version,order=ASCENDING \
+    --field-config=vector-config='{"dimension":1536,"flat":{}}',field-path=vector_embedding \
+    --project=$PROJECT
+
+# Index 2: filtro source_title (para busca por documento especifico)
+gcloud firestore indexes composite create \
+    --collection-group=$COLLECTION \
+    --field-config=field-path=scope,order=ASCENDING \
+    --field-config=field-path=owner_hash,order=ASCENDING \
+    --field-config=field-path=source_title,order=ASCENDING \
+    --field-config=field-path=embedding_model,order=ASCENDING \
+    --field-config=field-path=embedding_dim,order=ASCENDING \
+    --field-config=field-path=schema_version,order=ASCENDING \
+    --field-config=vector-config='{"dimension":1536,"flat":{}}',field-path=vector_embedding \
+    --project=$PROJECT
+
+# Index 3: filtro group + owner_hash
+gcloud firestore indexes composite create \
+    --collection-group=$COLLECTION \
+    --field-config=field-path=scope,order=ASCENDING \
+    --field-config=field-path=owner_hash,order=ASCENDING \
+    --field-config=field-path=group,order=ASCENDING \
+    --field-config=field-path=embedding_model,order=ASCENDING \
+    --field-config=field-path=embedding_dim,order=ASCENDING \
+    --field-config=field-path=schema_version,order=ASCENDING \
+    --field-config=vector-config='{"dimension":1536,"flat":{}}',field-path=vector_embedding \
+    --project=$PROJECT
+
+# Index 4: filtro language + owner_hash
+gcloud firestore indexes composite create \
+    --collection-group=$COLLECTION \
+    --field-config=field-path=scope,order=ASCENDING \
+    --field-config=field-path=owner_hash,order=ASCENDING \
+    --field-config=field-path=language,order=ASCENDING \
+    --field-config=field-path=embedding_model,order=ASCENDING \
+    --field-config=field-path=embedding_dim,order=ASCENDING \
+    --field-config=field-path=schema_version,order=ASCENDING \
+    --field-config=vector-config='{"dimension":1536,"flat":{}}',field-path=vector_embedding \
+    --project=$PROJECT
+```
+
+**Verificação:**
+```bash
+gcloud firestore indexes composite list --project=$PROJECT --format="table(name,state,fields)"
+```
+
+**Diagnóstico em produção:** o log estruturado de `_find_nearest` inclui
+`filters=["class==legal","source_title==cdc.pdf"]` e `results=0`.
+Se `results=0` com filtros extras mas a mesma query sem filtros retorna
+chunks (via `knowledge.search_all`), o composite index está ausente ou mal
+configurado.
+
 ### `scripts/seed_legal_knowledge.py`
 
 Pre-popula `agente-knowledge-{phone}` com ~10 documentos legais essenciais para o RAG juridico:

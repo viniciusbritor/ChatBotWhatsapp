@@ -1055,6 +1055,9 @@ async def retrieve(
                 group_jid=group_jid, query=enriched_query, limit=effective_limit, min_score=threshold
             )
             if group_hits["count"] > 0:
+                if group_hits["count"] > 3:
+                    group_hits["results"] = await _rerank_with_llm(enriched_query, group_hits["results"], top_n=min(group_hits["count"], 5))
+                    group_hits["count"] = len(group_hits["results"])
                 result = {
                     **group_hits,
                     "decision": "group",
@@ -1072,6 +1075,9 @@ async def retrieve(
                 class_=hints.get("class"),
             )
             if private_hits["count"] > 0:
+                if private_hits["count"] > 3:
+                    private_hits["results"] = await _rerank_with_llm(enriched_query, private_hits["results"], top_n=min(private_hits["count"], 5))
+                    private_hits["count"] = len(private_hits["results"])
                 pending = await _maybe_request_share(phone, group_jid, query)
                 result = {
                     **private_hits,
@@ -1108,6 +1114,9 @@ async def retrieve(
             class_=hints.get("class"),
         )
         if private_hits["count"] > 0:
+            if private_hits["count"] > 3:
+                private_hits["results"] = await _rerank_with_llm(enriched_query, private_hits["results"], top_n=min(private_hits["count"], 5))
+                private_hits["count"] = len(private_hits["results"])
             decision = "private"
             result = {
                 **private_hits,
