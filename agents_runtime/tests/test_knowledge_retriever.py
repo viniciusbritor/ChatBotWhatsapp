@@ -204,7 +204,9 @@ class TestRetrievalCache:
         ):
             await retrieve(envelope, "query A")
             await retrieve(envelope, "query B")
-        assert mock.await_count == 2
+        # Fallback progressivo: cada query com 0 hits dispara retry com score reduzido.
+        # 2 queries × 2 chamadas = 4 no total.
+        assert mock.await_count == 4
 
     def test_cache_set_respects_max_size(self):
         from agent_orchestration.knowledge_retriever import (

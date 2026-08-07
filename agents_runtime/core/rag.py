@@ -1139,7 +1139,7 @@ async def search_legal_knowledge(
             data = document.to_dict()
             score = _score_document(document, data)
             scores.append(score)
-            if score < min_score or score < ADAPTIVE_FLOOR:
+            if score < min_score and score < ADAPTIVE_FLOOR:
                 continue
             chunks.append(
                 {
