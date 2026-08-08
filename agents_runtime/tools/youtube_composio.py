@@ -6,10 +6,24 @@ from typing import Any, Dict
 logger = logging.getLogger(__name__)
 
 _YOUTUBE_ACCOUNT = os.getenv("COMPOSIO_YOUTUBE_ACCOUNT", "youtube_begall-sozin")
+_CACHED_KEY = None
+_PROJECT = os.getenv("GCP_PROJECT", "coherence-ominichannel-fs")
 
 
 def _get_api_key() -> str:
-    return (os.getenv("COMPOSIO_API_KEY", "") or "").strip().lstrip("\ufeff")
+    global _CACHED_KEY
+    if _CACHED_KEY:
+        return _CACHED_KEY
+    try:
+        from google.cloud import secretmanager
+        client = secretmanager.SecretManagerServiceClient()
+        name = f"projects/{_PROJECT}/secrets/COMPOSIO_API_KEY/versions/latest"
+        response = client.access_secret_version(request={"name": name})
+        _CACHED_KEY = response.payload.data.decode("utf-8-sig").strip()
+        return _CACHED_KEY
+    except Exception as exc:
+        logger.error("Failed to load COMPOSIO_API_KEY from Secret Manager: %s", exc)
+        return ""
 
 
 async def _composio_call(tool_slug: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
