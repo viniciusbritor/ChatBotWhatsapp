@@ -12,7 +12,7 @@ pubsub_v1 = pytest.importorskip("google.cloud.pubsub_v1")
 from core.pubsub_publisher import PubSubPublisher  # noqa: E402
 
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.skip(reason="requires PubSub emulator — integration only")
 
 
 def test_real_pubsub_publish_pull_roundtrip():
