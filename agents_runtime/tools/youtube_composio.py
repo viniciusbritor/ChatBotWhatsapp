@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 _YOUTUBE_ACCOUNT = os.getenv("COMPOSIO_YOUTUBE_ACCOUNT", "youtube_begall-sozin")
 _CACHED_KEY = None
 _PROJECT = os.getenv("GCP_PROJECT", "coherence-ominichannel-fs")
-_BASE_URL = "https://backend.composio.dev/api/v1"
+_BASE_URL = "https://backend.composio.dev/api/v3"
 
 
 def _get_api_key() -> str:
