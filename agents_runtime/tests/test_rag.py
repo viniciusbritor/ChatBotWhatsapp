@@ -235,7 +235,7 @@ class TestConversationMemory:
                 "owner_hash": "9" * 32,
                 "text_masked": "resultado interno",
                 "direction": "out",
-                "agent_id": "manager-web",
+                "agent_id": "manager-calendar",
                 "response_identity": "Jennifer",
                 "created_at": "2026-07-23T00:00:00-03:00",
             },
@@ -251,7 +251,7 @@ class TestConversationMemory:
         with patch("core.rag._get_firestore", return_value=database):
             result = await search_conversation_memory("5511999999999", "resultado")
 
-        assert result[0]["agent_id"] == "manager-web"
+        assert result[0]["agent_id"] == "manager-calendar"
         # Firestore query must filter by owner_hash to prevent leakage.
         expected_hash = _expected_owner_hash("5511999999999")
         database.collection.return_value.where.assert_called_once_with(
@@ -282,7 +282,7 @@ class TestConversationMemory:
                 "owner_hash": _expected_owner_hash("5511999999999"),
                 "text_masked": "resultado interno",
                 "direction": "out",
-                "agent_id": "manager-web",
+                "agent_id": "manager-calendar",
                 "response_identity": "Jennifer",
                 "created_at": "2026-07-23T00:00:00-03:00",
             },
@@ -299,7 +299,7 @@ class TestConversationMemory:
         with patch("core.rag._get_firestore", return_value=database):
             result = await search_conversation_memory("5511999999999", "resultado")
 
-        assert result[0]["agent_id"] == "manager-web"
+        assert result[0]["agent_id"] == "manager-calendar"
         assert result[0]["response_identity"] == "Jennifer"
         assert result[0]["score"] == pytest.approx(1.0)
 

@@ -15,15 +15,12 @@ _HARDCODED_ROUTES = {
     "manager-calendar",
     "manager-drive",
     "manager-email",
-    "manager-web",
     "agent-intimacy",
     "agent-learning",
     "agent-morality",
-    "agent-locomocao",
-    "agent-youtube",
 }
-_WORKER_AGENTS = {"ata-generator", "agent-proatividade"}
-_INTERNAL_AGENTS = {"agent-privacy-guard", "agent-rag", "group-resolver"}
+_WORKER_AGENTS = set()
+_INTERNAL_AGENTS = set()
 _GOOGLE_PREFIXES = ("calendar.", "drive.", "gmail.")
 _telemetry: Dict[str, Dict[str, Any]] = {}
 _telemetry_lock = threading.RLock()

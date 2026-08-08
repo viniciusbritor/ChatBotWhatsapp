@@ -22,9 +22,6 @@ routing_rules = [
     {"agent_id": "manager-calendar", "priority": 4, "enabled": True, "keywords": ["agenda", "reuniao", "evento", "compromisso", "lembrete", "calendario", "disponivel", "semana que vem", "proxima semana"]},
     {"agent_id": "manager-drive", "priority": 5, "enabled": True, "keywords": ["drive", "documento", "arquivo", "pasta", "upload", "omnichannel", "baixar", "encontrar arquivo"]},
     {"agent_id": "manager-email", "priority": 6, "enabled": True, "keywords": ["email", "e-mail", "caixa de entrada", "gmail", "ler email", "enviar email", "ultimos emails"]},
-    {"agent_id": "manager-web", "priority": 7, "enabled": True, "keywords": ["pesquisar", "buscar na internet", "busque na internet", "procure na web", "pesquise na web", "noticia atual", "noticias atuais"]},
-    {"agent_id": "agent-youtube", "priority": 8, "enabled": True, "keywords": ["youtube", "vídeo", "video", "tutorial", "aula"]},
-    {"agent_id": "agent-locomocao", "priority": 9, "enabled": True, "keywords": ["uber", "rota", "tempo", "distância", "distancia", "chegar", "trânsito", "transito", "endereço", "endereco", "onde fica", "perto de", "restaurante", "farmácia", "farmacia", "posto"]},
 ]
 db.collection("config").document("routing").set({"rules": routing_rules, "updated_at": now}, merge=True)
 print("config/routing seeded:", len(routing_rules), "rules")
@@ -57,68 +54,11 @@ db.collection("config").document("proactivity").set({
 print("config/proactivity seeded")
 
 # === NOVOS AGENTES ===
-new_agents = [
-    {"id": "agent-proatividade", "name": "Proatividade", "role": "specialist", "parent_id": "jennifier",
-     "model": "deepseek-v4-flash", "thinking": "disabled", "enabled": True,
-     "skills": ["skill-proatividade"], "tools": ["calendar.list_events"],
-     "system_prompt": "Voce antecipa necessidades dos usuarios. Com base no calendario e contexto, sugira lembretes, follow-ups e dicas uteis. Seja proativa mas nao invasiva. Respeite os limites de frequencia configurados.",
-     "instances": ["jennifer"], "system_prompt_version": 1, "updated_at": now},
-    {"id": "agent-privacy-guard", "name": "Privacy Guard", "role": "specialist", "parent_id": "jennifier",
-     "model": "deepseek-v4-flash", "thinking": "disabled", "enabled": True,
-     "skills": ["skill-privacy-group"], "tools": [],
-     "system_prompt": "Voce gerencia privacidade em grupos. Quando alguem pede dados pessoais no grupo, confirme com o usuario pelo NOME (nao email) se ele quer compartilhar no grupo ou receber no privado. Aguarde a resposta antes de prosseguir.",
-     "instances": ["jennifer"], "system_prompt_version": 1, "updated_at": now},
-    {"id": "agent-locomocao", "name": "Locomoção", "role": "specialist", "parent_id": "jennifier",
-     "model": "deepseek-v4-flash", "thinking": "disabled", "enabled": True,
-     "skills": ["skill-locomocao"], "tools": ["locomotion.calc_route", "locomotion.geocode", "locomotion.search_places"],
-     "system_prompt": "Voce calcula rotas, estima precos de Uber/99 e busca lugares proximos. SEMPRE confirme o endereco com o usuario antes de calcular. Precisa de origem e destino para calcular rota.",
-     "instances": ["jennifer"], "system_prompt_version": 1, "updated_at": now},
-    {"id": "agent-youtube", "name": "YouTube", "role": "specialist", "parent_id": "jennifier",
-     "model": "deepseek-v4-flash", "thinking": "disabled", "enabled": True,
-     "skills": [], "tools": ["youtube.search_videos"],
-     "system_prompt": "Voce busca videos no YouTube e retorna titulo, canal e link. Maximo 3 resultados por busca.",
-     "instances": ["jennifer"], "system_prompt_version": 1, "updated_at": now},
-    {"id": "agent-rag", "name": "Conhecimento", "role": "specialist", "parent_id": "jennifier",
-     "model": "deepseek-v4-flash", "thinking": "disabled", "enabled": True,
-     "skills": [], "tools": ["rag.search_knowledge"],
-     "system_prompt": "Voce busca informacoes na base de conhecimento compartilhada (leis, editais, livros). Use search_knowledge para consultas semanticas. Responda sempre em portugues brasileiro.",
-     "instances": ["jennifer"], "system_prompt_version": 1, "updated_at": now},
-    {"id": "group-resolver", "name": "Group Resolver", "role": "specialist", "parent_id": "manager-drive",
-     "model": "deepseek-v4-flash", "thinking": "disabled", "enabled": True,
-     "skills": [], "tools": ["group.get_info", "drive.search_files"],
-     "system_prompt": "Voce resolve qual grupo/pasta do Drive corresponde a um grupo do WhatsApp. Dado um group_jid, busque no Firestore qual pasta usar.",
-     "instances": ["jennifer"], "system_prompt_version": 1, "updated_at": now},
-    {"id": "juridicas-agent", "name": "Juridico", "role": "specialist", "parent_id": "jennifier",
-     "model": "deepseek-v4-flash", "thinking": "disabled", "enabled": True,
-     "skills": [], "tools": ["knowledge.retrieve", "chat_history.search"],
-     "system_prompt": "Voce e um jurista especializado. Analise leis, codigos, decretos e normas. Cite artigos e jurisprudencia com precisao. Tom formal e objetivo. Sempre indique a fonte entre colchetes: [documento | secao]. NUNCA invente leis ou artigos que nao estao nos trechos.",
-     "instances": ["jennifer"], "system_prompt_version": 1, "updated_at": now},
-    {"id": "editais-agent", "name": "Licitacoes", "role": "specialist", "parent_id": "jennifier",
-     "model": "deepseek-v4-flash", "thinking": "disabled", "enabled": True,
-     "skills": [], "tools": ["knowledge.retrieve", "chat_history.search"],
-     "system_prompt": "Voce e especialista em licitacoes e editais publicos. Destaque prazos, modalidades, requisitos e valores. Tom tecnico e preciso. Organize a resposta por secoes do edital. Sempre indique a fonte entre colchetes: [documento | secao].",
-     "instances": ["jennifer"], "system_prompt_version": 1, "updated_at": now},
-    {"id": "academica-agent", "name": "Academico", "role": "specialist", "parent_id": "jennifier",
-     "model": "deepseek-v4-flash", "thinking": "disabled", "enabled": True,
-     "skills": [], "tools": ["knowledge.retrieve", "chat_history.search"],
-     "system_prompt": "Voce e um orientador academico. Contextualize teses, dissertacoes e artigos cientificos. Destaque metodologia, resultados e referencias. Tom didatico e rigoroso. Sempre indique a fonte entre colchetes: [documento | secao].",
-     "instances": ["jennifer"], "system_prompt_version": 1, "updated_at": now},
-    {"id": "anotacoes-agent", "name": "Anotacoes", "role": "specialist", "parent_id": "jennifier",
-     "model": "deepseek-v4-flash", "thinking": "disabled", "enabled": True,
-     "skills": [], "tools": ["knowledge.retrieve", "chat_history.search"],
-     "system_prompt": "Voce gerencia notas, lembretes e memorias pessoais do usuario. Tom informal e direto, como um assistente pessoal. Respostas curtas e objetivas. Consulte o historico de conversas para contexto.",
-     "instances": ["jennifer"], "system_prompt_version": 1, "updated_at": now},
-]
+new_agents = []
 
 for agent in new_agents:
     db.collection("agents").document(agent["id"]).set(agent, merge=True)
 print(f"Agents seeded: {len(new_agents)}")
-
-# Disable legacy agents replaced by specialists
-# agent-knowledge-retriever is now re-enabled (used by jennifier PT9 routing)
-for legacy_id in ("agent-rag",):
-    db.collection("agents").document(legacy_id).set({"enabled": False, "updated_at": now}, merge=True)
-    print(f"Agent disabled: {legacy_id}")
 
 # === NOVAS SKILLS ===
 new_skills = [

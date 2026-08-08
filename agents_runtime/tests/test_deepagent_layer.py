@@ -15,7 +15,6 @@ class TestListSupportedManagers:
         assert "manager-calendar" in managers
         assert "manager-email" in managers
         assert "manager-drive" in managers
-        assert "manager-web" in managers
 
 
 class TestGetToolsForManager:
@@ -42,12 +41,6 @@ class TestGetToolsForManager:
         assert "search_drive_files" in names
         assert "list_drive_folder" in names
         assert "create_drive_folder" in names
-
-    def test_web_has_tools(self):
-        from deepagent_layer import get_tools_for_manager
-        tools = get_tools_for_manager("manager-web")
-        names = [t.name for t in tools]
-        assert "web_search_tool" in names
 
     def test_unknown_manager_returns_empty(self):
         from deepagent_layer import get_tools_for_manager

@@ -16,12 +16,7 @@ delegates_to:
   - manager-web
   - agent-intimacy
   - agent-learning
-  - agent-locomocao
-  - agent-youtube
-  - agent-rag
   - agent-morality
-  - agent-privacy-guard
-  - agent-proatividade
   - agent-knowledge-retriever
 tools:
   - knowledge.answer
