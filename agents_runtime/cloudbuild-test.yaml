@@ -14,7 +14,7 @@ steps:
     entrypoint: "bash"
     args:
       - "-c"
-      - "cd agents_runtime && pip install --prefer-binary -q pyyaml && python scripts/sync_agents_to_firestore.py"
+      - "cd agents_runtime && pip install --prefer-binary -q pyyaml --break-system-packages && python scripts/sync_agents_to_firestore.py"
 
   - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
     id: "deploy-firestore-index-source-title-chunk"
