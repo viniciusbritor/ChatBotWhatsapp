@@ -37,7 +37,7 @@ async def _api_call(tool_slug: str, arguments: Dict[str, Any], connected_account
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
-                f"{_BASE_URL}/actions/{tool_slug}/execute",
+                f"{_BASE_URL}/tools/{tool_slug}/execute",
                 headers={
                     "x-consumer-api-key": key,
                     "Content-Type": "application/json",
