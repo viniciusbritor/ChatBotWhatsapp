@@ -1,16 +1,22 @@
-"""Google Docs tools via Composio MCP."""
+"""Google Docs tools via Composio SDK."""
 import logging
 import os
 from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
 
+_GDOCS_ACCOUNT = os.getenv("COMPOSIO_GDOCS_ACCOUNT", "googledocs_eyas-blasty")
+
 
 async def _composio_call(tool_slug: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     try:
         from composio import Composio
         client = Composio(api_key=os.getenv("COMPOSIO_API_KEY", ""))
-        result = client.actions.execute(tool_slug, arguments)
+        result = client.tools.execute(
+            slug=tool_slug,
+            arguments=arguments,
+            connected_account_id=_GDOCS_ACCOUNT,
+        )
         return result.get("data", result)
     except ImportError:
         logger.warning("Composio SDK not installed")

@@ -1,16 +1,22 @@
-"""LinkedIn tools via Composio MCP."""
+"""LinkedIn tools via Composio SDK."""
 import logging
 import os
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+_LINKEDIN_ACCOUNT = os.getenv("COMPOSIO_LINKEDIN_ACCOUNT", "linkedin_struma-torula")
+
 
 async def _composio_call(tool_slug: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     try:
         from composio import Composio
         client = Composio(api_key=os.getenv("COMPOSIO_API_KEY", ""))
-        result = client.actions.execute(tool_slug, arguments)
+        result = client.tools.execute(
+            slug=tool_slug,
+            arguments=arguments,
+            connected_account_id=_LINKEDIN_ACCOUNT,
+        )
         return result.get("data", result)
     except ImportError:
         logger.warning("Composio SDK not installed")
