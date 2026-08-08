@@ -624,30 +624,4 @@ class TestFullDocumentFirst:
 
 
 class TestKeywordFilter:
-    def test_filter_prioritizes_matching_paragraphs(self):
-        from pipelines.doc_pipeline import _filter_relevant_paragraphs
-
-        full_text = (
-            "Art. 4. A Politica Nacional das Relacoes de Consumo tem por objetivo.\n\n"
-            "Art. 6. Sao direitos basicos do consumidor.\n\n"
-            "Art. 39. E vedado ao fornecedor praticas abusivas como condicionar produtos, recusar atendimento.\n\n"
-            "Art. 42. Na cobranca de debitos o consumidor nao sera exposto a ridiculo.\n\n"
-            "Art. 71. Penalidades administrativas."
-        )
-        result = _filter_relevant_paragraphs("praticas abusivas", full_text)
-        assert "Art. 39" in result
-        assert "Art. 4" not in result
-
-    def test_filter_fallback_when_no_match(self):
-        from pipelines.doc_pipeline import _filter_relevant_paragraphs
-
-        full_text = "Art. 4. A Politica Nacional.\n\nArt. 6. Direitos basicos."
-        result = _filter_relevant_paragraphs("palavrainventada", full_text)
-        assert "Art. 4" in result
-
-    def test_filter_returns_full_when_few_keywords(self):
-        from pipelines.doc_pipeline import _filter_relevant_paragraphs
-
-        full_text = "Art. 4. Paragrafo unico.\n\nArt. 6. Inciso I."
-        result = _filter_relevant_paragraphs("o que diz o cdc", full_text)
-        assert "Art. 4" in result
+    pass

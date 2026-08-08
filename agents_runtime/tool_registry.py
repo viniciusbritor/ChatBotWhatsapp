@@ -183,7 +183,46 @@ async def _answer_knowledge(**kwargs):
         sources = list(set(c.get("source", "") for c in chunks[:5]))
         return {"answer": answer or "", "confidence": min(0.65, round(top_score, 2)), "sources": sources, "strategy": "search_all"}
 
+    # Strategy 4: query expansion + retry vector search
+    expanded = await _expand_query(query)
+    if expanded != query:
+        result = await retrieve(envelope, expanded, limit=10, min_score=0.3)
+        chunks = result.get("results", [])
+        if chunks:
+            answer = await _synthesize_chunks_llm(query, chunks)
+            top_score = max((c.get("score", 0.0) for c in chunks), default=0.0)
+            sources = list(set(c.get("source", "") for c in chunks[:5]))
+            return {"answer": answer or "", "confidence": min(0.5, round(top_score, 2)), "sources": sources, "strategy": "query_expansion"}
+
     return {"answer": "", "confidence": 0.0, "sources": [], "strategy": "no_match"}
+
+
+async def _expand_query(query: str) -> str:
+    import os
+    api_key = (os.getenv("DEEPSEEK_API_KEY", "") or "").strip()
+    if not api_key:
+        return query
+    try:
+        from langchain_openai import ChatOpenAI
+        import asyncio as _asyncio
+        base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1").strip()
+        llm = ChatOpenAI(
+            model="deepseek-v4-flash", api_key=api_key, base_url=base_url,
+            temperature=0, max_tokens=80, timeout=5,
+            extra_body={"cache_mode": "default"},
+        )
+        prompt = (
+            "Expanda esta pergunta em 3-5 termos ou frases de busca semanticamente "
+            "relacionadas, em portugues brasileiro. Retorne apenas os termos separados "
+            "por virgula, sem explicacoes.\n\n"
+            f"Pergunta: {query}\n\nTermos:"
+        )
+        response = await _asyncio.to_thread(llm.invoke, prompt)
+        content = getattr(response, "content", str(response))
+        expanded = content.strip()[:200]
+        return f"{query} {expanded}" if expanded else query
+    except Exception:
+        return query
 
 
 async def _synthesize_llm(query: str, full_text: str, source_title: str) -> str:
