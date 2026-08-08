@@ -20,6 +20,7 @@ def _get_api_key() -> str:
         name = f"projects/{_PROJECT}/secrets/COMPOSIO_API_KEY/versions/latest"
         response = client.access_secret_version(request={"name": name})
         _CACHED_KEY = response.payload.data.decode("utf-8-sig").strip()
+        logger.info("COMPOSIO_API_KEY loaded from SecretManager: %d chars, starts with %s", len(_CACHED_KEY), _CACHED_KEY[:7])
         return _CACHED_KEY
     except Exception as exc:
         logger.error("Failed to load COMPOSIO_API_KEY from Secret Manager: %s", exc)
