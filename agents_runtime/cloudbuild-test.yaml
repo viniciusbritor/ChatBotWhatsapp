@@ -69,6 +69,7 @@ steps:
     args:
       - "build"
       - "--no-cache"
+      - "--pull"
       - "-t"
       - "gcr.io/$PROJECT_ID/agents-runtime:$BUILD_ID"
       - "-t"
