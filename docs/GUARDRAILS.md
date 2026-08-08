@@ -1,7 +1,40 @@
 # Guardrails e Regras Inegociáveis — ChatBotWhatsapp
 
 > Regras DURAS que todos os agentes IA e humanos devem obedecer neste projeto.
-> Última atualização: **2026-08-06** — Harness CI/CD + Arquitetura de Agentes + Retrieval.
+> Última atualização: **2026-08-07** — Harness DeepSeek v4: proibido `thinking` no `model_kwargs`.
+
+## Ǥ. Harness Global DeepSeek v4 (Flash e Pro) — QUEBRA SILENCIOSA
+
+**Regra:** É **TERMINANTEMENTE PROIBIDO** passar `"thinking": {"type": "disabled"}` ou qualquer valor
+no campo `thinking` dentro de `model_kwargs` ao usar `langchain_openai.ChatOpenAI` com DeepSeek v4
+(Flash ou Pro).
+
+**Motivo:** A API do DeepSeek v4 rejeita com `HTTP 400: unexpected keyword argument 'thinking'`.
+O erro é silencioso quando capturado por try/except — o código cai em fallback sem alertar.
+
+**Evidência:** Log de produção em 07/08/2026:
+```
+full_document synthesis failed: Completions.create() got an unexpected keyword argument 'thinking'
+```
+
+**Correto:**
+```python
+ChatOpenAI(
+    model="deepseek-v4-flash",
+    model_kwargs={"extra_body": {"cache_mode": "default"}},  # apenas extra_body
+)
+```
+
+**Errado (BANIDO):**
+```python
+ChatOpenAI(
+    model="deepseek-v4-flash",
+    model_kwargs={"thinking": {"type": "disabled"}, "extra_body": {"cache_mode": "default"}},  # NUNCA
+)
+```
+
+**Nota:** O `core/llm_provider.py:chat()` já NÃO envia `thinking` (comentário na linha 69 documenta o motivo).
+Esta regra aplica-se a todos os outros call-sites que usam `langchain_openai.ChatOpenAI` diretamente.
 
 ## 0. Harness de CI/CD (Regra Zero — violar = bloqueio)
 

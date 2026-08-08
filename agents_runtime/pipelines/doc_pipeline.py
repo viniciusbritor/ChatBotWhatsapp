@@ -478,7 +478,7 @@ async def _synthesize_full_document(query: str, full_text: str, source_title: st
             temperature=0.3,
             max_tokens=700,
             timeout=30,
-            model_kwargs={"thinking": {"type": "disabled"}, "extra_body": {"cache_mode": "default"}},
+            model_kwargs={"extra_body": {"cache_mode": "default"}},
         )
         response = await asyncio.to_thread(llm.invoke, [
             {"role": "system", "content": _SYNTHESIS_SYSTEM_PROMPT},
@@ -634,26 +634,26 @@ async def _synthesize_rag_answer(query: str, chunks: list) -> str:
 
     chunks = _prioritize_content_chunks(query, chunks)
 
-    # --- Tentativa 1: V4 Flash (thinking disabled) ---
+    # --- Tentativa 1: V4 Flash ---
     try:
         answer = await _call_llm_synthesis(
             model="deepseek-v4-flash",
             query=query, chunks=chunks,
             max_tokens=600, timeout=15,
-            extra_kwargs={"thinking": {"type": "disabled"}},
+            extra_kwargs={},
         )
         if answer and len(answer.strip()) >= 20:
             return answer
     except Exception as exc:
         logger.warning("RAG synthesis Flash failed: %s", exc)
 
-    # --- Tentativa 2: V4 Pro (thinking disabled) ---
+    # --- Tentativa 2: V4 Pro ---
     try:
         answer = await _call_llm_synthesis(
             model="deepseek-v4-pro",
             query=query, chunks=chunks,
             max_tokens=600, timeout=20,
-            extra_kwargs={"thinking": {"type": "disabled"}},
+            extra_kwargs={},
         )
         if answer and len(answer.strip()) >= 20:
             return answer

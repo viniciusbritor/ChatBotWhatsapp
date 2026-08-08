@@ -748,7 +748,7 @@ async def _llm_enrich_query(query: str) -> Dict[str, str]:
             temperature=0,
             max_tokens=150,
             timeout=8,
-            model_kwargs={"thinking": {"type": "disabled"}, "extra_body": {"cache_mode": "default"}},
+            model_kwargs={"extra_body": {"cache_mode": "default"}},
         )
 
         prompt = _LLM_ENRICH_PROMPT.format(query=query.strip()[:300])
