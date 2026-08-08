@@ -341,6 +341,66 @@ async def _render_image_report(**kwargs):
     )
 
 
+async def _linkedin_post(**kwargs):
+    from tools.linkedin_composio import create_post
+    return await create_post(text=kwargs.get("text", ""), visibility=kwargs.get("visibility", "PUBLIC"))
+
+
+async def _linkedin_read_post(**kwargs):
+    from tools.linkedin_composio import read_post
+    return await read_post(post_id=kwargs.get("post_id", ""))
+
+
+async def _linkedin_my_profile(**kwargs):
+    from tools.linkedin_composio import my_profile
+    return await my_profile()
+
+
+async def _linkedin_article(**kwargs):
+    from tools.linkedin_composio import create_article
+    return await create_article(text=kwargs.get("text", ""), title=kwargs.get("title", ""))
+
+
+async def _youtube_search(**kwargs):
+    from tools.youtube_composio import search_videos
+    return await search_videos(query=kwargs.get("query", ""), max_results=kwargs.get("max_results", 5))
+
+
+async def _youtube_video_details(**kwargs):
+    from tools.youtube_composio import get_video_details
+    return await get_video_details(video_ids=kwargs.get("video_ids", []))
+
+
+async def _googledocs_create(**kwargs):
+    from tools.googledocs_composio import create_document
+    return await create_document(title=kwargs.get("title", ""), markdown_text=kwargs.get("markdown_text", ""))
+
+
+async def _googledocs_read(**kwargs):
+    from tools.googledocs_composio import read_document
+    return await read_document(doc_id=kwargs.get("doc_id", ""))
+
+
+async def _googledocs_search(**kwargs):
+    from tools.googledocs_composio import search_documents
+    return await search_documents(query=kwargs.get("query", ""), max_results=kwargs.get("max_results", 10))
+
+
+async def _googledocs_export_pdf(**kwargs):
+    from tools.googledocs_composio import export_pdf
+    return await export_pdf(doc_id=kwargs.get("doc_id", ""))
+
+
+async def _transporte_rota(**kwargs):
+    from tools.transporte import calcular_rota
+    return await calcular_rota(origem=kwargs.get("origem", ""), destino=kwargs.get("destino", ""))
+
+
+async def _transporte_uber(**kwargs):
+    from tools.transporte import estimar_uber
+    return await estimar_uber(origem=kwargs.get("origem", ""), destino=kwargs.get("destino", ""))
+
+
 TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
     "calendar.list_events": {
         "function": google_calendar.list_events,
@@ -1067,6 +1127,191 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
                 "limit": {"type": "integer", "description": "Numero de turnos (default 10)"},
             },
             "required": ["phone"],
+        },
+    },
+    "linkedin.post": {
+        "function": _linkedin_post,
+        "implementation": "linkedin_composio",
+        "description": (
+            "Publica um post no LinkedIn do usuario. Suporta texto ate 3000 caracteres, "
+            "controle de visibilidade (PUBLIC, CONNECTIONS) e imagens. "
+            "Use quando o usuario pedir para postar, publicar ou compartilhar algo no LinkedIn."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "Texto do post (max 3000 caracteres)"},
+                "visibility": {"type": "string", "description": "Visibilidade: PUBLIC ou CONNECTIONS (default PUBLIC)"},
+            },
+            "required": ["text"],
+        },
+    },
+    "linkedin.read_post": {
+        "function": _linkedin_read_post,
+        "implementation": "linkedin_composio",
+        "description": (
+            "Le o conteudo de um post do LinkedIn por ID. Retorna texto, imagens e metadados. "
+            "Use quando o usuario pedir para ver ou ler um post especifico."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "post_id": {"type": "string", "description": "ID do post no LinkedIn"},
+            },
+            "required": ["post_id"],
+        },
+    },
+    "linkedin.my_profile": {
+        "function": _linkedin_my_profile,
+        "implementation": "linkedin_composio",
+        "description": (
+            "Retorna informacoes do perfil do LinkedIn do usuario autenticado: "
+            "nome, headline, foto, etc. Use quando o usuario perguntar sobre seu proprio perfil."
+        ),
+        "parameters_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    "linkedin.article": {
+        "function": _linkedin_article,
+        "implementation": "linkedin_composio",
+        "description": (
+            "Cria um artigo ou compartilha uma URL no LinkedIn. "
+            "Use quando o usuario pedir para escrever um artigo ou compartilhar um link."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "Texto do artigo (max 3000 caracteres)"},
+                "title": {"type": "string", "description": "Titulo do artigo"},
+            },
+            "required": ["text"],
+        },
+    },
+    "youtube.search": {
+        "function": _youtube_search,
+        "implementation": "youtube_composio",
+        "description": (
+            "Busca videos no YouTube. Retorna titulo, canal, descricao e link. "
+            "Use quando o usuario pedir para procurar videos ou conteudo no YouTube."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Termo de busca"},
+                "max_results": {"type": "integer", "description": "Maximo de resultados (default 5)"},
+            },
+            "required": ["query"],
+        },
+    },
+    "youtube.video_details": {
+        "function": _youtube_video_details,
+        "implementation": "youtube_composio",
+        "description": (
+            "Retorna detalhes de videos do YouTube por ID. Inclui titulo, views, likes, duracao. "
+            "Use para obter informacoes detalhadas de videos especificos."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "video_ids": {"type": "array", "items": {"type": "string"}, "description": "Lista de IDs de videos"},
+            },
+            "required": ["video_ids"],
+        },
+    },
+    "googledocs.create": {
+        "function": _googledocs_create,
+        "implementation": "googledocs_composio",
+        "description": (
+            "Cria um novo documento no Google Docs. Suporta titulo e conteudo em Markdown. "
+            "Use quando o usuario pedir para criar um documento, ata, relatorio ou nota no Google Docs."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Titulo do documento"},
+                "markdown_text": {"type": "string", "description": "Conteudo em Markdown"},
+            },
+            "required": ["title"],
+        },
+    },
+    "googledocs.read": {
+        "function": _googledocs_read,
+        "implementation": "googledocs_composio",
+        "description": (
+            "Le o conteudo de um documento do Google Docs e retorna texto puro. "
+            "Use quando o usuario pedir para ler, revisar ou consultar um documento pelo ID ou link."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "doc_id": {"type": "string", "description": "ID ou URL do documento Google Docs"},
+            },
+            "required": ["doc_id"],
+        },
+    },
+    "googledocs.search": {
+        "function": _googledocs_search,
+        "implementation": "googledocs_composio",
+        "description": (
+            "Busca documentos no Google Docs do usuario. Retorna titulo, ID e data de modificacao. "
+            "Use quando o usuario perguntar por documentos, atas ou relatorios no Google Docs."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Termo de busca (vazio = todos)"},
+                "max_results": {"type": "integer", "description": "Maximo de resultados (default 10)"},
+            },
+            "required": [],
+        },
+    },
+    "googledocs.export_pdf": {
+        "function": _googledocs_export_pdf,
+        "implementation": "googledocs_composio",
+        "description": (
+            "Exporta um documento do Google Docs como PDF. "
+            "Use quando o usuario pedir para baixar, exportar ou compartilhar um documento como PDF."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "doc_id": {"type": "string", "description": "ID ou URL do documento"},
+            },
+            "required": ["doc_id"],
+        },
+    },
+    "transporte.rota": {
+        "function": _transporte_rota,
+        "implementation": "transporte",
+        "description": (
+            "Calcula distancia e tempo de viagem entre dois locais usando Google Maps. "
+            "Retorna distancia em km, tempo em minutos e enderecos formatados. "
+            "Use quando o usuario perguntar sobre distancia, tempo de viagem ou rota entre locais."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "origem": {"type": "string", "description": "Local de origem (endereco ou coordenadas)"},
+                "destino": {"type": "string", "description": "Local de destino (endereco ou coordenadas)"},
+            },
+            "required": ["origem", "destino"],
+        },
+    },
+    "transporte.uber": {
+        "function": _transporte_uber,
+        "implementation": "transporte",
+        "description": (
+            "Estima o preco de uma viagem de Uber entre dois locais. "
+            "Calcula distancia via Google Maps e aplica taxa de R$3.50/km + R$5.00 bandeirada. "
+            "ATENCAO: e uma estimativa. O valor real pode variar conforme demanda e horario. "
+            "Use quando o usuario perguntar sobre preco ou valor de Uber entre locais."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "origem": {"type": "string", "description": "Local de origem (endereco ou coordenadas)"},
+                "destino": {"type": "string", "description": "Local de destino (endereco ou coordenadas)"},
+            },
+            "required": ["origem", "destino"],
         },
     },
 }
