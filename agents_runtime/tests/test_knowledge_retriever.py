@@ -1082,3 +1082,34 @@ class TestRetrieveUsesEnrichedQuery:
 
         assert result["count"] == 1
         assert "sobre o que se trata a tese" in captured_query[0]
+
+
+class TestTocEscape:
+    def test_toc_results_are_toc_only_detection(self):
+        from agent_orchestration.knowledge_retriever import _is_toc_chunk, _results_are_toc_only
+
+        toc_text = ("Consumo ..............................................10\n"
+                    "Prevencao ............................................14\n")
+        assert _is_toc_chunk(toc_text) is True
+
+        chunks = [{"text": toc_text, "score": 0.9, "source": "cdc.pdf"}]
+        assert _results_are_toc_only(chunks) is True
+
+    def test_content_is_not_toc(self):
+        from agent_orchestration.knowledge_retriever import _is_toc_chunk, _results_are_toc_only
+
+        content_text = "Art. 42. Na cobranca de debitos, o consumidor inadimplente nao sera exposto."
+        assert _is_toc_chunk(content_text) is False
+
+        chunks = [{"text": content_text, "score": 0.9, "source": "cdc.pdf"}]
+        assert _results_are_toc_only(chunks) is False
+
+    def test_fetch_full_document_empty(self):
+        from agent_orchestration.knowledge_retriever import _fetch_full_document
+        import asyncio
+
+        async def run():
+            return await _fetch_full_document("", "")
+
+        result = asyncio.run(run())
+        assert result == ""

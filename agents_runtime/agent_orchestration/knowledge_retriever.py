@@ -110,6 +110,80 @@ def _results_are_toc_only(chunks: List[Dict[str, Any]]) -> bool:
     return toc_count >= len(chunks) * 0.5
 
 
+async def _toc_escape(
+    phone: str,
+    hits: Dict[str, Any],
+    resolved_source: Optional[str] = None,
+) -> Dict[str, Any]:
+    chunks = hits.get("results", [])
+    if not _results_are_toc_only(chunks):
+        return hits
+    source = resolved_source or (chunks[0].get("source", "") if chunks else "")
+    if not source or not phone:
+        return hits
+    full_text = await _fetch_full_document(phone, source)
+    if full_text and len(full_text.strip()) >= 500:
+        logger.info("toc_escape_activated source=%s chars=%d", source, len(full_text))
+        hits["results"] = [{"text": full_text, "score": 0.95, "source": source, "class": "full_document", "group": "full_document"}]
+        hits["count"] = 1
+        hits["toc_escaped"] = True
+    return hits
+
+
+async def _fetch_full_document(phone: str, source_title: str, max_chars: int = 12000) -> str:
+    import asyncio as _asyncio
+
+    try:
+        from core.rag import KNOWLEDGE_DATABASE, _get_firestore, _owner_hash
+        db = _get_firestore()
+        if db is None:
+            return ""
+        owner_hash = _owner_hash(phone)
+
+        def fetch():
+            return list(
+                db.collection(KNOWLEDGE_DATABASE)
+                .where("scope", "==", "private")
+                .where("owner_hash", "==", owner_hash)
+                .where("source_title", "==", source_title)
+                .stream()
+            )
+
+        docs = await _asyncio.to_thread(fetch)
+        if not docs:
+            return ""
+
+        ordered = []
+        for d in docs:
+            data = d.to_dict() or {}
+            ordered.append((int(data.get("chunk_index", 0)), data.get("text_content", "")))
+        ordered.sort(key=lambda x: x[0])
+
+        parts = []
+        total = 0
+        _skip_re = re.compile(
+            r"senado federal|mesa diretora|bi[êe]nio|coordena[çc][ãa]o\s+de\s+edi[çc]|"
+            r"secretaria de editora|ficha catalogr[áa]fica|suplentes?\s+de\s+secret[áa]rio|"
+            r"quarto-secret[áa]rio|presidente|vice-presidente|sum[áa]rio",
+            re.IGNORECASE,
+        )
+        for _, text in ordered:
+            clean = text.strip()
+            if not clean or _skip_re.search(clean):
+                continue
+            if total + len(clean) > max_chars:
+                break
+            parts.append(clean)
+            total += len(clean)
+
+        from core.text_cleaner import clean_portuguese
+
+        return clean_portuguese("\n\n".join(parts))
+    except Exception as exc:
+        logger.warning("toc_escape_fetch_failed: %s", exc)
+        return ""
+
+
 RAG_KEYWORDS_RAW = {
     "memorizei", "memorizado", "memorizada", "memorizou", "memorizaram",
     "indexado", "indexada", "indexados", "no rag", "no vector",
@@ -1103,6 +1177,8 @@ async def retrieve(
                 if private_hits["count"] > 3:
                     private_hits["results"] = await _rerank_with_llm(enriched_query, private_hits["results"], top_n=min(private_hits["count"], 5))
                     private_hits["count"] = len(private_hits["results"])
+                # TOC escape: substituir sumarios por texto completo
+                private_hits = await _toc_escape(phone, private_hits, hints.get("source_title"))
                 pending = await _maybe_request_share(phone, group_jid, query)
                 result = {
                     **private_hits,
@@ -1142,6 +1218,8 @@ async def retrieve(
             if private_hits["count"] > 3:
                 private_hits["results"] = await _rerank_with_llm(enriched_query, private_hits["results"], top_n=min(private_hits["count"], 5))
                 private_hits["count"] = len(private_hits["results"])
+            # TOC escape: substituir sumarios por texto completo
+            private_hits = await _toc_escape(phone, private_hits, hints.get("source_title"))
             decision = "private"
             result = {
                 **private_hits,
@@ -1243,6 +1321,8 @@ __all__ = [
     "_list_knowledge_stats",
     "_is_toc_chunk",
     "_results_are_toc_only",
+    "_toc_escape",
+    "_fetch_full_document",
     "retrieve",
     "share_pending_action_consume",
     "RAG_RETRIEVE_MIN_SCORE",
