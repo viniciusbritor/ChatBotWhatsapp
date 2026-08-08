@@ -297,14 +297,12 @@ async def _run_rag(payload: Dict[str, Any]) -> Dict[str, Any]:
         # --- PASSO 1: resolver documento por alias / dynamic match ---
         from agent_orchestration.knowledge_retriever import (
             _extract_source_title_hint,
-            _match_source_title_alias,
             _match_source_title_dynamic,
             _list_known_sources,
         )
 
         resolved_source = (
             _extract_source_title_hint(text)
-            or _match_source_title_alias(text)
             or await _match_source_title_dynamic(phone, text)
         )
 
