@@ -68,6 +68,7 @@ steps:
   - name: "gcr.io/cloud-builders/docker"
     args:
       - "build"
+      - "--no-cache"
       - "-t"
       - "gcr.io/$PROJECT_ID/agents-runtime:$BUILD_ID"
       - "-t"
