@@ -270,7 +270,7 @@ async def _disambiguate_rag_vs_drive(
 
 
 async def _run_rag(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """RAG path: search knowledge base (no OAuth guard)."""
+    """RAG path: full-document quando possivel, vector search como fallback."""
     instance = payload.get("instance", "jennifer")
     phone = payload.get("phone", "")
     text = payload.get("text", "")
@@ -287,8 +287,6 @@ async def _run_rag(payload: Dict[str, Any]) -> Dict[str, Any]:
     ack_task = asyncio.create_task(_send_ack_rag())
 
     try:
-        from agent_orchestration.knowledge_retriever import retrieve
-
         envelope = {
             "phone": phone,
             "extra": {
@@ -296,14 +294,51 @@ async def _run_rag(payload: Dict[str, Any]) -> Dict[str, Any]:
             },
         }
 
+        # --- PASSO 1: resolver documento por alias / dynamic match ---
+        from agent_orchestration.knowledge_retriever import (
+            _extract_source_title_hint,
+            _match_source_title_alias,
+            _match_source_title_dynamic,
+            _list_known_sources,
+        )
+
+        resolved_source = (
+            _extract_source_title_hint(text)
+            or _match_source_title_alias(text)
+            or await _match_source_title_dynamic(phone, text)
+        )
+
+        if not resolved_source:
+            sources = await _list_known_sources(phone)
+            if sources:
+                from agent_orchestration.source_title_resolver import resolve
+                resolved_source = await resolve(sources, text) or None
+
+        # --- PASSO 2: full-document se doc resolvido ---
+        if resolved_source:
+            full_text = await _retrieve_full_document(phone, resolved_source)
+            if full_text and len(full_text.strip()) >= 500:
+                resposta = await _synthesize_full_document(text, full_text, resolved_source)
+                await ack_task
+                return {
+                    "reply": resposta,
+                    "delay_ms": 500,
+                    "presence": "composing",
+                    "metadata": {
+                        "agent_id": "agent-knowledge-retriever",
+                        "mode": "full_document",
+                        "source_title": resolved_source,
+                        "skip_image_report": True,
+                    },
+                }
+
+        # --- PASSO 3: fallback para vector search ---
+        from agent_orchestration.knowledge_retriever import retrieve
+
         result = await retrieve(envelope, text)
+        chunks = result.get("results", [])
 
-        resolved_source = None
-        filters = result.get("filters") or {}
-        if isinstance(filters, dict):
-            resolved_source = filters.get("source_title")
-
-        if result.get("clarification_prompt") and not resolved_source:
+        if result.get("clarification_prompt") and not chunks:
             await ack_task
             return {
                 "reply": result["clarification_prompt"],
@@ -316,57 +351,13 @@ async def _run_rag(payload: Dict[str, Any]) -> Dict[str, Any]:
                 },
             }
 
-        chunks = result.get("results", [])
-
         if not chunks:
-            if not resolved_source:
-                try:
-                    from agent_orchestration.knowledge_retriever import _list_known_sources
-                    sources = await _list_known_sources(phone)
-                    if sources and len(sources) <= 2:
-                        resolved_source = sources[0].get("source_title", sources[0]) if isinstance(sources[0], dict) else sources[0]
-                except Exception:
-                    pass
-            if resolved_source:
-                full_text = await _retrieve_full_document(phone, resolved_source)
-                if full_text and len(full_text.strip()) >= 500:
-                    resposta = await _synthesize_full_document(text, full_text, resolved_source)
-                    await ack_task
-                    return {
-                        "reply": resposta,
-                        "delay_ms": 500,
-                        "presence": "composing",
-                        "metadata": {"agent_id": "agent-knowledge-retriever", "mode": "full_document", "source_title": resolved_source, "skip_image_report": True},
-                    }
             await ack_task
             return {
                 "reply": "Nao encontrei nada sobre isso na base de conhecimento.",
                 "delay_ms": 0,
                 "presence": "composing",
                 "metadata": {"agent_id": "agent-knowledge-retriever", "count": 0, "skip_image_report": True},
-            }
-
-        # Etapa 1: se documento especifico foi resolvido, usa texto completo
-
-        full_text = ""
-        if resolved_source:
-            full_text = await _retrieve_full_document(phone, resolved_source)
-
-        if full_text and len(full_text.strip()) >= 500:
-            resposta = await _synthesize_full_document(text, full_text, resolved_source)
-            await ack_task
-            return {
-                "reply": resposta,
-                "delay_ms": 500,
-                "presence": "composing",
-                "metadata": {
-                    "agent_id": "agent-knowledge-retriever",
-                    "count": len(chunks),
-                    "scope": result.get("scope", "private"),
-                    "mode": "full_document",
-                    "source_title": resolved_source,
-                    "skip_image_report": True,
-                },
             }
 
         resposta = await _synthesize_rag_answer(text, chunks)

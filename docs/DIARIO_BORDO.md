@@ -1,5 +1,38 @@
 # Diario de Bordo — ChatBotWhatsapp
 
+## 07/08/2026 (22:00 BRT) — Refatoracao do RAG: Full-Document-First
+
+### Diagnostico Raiz (6 branches sem efeito visivel no WhatsApp)
+
+1. **TOC chunks sao inerentemente inuteis para leis** — embeddings tratam "Consumo ........ 10" como semanticamente similar a "praticas abusivas art 39", mas o texto e apenas um indice. Chunks nunca terao contexto suficiente.
+
+2. **`_is_toc_chunk` falha com blank lines** — split("\n") preserva linhas vazias entre entradas do sumario, inflando len(lines) e quebrando o threshold de 50%.
+
+3. **YAML != Firestore runtime** — agent_loader carrega agentes da collection `agents` do Firestore, nao dos YAMLs em disco. Sync so ocorreu apos 4 tentativas de cloudbuild.
+
+4. **`agent-knowledge-retriever` estava desabilitado** — seed_config.py:117-118 setava enabled: False.
+
+5. **Classifier sem categoria `conhecimento`** — todas queries RAG caiam em `conversa` -> jennifer_pipeline, pulando doc_pipeline com TOC escape.
+
+### Solucao Definitiva: Full-Document-First
+
+Em vez de vector search -> chunks -> sintese, inverter o fluxo:
+1. Resolver documento via alias (`_match_source_title_alias`) ou dynamic match
+2. Se resolvido -> `_retrieve_full_document` (texto completo, ate 12k chars)
+3. `_synthesize_full_document` (LLM le o documento inteiro)
+4. Vector search apenas como fallback quando doc nao e reconhecido
+
+### Arquivos alterados
+- `pipelines/doc_pipeline.py:_run_rag`: refatorado para full-document-first
+- `agent_orchestration/knowledge_retriever.py:_is_toc_chunk`: filtrar blank lines
+- `core/rag.py:_is_toc_chunk`: mesma correcao (duplicata)
+- `tests/`: 2 novos testes (full-document flow + fallback) + TOC blank lines
+
+### Resultado esperado
+"o que diz o cdc sobre praticas abusivas?" -> alias "cdc" -> "Codigo-do-consumidor-FINAL.pdf" -> texto completo -> LLM le CDC inteiro -> Art. 39 + recomendacao
+
+
+
 ## 02/08/2026 (04:30 BRT) — Loop de Acesso: Inicio do Plano de 5 Fases
 
 ### Contexto

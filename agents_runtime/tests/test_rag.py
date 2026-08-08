@@ -522,9 +522,17 @@ class TestTocChunkDetection:
     def test_toc_filter_removes_toc_from_chunking(self):
         from core.rag import _is_toc_chunk
 
+        # Chunk real com blank lines entre entradas (padrao do Firestore)
         toc_text = (
             "Consumo .......................................................................10\n"
+            "\n"
             "da Prevencao e da Reparacao dos Danos .....................14\n"
+            "\n"
+            "Produto e do Servico ................................................15\n"
+            "\n"
+            "Produto e do Servico ................................................18\n"
+            "\n"
+            "Juridica"
         )
         assert _is_toc_chunk(toc_text) is True
 

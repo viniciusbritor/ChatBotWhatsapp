@@ -616,3 +616,53 @@ class TestComenteContentMarker:
                         "extra": {},
                     })
         assert "Documentos na minha base" not in result["reply"]
+
+
+class TestFullDocumentFirst:
+    @pytest.mark.asyncio
+    async def test_cdc_query_uses_full_document_not_vectors(self):
+        from pipelines.doc_pipeline import run
+
+        full_text = (
+            "Art. 39. E vedado ao fornecedor de produtos ou servicos, dentre outras praticas abusivas: "
+            "I - condicionar o fornecimento de produto ou de servico ao fornecimento de outro produto ou servico. "
+            "II - recusar atendimento as demandas dos consumidores, na exata medida de suas disponibilidades de estoque. "
+            "III - enviar ou entregar ao consumidor, sem solicitacao previa, qualquer produto ou servico. "
+            "IV - prevalecer-se da fraqueza ou ignorancia do consumidor. "
+            "V - exigir do consumidor vantagem manifestamente excessiva. "
+            "VI - executar servicos sem a previsao de orcamento previo e autorizacao expressa do consumidor. "
+            "VII - repassar informacao depreciativa referente a ato praticado pelo consumidor no exercicio de seus direitos. "
+            "VIII - colocar, no mercado de consumo, qualquer produto ou servico em desacordo com as normas regulamentares. "
+            "IX - recusar a venda de bens ou a prestacao de servicos a quem se disponha a adquiri-los mediante pronto pagamento. "
+            "Paragrafo unico. Os servicos prestados e os produtos remetidos ou entregues ao consumidor, na hipotese prevista no inciso III, serao equiparados as amostras gratis, inexistindo obrigacao de pagamento."
+        )
+        llama_reply = "[Codigo-do-consumidor-FINAL.pdf] Art. 39. E vedado ao fornecedor..."
+
+        with patch("pipelines.doc_pipeline._synthesize_full_document", AsyncMock(return_value=llama_reply)):
+            with patch("pipelines.doc_pipeline._retrieve_full_document", AsyncMock(return_value=full_text)):
+                result = await run({
+                    "instance": "jennifer",
+                    "phone": "5511999",
+                    "text": "o que diz o cdc sobre praticas abusivas?",
+                    "extra": {},
+                    "intent_class": "conhecimento",
+                })
+
+        assert "Art. 39" in result["reply"]
+        assert result["metadata"]["mode"] == "full_document"
+
+    @pytest.mark.asyncio
+    async def test_unknown_doc_falls_back_to_vector_search(self):
+        from pipelines.doc_pipeline import run
+
+        with patch("pipelines.doc_pipeline._retrieve_full_document", AsyncMock(return_value="")):
+            with patch("agent_orchestration.knowledge_retriever.retrieve", new_callable=AsyncMock) as mock_retrieve:
+                mock_retrieve.return_value = {"results": [], "scope": "private"}
+                result = await run({
+                    "instance": "jennifer",
+                    "phone": "5511999",
+                    "text": "algo completamente sem match",
+                    "extra": {},
+                })
+
+        assert mock_retrieve.called

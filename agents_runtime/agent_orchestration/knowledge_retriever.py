@@ -91,7 +91,7 @@ _TOC_LINE_RE = re.compile(r"^.{5,80}\.{3,}\s*\d+\s*$")
 def _is_toc_chunk(text: str) -> bool:
     if not text or len(text) < 20:
         return False
-    lines = text.strip().split("\n")
+    lines = [l for l in text.strip().split("\n") if l.strip()]
     if len(lines) < 2:
         return False
     toc_lines = 0
