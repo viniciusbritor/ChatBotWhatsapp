@@ -8,10 +8,14 @@ logger = logging.getLogger(__name__)
 _YOUTUBE_ACCOUNT = os.getenv("COMPOSIO_YOUTUBE_ACCOUNT", "youtube_begall-sozin")
 
 
+def _get_api_key() -> str:
+    return (os.getenv("COMPOSIO_API_KEY", "") or "").strip().lstrip("\ufeff")
+
+
 async def _composio_call(tool_slug: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     try:
         from composio import Composio
-        client = Composio(api_key=os.getenv("COMPOSIO_API_KEY", ""))
+        client = Composio(api_key=_get_api_key())
         result = client.tools.execute(
             slug=tool_slug,
             arguments=arguments,
