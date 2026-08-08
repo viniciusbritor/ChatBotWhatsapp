@@ -1855,12 +1855,13 @@ _KNOWLEDGE_INTENTS = frozenset({"juridicas", "editais", "academica", "anotacoes"
 
 _CLASSIFIER_PROMPT = (
     "Classifique em UMA palavra:\n"
-    "juridicas  - leis, codigos, artigos, decretos, normas, jurisprudencia\n"
-    "editais    - licitacoes, concursos, pregoes, editais publicos\n"
-    "academica  - teses, dissertacoes, artigos cientificos, papers\n"
-    "anotacoes  - lembretes, notas, memorias pessoais\n"
-    "ferramentas - agenda, email, drive, pesquisa web\n"
-    "conversa   - saudacoes, ajuda, perguntas genericas\n\n"
+    "juridicas    - leis, codigos, artigos, decretos, normas, jurisprudencia\n"
+    "editais      - licitacoes, concursos, pregoes, editais publicos\n"
+    "academica    - teses, dissertacoes, artigos cientificos, papers\n"
+    "anotacoes    - lembretes, notas, memorias pessoais\n"
+    "conhecimento - buscas na base de conhecimento, perguntas sobre documentos indexados/memorizados, 'o que diz X?', 'quais documentos?', 'busque tudo sobre Y', 'que tipos de documento?'\n"
+    "ferramentas  - agenda, email, drive, pesquisa web\n"
+    "conversa     - saudacoes, ajuda, perguntas genericas\n\n"
     "Pergunta: {text}\n\n"
     "Categoria:"
 )
@@ -1882,7 +1883,7 @@ async def _classify_intent_llm(text: str) -> str:
     prompt = _CLASSIFIER_PROMPT.format(text=text[:500])
     result = await asyncio.to_thread(llm.invoke, prompt)
     raw = getattr(result, "content", str(result)).strip().lower()
-    valid = {"juridicas", "editais", "academica", "anotacoes", "ferramentas", "conversa"}
+    valid = {"juridicas", "editais", "academica", "anotacoes", "conhecimento", "ferramentas", "conversa"}
     if raw in valid:
         return raw
     return "conversa"
@@ -2061,7 +2062,7 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
     intent_class = await _classify_intent_llm(masked_text)
     from pipelines.doc_pipeline import run as doc_run
 
-    if intent_class in ("juridicas", "editais", "academica", "anotacoes"):
+    if intent_class in ("juridicas", "editais", "academica", "anotacoes", "conhecimento"):
         payload["intent_class"] = intent_class
         result = await doc_run(payload)
     elif intent_class == "ferramentas":

@@ -760,7 +760,7 @@ async def run(payload: Dict[str, Any]) -> Dict[str, Any]:
                 return await _run_drive(payload)
         return await _run_rag(payload)
 
-    if intent_class in ("juridicas", "editais", "academica", "anotacoes"):
+    if intent_class in ("juridicas", "editais", "academica", "anotacoes", "conhecimento"):
         return await _run_rag(payload)
     if intent_class == "ferramentas":
         return await _run_drive(payload)
