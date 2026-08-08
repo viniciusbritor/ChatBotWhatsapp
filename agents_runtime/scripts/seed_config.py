@@ -115,7 +115,8 @@ for agent in new_agents:
 print(f"Agents seeded: {len(new_agents)}")
 
 # Disable legacy agents replaced by specialists
-for legacy_id in ("agent-rag", "agent-knowledge-retriever"):
+# agent-knowledge-retriever is now re-enabled (used by jennifier PT9 routing)
+for legacy_id in ("agent-rag",):
     db.collection("agents").document(legacy_id).set({"enabled": False, "updated_at": now}, merge=True)
     print(f"Agent disabled: {legacy_id}")
 

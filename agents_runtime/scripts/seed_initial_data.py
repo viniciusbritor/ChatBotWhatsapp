@@ -29,7 +29,21 @@ DEFAULT_AGENTS = [
             "NUNCA improvise nada depreciativo. Anti-alucinacao: jamais invente dados, datas, nomes. "
             "Mensagens: max 4 linhas, pt-BR, 1-2 emojis. Fuso America/Sao_Paulo. LGPD: nao exponha PII.\n\n"
             "Delega para managers: calendar, drive, email, web. "
-            "O agente access_guardian valida owner + OAuth antes de cada tool Google."
+            "O agente access_guardian valida owner + OAuth antes de cada tool Google.\n\n"
+            "## PT8 — Distincao RAG vs Drive (CRITICO)\n"
+            "Base de conhecimento pessoal (RAG) NAO e Google Drive. "
+            "Se a frase inclui 'base de conhecimento', 'memorizou', 'salvou', 'guardou', "
+            "'indexado', 'no RAG', 'no vector', 'voce guardou' -> use tools knowledge.* "
+            "(knowledge.retrieve, knowledge.list, knowledge.stats, knowledge.sections, knowledge.search_all). "
+            "So use manager-drive se o usuario disser explicitamente 'Drive' ou 'Google Drive'.\n\n"
+            "## PT9 — Roteamento entre Tools de Knowledge (CRITICO)\n"
+            "- 'quantos/quantas' + tipo de doc -> knowledge.stats\n"
+            "- 'quais/lista/meus/seus' + documentos -> knowledge.list\n"
+            "- 'completo/inteiro/todo' + nome do doc -> knowledge.sections\n"
+            "- 'tudo/qualquer coisa' + termo -> knowledge.search_all\n"
+            "- Pergunta especifica 'o que diz/qual/quem' -> knowledge.retrieve\n"
+            "- 'remova/apague/delete' + arquivo -> knowledge.delete\n"
+            "- Cite sempre o source_title antes de qualquer trecho."
         ),
         "skills": [
             "skill-motivacao-pre-reuniao",
@@ -37,15 +51,31 @@ DEFAULT_AGENTS = [
         ],
         "delegates_to": [
             "agent-access-guardian",
+            "agent-knowledge-retriever",
             "manager-calendar",
             "manager-drive",
             "manager-email",
             "manager-web",
+            "agent-intimacy",
+            "agent-learning",
+            "agent-locomocao",
+            "agent-youtube",
+            "agent-morality",
+            "agent-privacy-guard",
+            "agent-proatividade",
         ],
-        "tools": [],
-        "instances": ["jennifer"],
+        "tools": [
+            "knowledge.retrieve",
+            "knowledge.categorize",
+            "knowledge.delete",
+            "knowledge.list",
+            "knowledge.stats",
+            "knowledge.sections",
+            "knowledge.search_all",
+        ],
+        "instances": ["jennifer", "Jennifer"],
         "enabled": True,
-        "system_prompt_version": 2,
+        "system_prompt_version": 3,
         "last_learned_at": None,
         "created_at": _now_iso(),
         "updated_at": _now_iso(),

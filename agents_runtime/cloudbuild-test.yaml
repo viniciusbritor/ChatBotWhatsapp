@@ -10,6 +10,13 @@ steps:
       - "export REPO_ROOT=/workspace && cd agents_runtime && pip install --prefer-binary -q uv && uv pip install --system -q -r requirements.txt -r requirements-dev.txt && DEEPSEEK_MODEL=deepseek-v4-flash DEEPSEEK_BASE_URL=https://api.deepseek.com pytest -q tests/ && python scripts/check_lgpd_compliance.py"
 
   - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    id: "sync-agents-to-firestore"
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - "cd agents_runtime && pip install --prefer-binary -q pyyaml && python scripts/sync_agents_to_firestore.py"
+
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
     id: "deploy-firestore-index-source-title-chunk"
     entrypoint: "bash"
     args:
