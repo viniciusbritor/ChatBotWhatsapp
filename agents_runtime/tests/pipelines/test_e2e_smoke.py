@@ -9,6 +9,11 @@ import os
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
+_HAS_API_KEY = bool((os.getenv("DEEPSEEK_API_KEY", "") or "").strip())
+
+
+skip_if_no_key = pytest.mark.skipif(not _HAS_API_KEY, reason="DEEPSEEK_API_KEY not available locally; runs in CI")
+
 
 
 
@@ -87,6 +92,7 @@ class TestE2EEmail:
     """Email pipeline: detect ÔåÆ guard ÔåÆ ack ÔåÆ prefetch ÔåÆ agent ÔåÆ response."""
 
     @pytest.mark.asyncio
+    @skip_if_no_key
     async def test_e2e_email_full_flow(self):
         from orchestrator import orchestrate
 
@@ -101,6 +107,7 @@ class TestE2EEmail:
         assert result["metadata"]["agent_id"] == "manager-email"
 
     @pytest.mark.asyncio
+    @skip_if_no_key
     async def test_e2e_email_never_mentions_calendar_or_drive(self):
         """Garantia: resposta de email NUNCA referencia calendar, drive, doc."""
         from orchestrator import orchestrate
@@ -122,6 +129,7 @@ class TestE2EJennifer:
     """Jennifer pipeline: fallback conversacional."""
 
     @pytest.mark.asyncio
+    @skip_if_no_key
     async def test_e2e_jennifer_fallback_greeting(self):
         from orchestrator import orchestrate
 

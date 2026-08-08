@@ -42,5 +42,5 @@ def build_default_chat_model() -> Any:
         api_key=api_key,
         base_url=base_url,
         temperature=0.7,
-        model_kwargs={"extra_body": {"cache_mode": "default"}},
+        extra_body={"cache_mode": "default"},
     )

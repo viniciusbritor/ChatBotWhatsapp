@@ -244,7 +244,7 @@ async def _disambiguate_rag_vs_drive(
             temperature=0,
             max_tokens=10,
             timeout=5,
-            model_kwargs={"extra_body": {"cache_mode": "default"}},
+            extra_body={"cache_mode": "default"},
         )
 
         prompt = _DISAMBIGUATOR_PROMPT.format(
@@ -524,7 +524,7 @@ async def _synthesize_full_document(query: str, full_text: str, source_title: st
             temperature=0.3,
             max_tokens=700,
             timeout=30,
-            model_kwargs={"extra_body": {"cache_mode": "default"}},
+            extra_body={"cache_mode": "default"},
         )
         response = await asyncio.to_thread(llm.invoke, [
             {"role": "system", "content": _SYNTHESIS_SYSTEM_PROMPT},
@@ -622,7 +622,7 @@ async def _call_llm_synthesis(
         temperature=0.3,
         max_tokens=max_tokens,
         timeout=timeout,
-        model_kwargs={**extra_kwargs, "extra_body": {"cache_mode": "default"}},
+        extra_body={"cache_mode": "default"}, model_kwargs=extra_kwargs,
     )
 
     response = await asyncio.to_thread(llm.invoke, [

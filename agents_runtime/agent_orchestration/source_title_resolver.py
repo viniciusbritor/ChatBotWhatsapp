@@ -56,7 +56,7 @@ async def resolve(sources: List[str] | List[Dict[str, str]], query: str) -> Opti
             temperature=0,
             max_tokens=80,
             timeout=8,
-            model_kwargs={"extra_body": {"cache_mode": "default"}},
+            extra_body={"cache_mode": "default"},
         )
 
         sources_text = "\n".join(f"- {s}" for s in source_list[:20])

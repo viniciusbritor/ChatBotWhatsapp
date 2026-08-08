@@ -1878,7 +1878,7 @@ async def _classify_intent_llm(text: str) -> str:
         temperature=0,
         max_tokens=5,
         timeout=5,
-        model_kwargs={"extra_body": {"cache_mode": "default"}},
+        extra_body={"cache_mode": "default"},
     )
     prompt = _CLASSIFIER_PROMPT.format(text=text[:500])
     result = await asyncio.to_thread(llm.invoke, prompt)

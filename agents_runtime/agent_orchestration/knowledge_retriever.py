@@ -313,7 +313,8 @@ async def _llm_is_rag_query(
             temperature=0,
             max_tokens=5,
             timeout=8,
-            model_kwargs={"extra_body": {"cache_mode": "default"}},
+            extra_body={"cache_mode": "default"},
+            model_kwargs={},
         )
         prompt = (
             "O usuario esta pedindo algo que foi previamente salvo/armazenado "
@@ -721,7 +722,8 @@ async def _llm_enrich_query(query: str) -> Dict[str, str]:
             temperature=0,
             max_tokens=150,
             timeout=8,
-            model_kwargs={"extra_body": {"cache_mode": "default"}},
+            extra_body={"cache_mode": "default"},
+            model_kwargs={},
         )
 
         prompt = _LLM_ENRICH_PROMPT.format(query=query.strip()[:300])
@@ -888,7 +890,8 @@ async def _rerank_with_llm(
             temperature=0,
             max_tokens=200,
             timeout=10,
-            model_kwargs={"extra_body": {"cache_mode": "default"}},
+            extra_body={"cache_mode": "default"},
+            model_kwargs={},
         )
         chunk_lines = []
         for i, c in enumerate(chunks):
