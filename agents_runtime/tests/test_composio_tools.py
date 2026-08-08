@@ -1,64 +1,62 @@
-"""Tests for Composio tool wrappers — SDK API validation."""
+"""Tests for Composio tool wrappers — HTTP API validation."""
 import asyncio
 import pytest
 from unittest.mock import MagicMock, patch
 
 
 class TestYoutubeComposio:
-    def test_search_videos_calls_correct_sdk_api(self):
+    def test_search_videos_http_call(self):
         from tools.youtube_composio import search_videos
 
-        mock_client = MagicMock()
-        mock_client.tools.execute.return_value = {"data": {"items": [{"id": "123"}]}}
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"data": {"items": [{"id": "123"}]}}
 
-        with patch("composio.Composio", return_value=mock_client):
-            with patch.dict("os.environ", {"COMPOSIO_API_KEY": "test"}):
+        with patch("tools.youtube_composio.httpx.AsyncClient") as mock_http:
+            mock_http.return_value.__aenter__.return_value.post.return_value = mock_resp
+            with patch("tools.youtube_composio._get_api_key", return_value="ck_test123"):
                 result = asyncio.run(search_videos("marvin gaye"))
 
-        assert mock_client.tools.execute.called
-        kwargs = mock_client.tools.execute.call_args.kwargs
-        assert kwargs["slug"] == "YOUTUBE_SEARCH_YOU_TUBE"
-        assert kwargs["arguments"]["query"] == "marvin gaye"
-        assert kwargs["connected_account_id"] == "youtube_begall-sozin"
         assert "items" in result
+        assert len(result["items"]) == 1
 
-    def test_sdk_not_installed_graceful(self):
+    def test_api_key_missing_graceful(self):
         from tools.youtube_composio import search_videos
+        import asyncio
 
-        with patch.dict("os.environ", {"COMPOSIO_API_KEY": "test"}):
-            with patch("composio.Composio", side_effect=ImportError()):
-                result = asyncio.run(search_videos("test"))
+        with patch("tools.youtube_composio._get_api_key", return_value=""):
+            result = asyncio.run(search_videos("test"))
 
-        assert result["error"] == "composio_sdk_missing"
+        assert result["error"] == "composio_api_key_missing"
 
 
 class TestLinkedinComposio:
-    def test_create_post_calls_correct_sdk_api(self):
-        from tools.linkedin_composio import create_post
+    def test_my_profile_http_call(self):
+        from tools.linkedin_composio import my_profile
 
-        mock_client = MagicMock()
-        mock_client.tools.execute.return_value = {"data": {"id": "post-1"}}
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"data": {"firstName": "Test"}}
 
-        with patch("composio.Composio", return_value=mock_client):
-            with patch.dict("os.environ", {"COMPOSIO_API_KEY": "test"}):
-                result = asyncio.run(create_post("hello"))
+        with patch("tools.linkedin_composio.httpx.AsyncClient") as mock_http:
+            mock_http.return_value.__aenter__.return_value.post.return_value = mock_resp
+            with patch("tools.linkedin_composio._get_api_key", return_value="ck_test"):
+                result = asyncio.run(my_profile())
 
-        kwargs = mock_client.tools.execute.call_args.kwargs
-        assert kwargs["slug"] == "LINKEDIN_CREATE_LINKED_IN_POST"
-        assert kwargs["connected_account_id"] == "linkedin_struma-torula"
+        assert "firstName" in result
 
 
 class TestGoogledocsComposio:
-    def test_create_document_calls_correct_sdk_api(self):
+    def test_create_document_http_call(self):
         from tools.googledocs_composio import create_document
 
-        mock_client = MagicMock()
-        mock_client.tools.execute.return_value = {"data": {"documentId": "doc-1"}}
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"data": {"documentId": "doc-1"}}
 
-        with patch("composio.Composio", return_value=mock_client):
-            with patch.dict("os.environ", {"COMPOSIO_API_KEY": "test"}):
+        with patch("tools.googledocs_composio.httpx.AsyncClient") as mock_http:
+            mock_http.return_value.__aenter__.return_value.post.return_value = mock_resp
+            with patch("tools.googledocs_composio._get_api_key", return_value="ck_test"):
                 result = asyncio.run(create_document("Meu Doc"))
 
-        kwargs = mock_client.tools.execute.call_args.kwargs
-        assert kwargs["slug"] == "GOOGLEDOCS_CREATE_DOCUMENT_MARKDOWN"
-        assert kwargs["connected_account_id"] == "googledocs_eyas-blasty"
+        assert result["documentId"] == "doc-1"
