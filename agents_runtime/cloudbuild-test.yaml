@@ -99,7 +99,7 @@ steps:
     entrypoint: "python"
     args:
       - "-c"
-      - "import sys; sys.path.insert(0, '/app'); from tools.youtube_composio import _get_api_key; k=_get_api_key(); assert len(k)>20, f'Key too short: {len(k)} chars'; print(f'VERIFIED: key {len(k)} chars')"
+      - "import sys; sys.path.insert(0, '/app'); from tools.linkedin_composio import _get_api_key, my_profile; import asyncio; k=_get_api_key(); assert len(k)>20, f'Key too short: {len(k)}'; print(f'Key OK: {len(k)} chars'); r=asyncio.run(my_profile()); err=r.get('error',''); assert not err, f'API call failed: {err[:200]}'; print('API call OK')"
 
   - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
     entrypoint: "gcloud"
