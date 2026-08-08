@@ -94,7 +94,7 @@ steps:
       - "push"
       - "gcr.io/$PROJECT_ID/agents-runtime:latest"
 
-  - name: "gcr.io/$PROJECT_ID/agents-runtime:latest"
+  - name: "gcr.io/$PROJECT_ID/agents-runtime:$BUILD_ID"
     id: "verify-composio-key"
     entrypoint: "python"
     args:
