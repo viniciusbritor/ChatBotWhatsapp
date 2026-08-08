@@ -602,14 +602,14 @@ async def pubsub_push(request: Request):
                 delivered = True
             except Exception as send_exc:
                 delivery_error = f"{type(send_exc).__name__}:{send_exc}"
-                logger.warning(
-                    "pubsub send_text_skipped reason=%s phone_present=%s",
-                    type(send_exc).__name__, bool(phone),
+                logger.error(
+                    "pubsub send_text_skipped reason=%s phone_present=%s instance=%s reply_len=%d",
+                    type(send_exc).__name__, bool(phone), p.get("instance", "?"), len(reply),
                 )
         elif reply and not phone:
-            logger.warning(
-                "pubsub reply_dropped_empty_phone request_id=%s reply_len=%d",
-                request_id, len(reply),
+            logger.error(
+                "pubsub reply_dropped_empty_phone request_id=%s reply_len=%d instance=%s",
+                request_id, len(reply), p.get("instance", "?"),
             )
 
         if message_id:
