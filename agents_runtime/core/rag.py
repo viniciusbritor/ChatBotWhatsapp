@@ -72,7 +72,7 @@ ADAPTIVE_FLOOR = float(os.getenv("RAG_ADAPTIVE_FLOOR", "0.3"))
 
 # Firestore Vector — knowledge-database (documentos, nao chat turns).
 # scope="private" + owner_hash | scope="group" + group_hash
-KNOWLEDGE_DATABASE = os.getenv("RAG_KNOWLEDGE_DATABASE", "knowledge-database")
+KNOWLEDGE_DATABASE = os.getenv("RAG_KNOWLEDGE_DATABASE", "agent-knowledge-v2")
 PRIVATE_COLLECTION = KNOWLEDGE_DATABASE
 SHARED_COLLECTION = None
 COLLECTIVE_COLLECTION = None

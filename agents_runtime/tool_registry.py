@@ -133,7 +133,6 @@ async def _answer_knowledge(**kwargs):
 
     from agent_orchestration.knowledge_retriever import (
         _extract_source_title_hint,
-        _match_source_title_alias,
         _match_source_title_dynamic,
         _list_known_sources,
         retrieve,
@@ -148,7 +147,6 @@ async def _answer_knowledge(**kwargs):
     # Strategy 1: full-document via alias/dynamic match
     resolved = (
         _extract_source_title_hint(query)
-        or _match_source_title_alias(query)
         or await _match_source_title_dynamic(phone, query)
     )
     if not resolved:
@@ -237,7 +235,7 @@ async def _synthesize_llm(query: str, full_text: str, source_title: str) -> str:
         llm = ChatOpenAI(
             model="deepseek-v4-flash", api_key=api_key, base_url=base_url,
             temperature=0.3, max_tokens=700, timeout=30,
-            model_kwargs={"extra_body": {"cache_mode": "default"}},
+            extra_body={"cache_mode": "default"},
         )
         response = await _asyncio.to_thread(llm.invoke, [
             {"role": "system", "content": "Voce e a Jennifer. Use APENAS os trechos. NAO invente. Formato: bullets, max 15 linhas, pt-BR."},
@@ -266,7 +264,7 @@ async def _synthesize_chunks_llm(query: str, chunks: list) -> str:
         llm = ChatOpenAI(
             model="deepseek-v4-flash", api_key=api_key, base_url=base_url,
             temperature=0.3, max_tokens=600, timeout=15,
-            model_kwargs={"extra_body": {"cache_mode": "default"}},
+            extra_body={"cache_mode": "default"},
         )
         response = await _asyncio.to_thread(llm.invoke, [
             {"role": "system", "content": "Voce e a Jennifer. Use APENAS os trechos. NAO invente. Formato: cite fonte, bullets, max 15 linhas, pt-BR."},

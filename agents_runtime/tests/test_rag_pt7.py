@@ -144,7 +144,7 @@ class TestIndexPipeline:
         assert "error" not in result, result
         assert result["chunks"] >= 1
         assert result["chunks_indexed"] == result["chunks"]
-        assert result["collection"] == "knowledge-database"
+        assert result["collection"] == "agent-knowledge-v2"
 
     def test_index_sem_embeddings_retorna_error(self):
         """Com embed_documents retornando [], index deve reportar erro."""
