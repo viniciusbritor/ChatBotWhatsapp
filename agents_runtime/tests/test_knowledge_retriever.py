@@ -768,46 +768,6 @@ class TestRetrieveWithHints:
         assert "Não encontrei" in result["clarification_prompt"]
 
 
-class TestSourceTitleAlias:
-    @pytest.mark.asyncio
-    async def test_static_alias_lgpd(self):
-        from agent_orchestration.knowledge_retriever import _match_source_title_alias
-
-        assert _match_source_title_alias("o que diz a lgpd sobre dados?") == (
-            "Lei_geral_protecao_dados_pessoais_1ed.pdf"
-        )
-
-    @pytest.mark.asyncio
-    async def test_static_alias_cdc(self):
-        from agent_orchestration.knowledge_retriever import _match_source_title_alias
-
-        assert _match_source_title_alias("qual o artigo 5 do codigo de defesa do consumidor?") == (
-            "Codigo-do-consumidor-FINAL.pdf"
-        )
-
-    @pytest.mark.asyncio
-    async def test_static_alias_no_match(self):
-        from agent_orchestration.knowledge_retriever import _match_source_title_alias
-
-        assert _match_source_title_alias("manual de higiene hospitalar") is None
-
-    @pytest.mark.asyncio
-    async def test_static_alias_tese(self):
-        from agent_orchestration.knowledge_retriever import _match_source_title_alias
-
-        assert _match_source_title_alias("o que diz a tese do vinicius?") == (
-            "tese vinicius.pdf"
-        )
-
-    @pytest.mark.asyncio
-    async def test_static_alias_dissertacao(self):
-        from agent_orchestration.knowledge_retriever import _match_source_title_alias
-
-        assert _match_source_title_alias("me fale sobre a dissertacao") == (
-            "dissertação vinicius.pdf"
-        )
-
-
 class TestSourceTitleDynamic:
     @pytest.mark.asyncio
     async def test_dynamic_matches_firestore_title(self):

@@ -427,7 +427,7 @@ def _classify_theme(source_name: str, text: str) -> str:
             temperature=0,
             max_tokens=15,
             timeout=5,
-            model_kwargs={"extra_body": {"cache_mode": "default"}},
+            extra_body={"cache_mode": "default"},
         )
         sample = (text or "")[:500]
         resp = llm.invoke(

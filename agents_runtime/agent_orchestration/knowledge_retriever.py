@@ -313,7 +313,8 @@ async def _llm_is_rag_query(
             temperature=0,
             max_tokens=5,
             timeout=8,
-            model_kwargs={"extra_body": {"cache_mode": "default"}},
+            extra_body={"cache_mode": "default"},
+            model_kwargs={},
         )
         prompt = (
             "O usuario esta pedindo algo que foi previamente salvo/armazenado "
@@ -642,39 +643,12 @@ def _extract_class_hint(query: str) -> Optional[str]:
     return max(scores.items(), key=lambda item: item[1])[0]
 
 
-_SOURCE_TITLE_ALIASES = {
-    "lgpd": "Lei_geral_protecao_dados_pessoais_1ed.pdf",
-    "lei geral de protecao de dados": "Lei_geral_protecao_dados_pessoais_1ed.pdf",
-    "protecao de dados": "Lei_geral_protecao_dados_pessoais_1ed.pdf",
-    "cdc": "Codigo-do-consumidor-FINAL.pdf",
-    "codigo de defesa do consumidor": "Codigo-do-consumidor-FINAL.pdf",
-    "defesa do consumidor": "Codigo-do-consumidor-FINAL.pdf",
-    "consumidor": "Codigo-do-consumidor-FINAL.pdf",
-    "tese": "tese vinicius.pdf",
-    "dissertacao": "dissertação vinicius.pdf",
-    "tese vinicius": "tese vinicius.pdf",
-    "dissertacao vinicius": "dissertação vinicius.pdf",
-}
-
-
-def _match_source_title_alias(query: str) -> Optional[str]:
-    """Map common terms in the query to known document filenames.
-
-    Example: query contains 'lgpd' → source_title='lgpd-capitulo-1.pdf'
-    """
-    t = _normalize(query)
-    for term, filename in _SOURCE_TITLE_ALIASES.items():
-        if _normalize(term) in t:
-            return filename
-    return None
-
-
 async def _match_source_title_dynamic(phone: str, query: str) -> Optional[str]:
-    """Look up Firestore for source_titles matching query terms.
+    """Auto-discovery: match query terms against known Firestore doc filenames.
 
-    Falls back to Firestore when static aliases fail. Returns the
-    source_title when 2+ non-stopword words from the query match
-    words in a known document filename.
+    No hardcoded aliases. Works with ANY document indexed in Firestore.
+    Requires 2+ non-stopword words from the query to match words in a
+    known document filename.
     """
     if not phone or not query:
         return None
@@ -748,7 +722,8 @@ async def _llm_enrich_query(query: str) -> Dict[str, str]:
             temperature=0,
             max_tokens=150,
             timeout=8,
-            model_kwargs={"extra_body": {"cache_mode": "default"}},
+            extra_body={"cache_mode": "default"},
+            model_kwargs={},
         )
 
         prompt = _LLM_ENRICH_PROMPT.format(query=query.strip()[:300])
@@ -779,7 +754,6 @@ async def _extract_query_hints(phone: str, query: str) -> Dict[str, str]:
     hints: Dict[str, str] = {}
     source_title = (
         _extract_source_title_hint(query)
-        or _match_source_title_alias(query)
         or await _match_source_title_dynamic(phone, query)
     )
     if source_title:
@@ -916,7 +890,8 @@ async def _rerank_with_llm(
             temperature=0,
             max_tokens=200,
             timeout=10,
-            model_kwargs={"extra_body": {"cache_mode": "default"}},
+            extra_body={"cache_mode": "default"},
+            model_kwargs={},
         )
         chunk_lines = []
         for i, c in enumerate(chunks):

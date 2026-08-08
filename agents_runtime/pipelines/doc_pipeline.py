@@ -244,7 +244,7 @@ async def _disambiguate_rag_vs_drive(
             temperature=0,
             max_tokens=10,
             timeout=5,
-            model_kwargs={"extra_body": {"cache_mode": "default"}},
+            extra_body={"cache_mode": "default"},
         )
 
         prompt = _DISAMBIGUATOR_PROMPT.format(
@@ -297,14 +297,12 @@ async def _run_rag(payload: Dict[str, Any]) -> Dict[str, Any]:
         # --- PASSO 1: resolver documento por alias / dynamic match ---
         from agent_orchestration.knowledge_retriever import (
             _extract_source_title_hint,
-            _match_source_title_alias,
             _match_source_title_dynamic,
             _list_known_sources,
         )
 
         resolved_source = (
             _extract_source_title_hint(text)
-            or _match_source_title_alias(text)
             or await _match_source_title_dynamic(phone, text)
         )
 
@@ -478,7 +476,7 @@ async def _synthesize_full_document(query: str, full_text: str, source_title: st
             temperature=0.3,
             max_tokens=700,
             timeout=30,
-            model_kwargs={"extra_body": {"cache_mode": "default"}},
+            extra_body={"cache_mode": "default"},
         )
         response = await asyncio.to_thread(llm.invoke, [
             {"role": "system", "content": _SYNTHESIS_SYSTEM_PROMPT},
@@ -576,7 +574,7 @@ async def _call_llm_synthesis(
         temperature=0.3,
         max_tokens=max_tokens,
         timeout=timeout,
-        model_kwargs={**extra_kwargs, "extra_body": {"cache_mode": "default"}},
+        extra_body={"cache_mode": "default"}, model_kwargs=extra_kwargs,
     )
 
     response = await asyncio.to_thread(llm.invoke, [
