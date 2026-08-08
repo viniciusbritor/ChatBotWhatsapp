@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-@pytest.mark.skip(reason="LGPD gate disabled in Fase K — cloudbuild no longer invokes check_lgpd_compliance.py")
+@pytest.mark.xfail(reason="LGPD gate disabled — requires full repo structure in CI")
 def test_check_lgpd_compliance_passes_in_repo():
     import subprocess
     import sys

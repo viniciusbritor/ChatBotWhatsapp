@@ -1,19 +1,34 @@
-"""Test configuration: filter third-party warnings that are out of our control."""
+"""Test configuration: auto-load API keys from GCP Secret Manager (cached)."""
 import os
 import warnings
 
-# Default off do TASK B folder_permissions enforcement para nao quebrar
-# testes existentes que nao se importam com lock-down. Testes que validam o
-# enforcement (tests/test_folder_permissions_enforcement.py) re-ligam
-# explicitamente via monkeypatch ou env var local.
 os.environ.setdefault("RAG_FOLDER_PERMISSIONS_ENFORCE", "false")
+
+_KEYS_LOADED = False
+
+def _load_keys_once():
+    global _KEYS_LOADED
+    if _KEYS_LOADED:
+        return
+    _KEYS_LOADED = True
+    try:
+        import subprocess
+        for env_var, secret_name in [("DEEPSEEK_API_KEY", "DEEPSEEK_API_KEY"), ("OPENAI_API_KEY", "OPENAI_API_KEY")]:
+            if (os.getenv(env_var, "") or "").strip():
+                continue
+            result = subprocess.run(
+                f'gcloud secrets versions access latest --secret={secret_name} --project=coherence-ominichannel-fs',
+                shell=True, capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                os.environ[env_var] = result.stdout.strip()
+    except Exception:
+        pass
+
+_load_keys_once()
 
 try:
     from langchain_core._api.deprecation import LangChainPendingDeprecationWarning
-    warnings.filterwarnings(
-        "ignore",
-        category=LangChainPendingDeprecationWarning,
-        message="The default value of `allowed_objects`",
-    )
+    warnings.filterwarnings("ignore", category=LangChainPendingDeprecationWarning, message="The default value of `allowed_objects`")
 except ImportError:
     pass

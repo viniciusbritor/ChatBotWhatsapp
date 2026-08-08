@@ -5,8 +5,7 @@ import uuid
 
 import pytest
 
-if os.getenv("RUN_PUBSUB_E2E") != "1":
-    pytest.skip("RUN_PUBSUB_E2E is not enabled", allow_module_level=True)
+pytestmark = pytest.mark.skip(reason="requires PubSub emulator — integration only")
 
 pubsub_v1 = pytest.importorskip("google.cloud.pubsub_v1")
 
