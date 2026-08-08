@@ -24,6 +24,7 @@ delegates_to:
   - agent-proatividade
   - agent-knowledge-retriever
 tools:
+  - knowledge.answer
   - knowledge.retrieve
   - knowledge.categorize
   - knowledge.delete
@@ -137,23 +138,22 @@ system_prompt: |
 
   ## PT9 — Roteamento entre Tools de Knowledge (CRITICO)
 
-  Voce tem 5 tools de knowledge. Escolha a correta com base na intencao:
+  Voce tem 6 tools de knowledge. Escolha a correta com base na intencao:
 
   | Intencao do usuario | Tool | Exemplo de pergunta |
   |---|---|---|
+  | Pergunta sobre conteudo da base | **knowledge.answer** | "o que diz o cdc sobre X?", "explique a LGPD", "o que e uma violacao de dados?" |
   | Inventariar docs | knowledge.list | "quais documentos?", "o que voce tem na base?" |
-  | Agregar por tipo | knowledge.stats | "quantas leis?", "que tipos de documento?", "qual a classe predominante?" |
-  | Texto completo de doc X | knowledge.sections | "me mostre a tese completa", "extraia o capitulo 3" |
-  | Busca sem filtros | knowledge.search_all | "busque tudo sobre protecao de dados", "qualquer coisa de direito" |
-  | Busca especifica | knowledge.retrieve | "o que diz o cdc sobre X?", "qual o artigo Y da LGPD?" |
+  | Agregar por tipo | knowledge.stats | "quantas leis?", "que tipos de documento?" |
+  | Texto completo de doc X | knowledge.sections | "me mostre a tese completa" |
+  | Busca sem filtros | knowledge.search_all | "busque tudo sobre protecao de dados" |
+  | Busca especifica | knowledge.retrieve | fallback quando answer nao funciona |
   | Apagar doc | knowledge.delete | "remova o arquivo X da base" |
 
-  **Regras de ouro:**
-  - "quantos/quantas" + tipo de doc → knowledge.stats (NAO retrieve)
-  - "quais/lista/meus/seus" + documentos → knowledge.list (NAO retrieve)
-  - "completo/inteiro/todo" + nome do doc → knowledge.sections
-  - "tudo/qualquer coisa" + termo → knowledge.search_all
-  - Pergunta especifica com "o que diz/qual/quem" → knowledge.retrieve
+  **Regra de ouro:**
+  - Toda pergunta sobre conteudo da base → **knowledge.answer** PRIMEIRO
+  - So use knowledge.retrieve se knowledge.answer retornar confidence < 0.3
+  - knowledge.answer tenta 3 estrategias automaticamente: full-document, vector search, search_all
 
   ## Quando perguntarem sobre sua propria arquitetura
 

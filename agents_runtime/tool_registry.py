@@ -125,6 +125,120 @@ async def _delete_knowledge(**kwargs):
     }
 
 
+async def _answer_knowledge(**kwargs):
+    phone = kwargs.get("phone", "")
+    query = kwargs.get("query", "")
+    if not phone or not query:
+        return {"answer": "", "confidence": 0.0, "sources": [], "strategy": "invalid"}
+
+    from agent_orchestration.knowledge_retriever import (
+        _extract_source_title_hint,
+        _match_source_title_alias,
+        _match_source_title_dynamic,
+        _list_known_sources,
+        retrieve,
+    )
+    from pipelines.doc_pipeline import _retrieve_full_document as fetch_doc
+
+    envelope = {"phone": phone, "extra": {"remote_jid": f"{phone}@s.whatsapp.net"}}
+    chunks = []
+    strategy = "no_match"
+    resolved = None
+
+    # Strategy 1: full-document via alias/dynamic match
+    resolved = (
+        _extract_source_title_hint(query)
+        or _match_source_title_alias(query)
+        or await _match_source_title_dynamic(phone, query)
+    )
+    if not resolved:
+        sources = await _list_known_sources(phone)
+        if sources:
+            from agent_orchestration.source_title_resolver import resolve
+            resolved = await resolve(sources, query) or None
+
+    if resolved:
+        full_text = await fetch_doc(phone, resolved, max_chars=30000)
+        if full_text and len(full_text.strip()) >= 500:
+            answer = await _synthesize_llm(query, full_text, resolved)
+            if answer:
+                return {"answer": answer, "confidence": 0.85, "sources": [resolved], "strategy": "full_document"}
+
+    # Strategy 2: vector search
+    result = await retrieve(envelope, query, limit=10, min_score=0.4)
+    chunks = result.get("results", [])
+    if chunks:
+        answer = await _synthesize_chunks_llm(query, chunks)
+        top_score = max((c.get("score", 0.0) for c in chunks), default=0.0)
+        sources = list(set(c.get("source", "") for c in chunks[:5]))
+        return {"answer": answer or "", "confidence": min(0.8, round(top_score, 2)), "sources": sources, "strategy": "vector_search"}
+
+    # Strategy 3: search_all (unfiltered escape hatch)
+    from core.rag import search_legal_knowledge
+    all_result = await search_legal_knowledge(phone=phone, query=query, k=10, min_score=0.3)
+    chunks = all_result.get("results", []) if isinstance(all_result, dict) else []
+    if chunks:
+        answer = await _synthesize_chunks_llm(query, chunks)
+        top_score = max((c.get("score", 0.0) for c in chunks), default=0.0)
+        sources = list(set(c.get("source", "") for c in chunks[:5]))
+        return {"answer": answer or "", "confidence": min(0.65, round(top_score, 2)), "sources": sources, "strategy": "search_all"}
+
+    return {"answer": "", "confidence": 0.0, "sources": [], "strategy": "no_match"}
+
+
+async def _synthesize_llm(query: str, full_text: str, source_title: str) -> str:
+    import os
+    api_key = (os.getenv("DEEPSEEK_API_KEY", "") or "").strip()
+    if not api_key:
+        return ""
+    try:
+        from langchain_openai import ChatOpenAI
+        import asyncio as _asyncio
+        base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1").strip()
+        llm = ChatOpenAI(
+            model="deepseek-v4-flash", api_key=api_key, base_url=base_url,
+            temperature=0.3, max_tokens=700, timeout=30,
+            model_kwargs={"extra_body": {"cache_mode": "default"}},
+        )
+        response = await _asyncio.to_thread(llm.invoke, [
+            {"role": "system", "content": "Voce e a Jennifer. Use APENAS os trechos. NAO invente. Formato: bullets, max 15 linhas, pt-BR."},
+            {"role": "user", "content": f"Pergunta: {query}\n\nFonte: [{source_title}]\n{full_text[:30000]}\n\nResponda:"},
+        ])
+        content = getattr(response, "content", str(response))
+        return content.strip() if isinstance(content, str) and len(content.strip()) >= 20 else ""
+    except Exception:
+        return ""
+
+
+async def _synthesize_chunks_llm(query: str, chunks: list) -> str:
+    if not chunks:
+        return ""
+    context = "\n---\n".join(
+        f"[{c.get('source', '?')}] {c.get('text', '')[:1500]}" for c in chunks[:5]
+    )
+    import os
+    api_key = (os.getenv("DEEPSEEK_API_KEY", "") or "").strip()
+    if not api_key:
+        return ""
+    try:
+        from langchain_openai import ChatOpenAI
+        import asyncio as _asyncio
+        base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1").strip()
+        llm = ChatOpenAI(
+            model="deepseek-v4-flash", api_key=api_key, base_url=base_url,
+            temperature=0.3, max_tokens=600, timeout=15,
+            model_kwargs={"extra_body": {"cache_mode": "default"}},
+        )
+        response = await _asyncio.to_thread(llm.invoke, [
+            {"role": "system", "content": "Voce e a Jennifer. Use APENAS os trechos. NAO invente. Formato: cite fonte, bullets, max 15 linhas, pt-BR."},
+            {"role": "user", "content": f"Pergunta: {query}\n\nTrechos:\n{context}\n\nResponda:"},
+        ])
+        content = getattr(response, "content", str(response))
+        return content.strip() if isinstance(content, str) and len(content.strip()) >= 20 else ""
+    except Exception:
+        return ""
+
+
 async def _list_knowledge(**kwargs):
     from agent_orchestration.knowledge_retriever import _list_known_sources
 
@@ -599,6 +713,26 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
                 "phone": {"type": "string", "description": "Telefone do usuario owner"},
             },
             "required": ["source_title", "phone"],
+        },
+    },
+    "knowledge.answer": {
+        "function": _answer_knowledge,
+        "implementation": "knowledge_answer",
+        "description": (
+            "Responde perguntas consultando a base de conhecimento. "
+            "Tenta 3 estrategias em ordem: full-document (alias/dynamic match), "
+            "vector search, search_all (unfiltered). "
+            "Retorna answer (texto sintetizado), confidence (0-1), sources (docs usados) "
+            "e strategy (qual estrategia funcionou). "
+            "Use como ferramenta PRINCIPAL para qualquer pergunta sobre conteudo da base."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string", "description": "Telefone do usuario"},
+                "query": {"type": "string", "description": "Pergunta do usuario"},
+            },
+            "required": ["phone", "query"],
         },
     },
     "knowledge.list": {
