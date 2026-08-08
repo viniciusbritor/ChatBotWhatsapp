@@ -195,44 +195,6 @@ class TestIdempotency:
 
 
 class TestIntentClassifierKnowledge:
-    """Classificador de intent deve rotear queries de conhecimento."""
-
-    def test_classifier_has_conhecimento_category(self):
-        from orchestrator import _CLASSIFIER_PROMPT
-        assert "conhecimento" in _CLASSIFIER_PROMPT
-
-    def test_classifier_valid_set_includes_conhecimento(self):
-        from orchestrator import _classify_intent_llm
-        import inspect
-        source = inspect.getsource(_classify_intent_llm)
-        assert '"conhecimento"' in source or "'conhecimento'" in source
-
-    @pytest.mark.asyncio
-    async def test_conhecimento_routes_to_doc_pipeline(self):
-        from orchestrator import orchestrate, _response_cache
-
-        _response_cache.clear()
-        with patch("pipelines.jennifer_pipeline.run", new_callable=AsyncMock) as mock_jen:
-            with patch("pipelines.doc_pipeline.run", new_callable=AsyncMock) as mock_doc:
-                mock_doc.return_value = {
-                    "reply": "ok doc", "delay_ms": 0, "presence": "composing", "metadata": {}
-                }
-                mock_jen.return_value = {
-                    "reply": "ok jen", "delay_ms": 0, "presence": "composing", "metadata": {}
-                }
-                with patch("orchestrator._classify_intent_llm", return_value="conhecimento"):
-                    with patch("orchestrator._detect_intimacy", return_value=False):
-                        with patch("orchestrator._detect_runtime_status", return_value=False):
-                            with patch("orchestrator._detect_correction", return_value=False):
-                                with patch("orchestrator._detect_morality", return_value=False):
-                                    with patch("core.pending_actions.get_pending_action", AsyncMock(return_value=None)):
-                                        result = await orchestrate({
-                                            "instance": "jennifer",
-                                            "phone": "+5511999",
-                                            "text": "o que diz o cdc sobre praticas abusivas?",
-                                            "sender_name": "Test",
-                                            "extra": {"remote_jid": "5511999@s.whatsapp.net"},
-                                        })
-        assert mock_doc.called
-        assert not mock_jen.called
-        assert result["reply"] == "ok doc"
+    # Tests removidos — categoria 'conhecimento' foi eliminada.
+    # O agente (via knowledge.answer) decide como buscar, nao o classifier.
+    pass

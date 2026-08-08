@@ -318,8 +318,7 @@ async def _run_rag(payload: Dict[str, Any]) -> Dict[str, Any]:
         if resolved_source:
             full_text = await _retrieve_full_document(phone, resolved_source)
             if full_text and len(full_text.strip()) >= 500:
-                filtered = _filter_relevant_paragraphs(text, full_text, max_chars=15000)
-                resposta = await _synthesize_full_document(text, filtered, resolved_source)
+                resposta = await _synthesize_full_document(text, full_text[:30000], resolved_source)
                 await ack_task
                 return {
                     "reply": resposta,
@@ -383,53 +382,6 @@ async def _run_rag(payload: Dict[str, Any]) -> Dict[str, Any]:
             "presence": "composing",
             "metadata": {"agent_id": "agent-knowledge-retriever", "error": str(exc)[:200], "skip_image_report": True},
         }
-
-
-_STOPWORDS = frozenset({
-    "como", "para", "com", "sem", "sobre", "entre", "pelo", "pela",
-    "que", "qual", "quais", "quem", "onde", "quando", "diz", "fala",
-    "isso", "aquilo", "esse", "essa", "este", "esta", "sao", "foi",
-    "tem", "fazer", "ser", "esta", "estao", "dos", "das", "nos", "nas",
-    "mas", "porque", "pois", "alem", "sobre", "ate", "desde", "cada",
-    "tudo", "nada", "todos", "todas", "mais", "menos", "muito", "pouco",
-    "isso", "esse", "aquilo", "tambem", "ainda", "assim", "entao",
-})
-
-
-def _filter_relevant_paragraphs(query: str, full_text: str, max_chars: int = 15000) -> str:
-    keywords = set()
-    for word in query.lower().split():
-        w = "".join(c for c in word if c.isalpha())
-        if len(w) > 3 and w not in _STOPWORDS:
-            keywords.add(w)
-
-    if not keywords or len(keywords) <= 1:
-        return full_text[:max_chars]
-
-    paragraphs = [p.strip() for p in full_text.split("\n\n") if p.strip()]
-    if not paragraphs:
-        return full_text[:max_chars]
-
-    scored = []
-    for p in paragraphs:
-        p_lower = p.lower()
-        score = sum(1 for kw in keywords if kw in p_lower)
-        if score > 0:
-            scored.append((score, p))
-
-    if not scored:
-        return full_text[:max_chars]
-
-    scored.sort(key=lambda x: -x[0])
-    parts = []
-    total = 0
-    for _, p in scored:
-        if total + len(p) > max_chars:
-            break
-        parts.append(p)
-        total += len(p) + 2
-
-    return "\n\n".join(parts) if parts else full_text[:max_chars]
 
 
 async def _retrieve_full_document(
@@ -759,7 +711,8 @@ async def run(payload: Dict[str, Any]) -> Dict[str, Any]:
     phone = payload.get("phone", "")
 
     if not text.strip():
-        return await _run_rag(payload)
+        from pipelines.jennifer_pipeline import run as jen_run
+        return await jen_run(payload)
 
     intent_class = payload.get("intent_class") or ""
 
@@ -768,10 +721,20 @@ async def run(payload: Dict[str, Any]) -> Dict[str, Any]:
         for kw in _DRIVE_ONLY_KEYWORDS:
             if kw in t:
                 return await _run_drive(payload)
-        return await _run_rag(payload)
+        # fall through — agent handles via knowledge.answer
+        from pipelines.jennifer_pipeline import run as jen_run
+        return await jen_run(payload)
 
     if intent_class in ("juridicas", "editais", "academica", "anotacoes", "conhecimento"):
-        return await _run_rag(payload)
+        t = text.lower()
+        if any(kw in t for kw in _STATS_WORDS):
+            return await _stats_knowledge_pipeline(payload)
+        has_content = any(mk in t for mk in ("diz", "fala", "capitulo", "artigo", "lei", "sobre", "resuma", "explique", "qual o", "quais os"))
+        if any(kw in t for kw in _LIST_WORDS) and not has_content:
+            return await _list_knowledge_base(payload)
+        # Delegate to agent — agent uses knowledge.answer
+        from pipelines.jennifer_pipeline import run as jen_run
+        return await jen_run(payload)
     if intent_class == "ferramentas":
         return await _run_drive(payload)
 
@@ -784,4 +747,5 @@ async def run(payload: Dict[str, Any]) -> Dict[str, Any]:
         if not has_content:
             return await _list_knowledge_base(payload)
 
-    return await _run_rag(payload)
+    from pipelines.jennifer_pipeline import run as jen_run
+    return await jen_run(payload)

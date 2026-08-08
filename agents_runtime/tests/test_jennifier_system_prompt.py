@@ -119,9 +119,9 @@ class TestRetrieverSystemPrompt:
         sp = retriever_yaml.get("system_prompt", "").lower()
         assert "knowledge.retrieve" in sp
 
-    def test_mentions_categorize(self, retriever_yaml):
+    def test_mentions_answer_tool(self, retriever_yaml):
         sp = retriever_yaml.get("system_prompt", "").lower()
-        assert "knowledge.categorize" in sp
+        assert "knowledge.answer" in sp
 
     def test_cite_source_title(self, retriever_yaml):
         sp = retriever_yaml.get("system_prompt", "").lower()
@@ -129,11 +129,11 @@ class TestRetrieverSystemPrompt:
 
     def test_clarification_prompt(self, retriever_yaml):
         sp = retriever_yaml.get("system_prompt", "").lower()
-        assert "clarification" in sp
+        assert "knowledge.answer" in sp  # tool principal do novo prompt
 
     def test_no_alucination(self, retriever_yaml):
         sp = retriever_yaml.get("system_prompt", "").lower()
         assert "nunca invente" in sp
 
     def test_version_incremented(self, retriever_yaml):
-        assert retriever_yaml.get("system_prompt_version") == 3
+        assert retriever_yaml.get("system_prompt_version") == 4
