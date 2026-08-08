@@ -85,6 +85,13 @@ steps:
       - "push"
       - "gcr.io/$PROJECT_ID/agents-runtime:latest"
 
+  - name: "gcr.io/$PROJECT_ID/agents-runtime:latest"
+    id: "verify-composio-key"
+    entrypoint: "python"
+    args:
+      - "-c"
+      - "from tools.youtube_composio import _get_api_key; k=_get_api_key(); assert len(k)>20, f'Key too short: {len(k)} chars'; print(f'VERIFIED: key {len(k)} chars')"
+
   - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
     entrypoint: "gcloud"
     args:
