@@ -193,7 +193,7 @@ class TestAdminKnowledgeGrouping(_AuthFixture):
         return client
 
     def test_admin_knowledge_groups_by_source_title(self):
-        fake = self._fake_firestore_with_chunks("agent-knowledge-v2")
+        fake = self._fake_firestore_with_chunks("knowledge-database")
         with patch("agent_loader._get_firestore_client", return_value=fake):
             resp = self.client.get("/admin/knowledge?limit=10", headers=self.headers)
         assert resp.status_code == 200, resp.text
@@ -206,7 +206,7 @@ class TestAdminKnowledgeGrouping(_AuthFixture):
         assert docs[0]["group"] == "academico"
 
     def test_admin_knowledge_detail_returns_chunks(self):
-        fake = self._fake_firestore_with_chunks("agent-knowledge-v2")
+        fake = self._fake_firestore_with_chunks("knowledge-database")
         with patch("agent_loader._get_firestore_client", return_value=fake):
             resp = self.client.get("/admin/knowledge/dissertacao.pdf", headers=self.headers)
         assert resp.status_code == 200, resp.text
@@ -218,7 +218,7 @@ class TestAdminKnowledgeGrouping(_AuthFixture):
         assert "chunk 0" in doc["chunks"][0]["text"]
 
     def test_admin_knowledge_detail_404_when_missing(self):
-        fake = self._fake_firestore_with_chunks("agent-knowledge-v2")
+        fake = self._fake_firestore_with_chunks("knowledge-database")
         with patch("agent_loader._get_firestore_client", return_value=fake):
             resp = self.client.get("/admin/knowledge/inexistente.pdf", headers=self.headers)
         assert resp.status_code == 404
