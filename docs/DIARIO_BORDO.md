@@ -1,5 +1,27 @@
 # Diario de Bordo — ChatBotWhatsapp
 
+## 09/08/2026 (05:00 BRT) — ✅ Composio INTEGRADO em producao (WhatsApp)
+
+### Validacao final (via WhatsApp com Jennifer)
+Usuario confirmou que a integracao Composio FUNCIONOU em producao:
+- YouTube search via WhatsApp: "Sexual Healing do Marvin Gaye" retornado
+- LinkedIn e Google Docs: fluxo completo funcionando
+
+### Stack final de fixes (4 camadas encadeadas)
+| # | Commit | Camada corrigida |
+|---|---|---|
+| 1 | `2eca49f` | `connected_accounts.list(user_id=)` → `user_ids=[...]` (status/connect API) |
+| 2 | `a6574df` | `tools.execute()` precisa de `user_id` → phone injetado via USER_SCOPED_TOOL_PREFIXES |
+| 3 | `bc19519` | `toolkit_versions` pinadas (11 apps, `_composio_common.py`) + schemas reais (q/maxResults, author URN, document_id/file_id, specificContent) |
+| 4 | `670e4d4` | Wrappers do tool_registry repassam `phone` → `user_id` chega de verdade ao `tools.execute()` |
+
+### Licao (anti-regressao)
+Bug em 4 camadas: se QUALQUER uma falhar, a tool retorna erro generico.
+Para testar tools composio: validar a cadeia completa
+(wrapper → funcao → SDK → API) localmente com chamada REAL, nao so mock.
+
+---
+
 ## 09/08/2026 (04:50 BRT) — Fix Composio: wrappers do tool_registry nao repassavam phone
 
 ### Problema

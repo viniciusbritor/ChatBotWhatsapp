@@ -645,7 +645,8 @@ MIME + tie-breaker LLM.
 | `ATA_WORKER_PHONES` | `ata-worker` (CSV) | ativo |
 | `evolution-api-key` | `agents-runtime` (envio de mensagens) | **necessita key real** (nao foi exposta) |
 | `google-maps-api-key` | `agents-runtime` (locomotion tool) | ativo |
-| `youtube-api-key` | `agents-runtime` (youtube tool) | ativo |
+| `COMPOSIO_API_KEY` | `agents-runtime` (tools linkedin./youtube./googledocs. via Composio, 09/08/2026) | ativo |
+| `youtube-api-key` | `agents-runtime` (youtube tool) | **legado — YouTube usa Composio desde 09/08/2026** |
 | `serper-api-key` | `agents-runtime` (web search) | ativo |
 | `GEMINI_API_KEY` | `agents-runtime` (fallback STT somente sob consentimento) | ativo |
 | `DEEPSEEK_API_KEY` | LLM cascade (1º recurso apos MiniMax M2.7) | **versao bloqueada — aguardando nova key** |

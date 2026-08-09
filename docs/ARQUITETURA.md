@@ -409,7 +409,7 @@ coherence-ominichannel-fs
 | `agent-learning` | Specialist | "na verdade", "errado" |
 | `manager-web` | Deep Agent | "pesquisar", "buscar na internet" |
 | `agent-locomocao` | Specialist | "uber", "rota", "onde fica" |
-| `agent-youtube` | Specialist | "youtube", "video", "tutorial" |
+| `agent-youtube` | Specialist | "youtube", "video", "tutorial" (via Composio, 09/08/2026) |
 | `agent-morality` | Specialist | Keywords de agressão |
 | `agent-group-rag` | Deep Agent | Anexo em grupo WhatsApp |
 | `agent-rag` (legacy) | Specialist | Superseded pelo knowledge-retriever |
@@ -504,6 +504,13 @@ em `agents_runtime/docs/` foram removidas em 22/07/2026.
   `knowledge-database`.
 - **Orquestração**: dispatch procedural em `orchestrator.py` (flat,
   pipeline-based). Jennifer → `access_guardian` → manager → reply.
+- **Integração externa (Composio, desde 09/08/2026)**: tools
+  `linkedin.*`, `youtube.*` e `googledocs.*` via SDK Composio
+  (`tools/{linkedin,youtube,googledocs}_composio.py`). Requer as 4 camadas:
+  prefixo user-scoped (`USER_SCOPED_TOOL_PREFIXES`), wrapper repassa `phone`,
+  `user_id` no `tools.execute()`, `toolkit_versions` em
+  `tools/_composio_common.py` (11 apps). `COMPOSIO_API_KEY` no Secret Manager.
+  Endpoints Connect: `/api/v1/composio/{status,connect-all,authorize-owner}`.
 - **LLM**: DeepSeek V4 Flash (único provedor desde Fase N).
 - **STT**: Whisper local (`faster-whisper`, `base/int8`). Fallback
   controlado para Gemini 2.5 Flash apenas em falha técnica do Whisper
@@ -527,6 +534,8 @@ flowchart LR
     PUSH --> ORCH["Jennifer orchestrator"]
     ORCH --> TOOLS["Capacidades Gmail/Drive/Calendar + RAG"]
     TOOLS --> VECT[("Firestore Vector por owner")]
+    ORCH --> COMP["Composio: LinkedIn/YouTube/Google Docs"]
+    COMP --> COMPAC[("Contas conectadas Composio")]
     ORCH --> EVO
     ORCH --> PORTAL["Coherence Portal (UI Agentes Omnichannel)"]
     PORTAL -->|"Authorization: Bearer ou Firebase"| WEB
