@@ -1345,6 +1345,51 @@ async def admin_cache_stats():
     return JSONResponse(content=get_cache_stats())
 
 
+# ==============================================================================
+# Composio Platform — Connect API (Portal Omnichannel / Agent Module)
+# ==============================================================================
+
+
+@app.get("/api/v1/composio/status")
+async def composio_status(phone: str = ""):
+    """Retorna status de conexao de todos os auth configs do usuario."""
+    if not phone:
+        return JSONResponse({"error": "phone required"}, status_code=400)
+    from tools.composio_connect import get_status
+    result = await get_status(phone)
+    return JSONResponse(content=result)
+
+
+@app.post("/api/v1/composio/connect-all")
+async def composio_connect_all(request: Request):
+    """Gera Connect Links para todos os apps NAO conectados do usuario."""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid json"}, status_code=400)
+    phone = (body.get("phone") or "").strip()
+    if not phone:
+        return JSONResponse({"error": "phone required"}, status_code=400)
+    from tools.composio_connect import connect_all
+    result = await connect_all(phone)
+    return JSONResponse(content=result)
+
+
+@app.post("/api/v1/composio/authorize-owner")
+async def composio_authorize_owner(request: Request):
+    """Gera Connect Links para TODOS os 12 auth configs (owner)."""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid json"}, status_code=400)
+    phone = (body.get("phone") or "").strip()
+    if not phone:
+        return JSONResponse({"error": "phone required"}, status_code=400)
+    from tools.composio_connect import authorize_owner
+    result = await authorize_owner(phone)
+    return JSONResponse(content=result)
+
+
 @app.get("/")
 async def root_redirect(request: Request):
     """Return the service metadata for plain API clients, or the HTML module
