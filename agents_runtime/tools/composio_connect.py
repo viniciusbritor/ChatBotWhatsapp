@@ -69,7 +69,7 @@ async def connect_all(user_id: str) -> Dict[str, Any]:
             links.append({"toolkit": slug, "status": "connected", "connect_url": None})
         else:
             try:
-                req = session.authorize(toolkit=slug, auth_config_id=getattr(cfg, "id", None))
+                req = session.authorize(toolkit=slug)
                 links.append({
                     "toolkit": slug,
                     "status": "pending",
