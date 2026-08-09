@@ -343,52 +343,52 @@ async def _render_image_report(**kwargs):
 
 async def _linkedin_post(**kwargs):
     from tools.linkedin_composio import create_post
-    return await create_post(text=kwargs.get("text", ""), visibility=kwargs.get("visibility", "PUBLIC"))
+    return await create_post(text=kwargs.get("text", ""), visibility=kwargs.get("visibility", "PUBLIC"), phone=kwargs.get("phone", ""))
 
 
 async def _linkedin_read_post(**kwargs):
     from tools.linkedin_composio import read_post
-    return await read_post(post_id=kwargs.get("post_id", ""))
+    return await read_post(post_id=kwargs.get("post_id", ""), phone=kwargs.get("phone", ""))
 
 
 async def _linkedin_my_profile(**kwargs):
     from tools.linkedin_composio import my_profile
-    return await my_profile()
+    return await my_profile(phone=kwargs.get("phone", ""))
 
 
 async def _linkedin_article(**kwargs):
     from tools.linkedin_composio import create_article
-    return await create_article(text=kwargs.get("text", ""), title=kwargs.get("title", ""), url=kwargs.get("url", ""))
+    return await create_article(text=kwargs.get("text", ""), title=kwargs.get("title", ""), url=kwargs.get("url", ""), phone=kwargs.get("phone", ""))
 
 
 async def _youtube_search(**kwargs):
     from tools.youtube_composio import search_videos
-    return await search_videos(query=kwargs.get("query", ""), max_results=kwargs.get("max_results", 5))
+    return await search_videos(query=kwargs.get("query", ""), max_results=kwargs.get("max_results", 5), phone=kwargs.get("phone", ""))
 
 
 async def _youtube_video_details(**kwargs):
     from tools.youtube_composio import get_video_details
-    return await get_video_details(video_ids=kwargs.get("video_ids", []))
+    return await get_video_details(video_ids=kwargs.get("video_ids", []), phone=kwargs.get("phone", ""))
 
 
 async def _googledocs_create(**kwargs):
     from tools.googledocs_composio import create_document
-    return await create_document(title=kwargs.get("title", ""), markdown_text=kwargs.get("markdown_text", ""))
+    return await create_document(title=kwargs.get("title", ""), markdown_text=kwargs.get("markdown_text", ""), phone=kwargs.get("phone", ""))
 
 
 async def _googledocs_read(**kwargs):
     from tools.googledocs_composio import read_document
-    return await read_document(doc_id=kwargs.get("doc_id", ""))
+    return await read_document(doc_id=kwargs.get("doc_id", ""), phone=kwargs.get("phone", ""))
 
 
 async def _googledocs_search(**kwargs):
     from tools.googledocs_composio import search_documents
-    return await search_documents(query=kwargs.get("query", ""), max_results=kwargs.get("max_results", 10))
+    return await search_documents(query=kwargs.get("query", ""), max_results=kwargs.get("max_results", 10), phone=kwargs.get("phone", ""))
 
 
 async def _googledocs_export_pdf(**kwargs):
     from tools.googledocs_composio import export_pdf
-    return await export_pdf(doc_id=kwargs.get("doc_id", ""))
+    return await export_pdf(doc_id=kwargs.get("doc_id", ""), phone=kwargs.get("phone", ""))
 
 
 async def _transporte_rota(**kwargs):

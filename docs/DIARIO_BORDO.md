@@ -1,5 +1,30 @@
 # Diario de Bordo — ChatBotWhatsapp
 
+## 09/08/2026 (04:50 BRT) — Fix Composio: wrappers do tool_registry nao repassavam phone
+
+### Problema
+Mesmo apos os 2 fixes anteriores (user_ids plural + toolkit_versions), as tools
+composio continuavam falhando em producao com "unregistered callers" / "falta
+user ID vinculado". O fix funcionava localmente mas NAO em producao.
+
+### Causa Raiz (elusive — 3ª camada)
+O `phone` chega nos kwargs do wrapper (injetado pelo `_bind_tool_args` porque
+as tools sao user-scoped), mas os 10 wrappers em `tool_registry.py` so
+extraiam os parametros conhecidos (query, max_results, etc.) e DESCARTAVAM
+o `phone`. Resultado: `search_videos(..., user_id="")` → API rejeita.
+
+### Correcao
+`tool_registry.py`: os 10 wrappers (`_linkedin_*`, `_youtube_*`,
+`_googledocs_*`) agora repassam `phone=kwargs.get("phone", "")`.
+
+### Validacao
+- Teste local da cadeia completa via wrapper (`tr.get_tool(...)`):
+  youtube.search OK, linkedin.my_profile OK, googledocs.search OK
+- Teste `is_user_scoped_tool` para as 10 tools: ALL OK
+- pytest tests/test_composio_tools.py: 4 passed
+
+---
+
 ## 09/08/2026 (04:40 BRT) — Fix Composio: schemas reais das tools (param names)
 
 ### Problema
