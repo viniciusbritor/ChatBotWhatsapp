@@ -16,7 +16,7 @@ from tools import locomotion, youtube, group, correction, chat_history
 logger = logging.getLogger(__name__)
 
 ToolFn = Callable[..., Awaitable[Dict[str, Any]]]
-USER_SCOPED_TOOL_PREFIXES = ("calendar.", "drive.", "gmail.")
+USER_SCOPED_TOOL_PREFIXES = ("calendar.", "drive.", "gmail.", "youtube.", "linkedin.", "googledocs.")
 
 
 def is_user_scoped_tool(tool_id: str) -> bool:

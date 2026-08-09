@@ -1,5 +1,27 @@
 # Diario de Bordo — ChatBotWhatsapp
 
+## 08/08/2026 (23:50 BRT) — Fix Composio: tools.execute precisa de user_id
+
+### Problema
+YouTube/LinkedIn/GoogleDocs tools falhavam com erro `unregistered callers`:
+"Method doesn't allow unregistered callers. Please use API Key or other
+form of API consumer identity to call this API."
+
+### Causa Raiz
+`composio.tools.execute()` precisa de `user_id` para selecionar qual conta
+conectada usar. Mas as tools nao recebiam o `phone` do usuario porque:
+- `USER_SCOPED_TOOL_PREFIXES = ("calendar.", "drive.", "gmail.")` nao incluia
+  `youtube.`, `linkedin.`, `googledocs.`
+- `_bind_tool_args()` so injeta `phone` para user-scoped tools
+
+### Correcao
+- `tool_registry.py:19`: prefixos adicionados → `youtube.`, `linkedin.`, `googledocs.`
+- `tools/{youtube,linkedin,googledocs}_composio.py`: cada funcao publica agora
+  aceita `**kwargs`, extrai `phone`, e passa `user_id` ao `tools.execute()`
+- `_composio_call()` em todos os 3 arquivos: recebe e repassa `user_id`
+
+---
+
 ## 08/08/2026 (23:20 BRT) — Fix Composio Connect: connected_accounts.list param
 
 ### Problema

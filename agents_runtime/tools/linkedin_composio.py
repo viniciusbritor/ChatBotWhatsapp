@@ -26,11 +26,11 @@ def _get_api_key() -> str:
         return (os.getenv("COMPOSIO_API_KEY", "") or "").strip()
 
 
-async def _composio_call(tool_slug: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+async def _composio_call(tool_slug: str, arguments: Dict[str, Any], user_id: str = "") -> Dict[str, Any]:
     try:
         from composio import Composio
         client = Composio(api_key=_get_api_key())
-        result = client.tools.execute(slug=tool_slug, arguments=arguments)
+        result = client.tools.execute(slug=tool_slug, arguments=arguments, user_id=user_id)
         return result.get("data", result)
     except ImportError:
         return {"error": "composio_sdk_missing"}
@@ -39,21 +39,25 @@ async def _composio_call(tool_slug: str, arguments: Dict[str, Any]) -> Dict[str,
         return {"error": str(exc)[:200]}
 
 
-async def create_post(text: str, visibility: str = "PUBLIC", images: Optional[List[str]] = None) -> Dict[str, Any]:
+async def create_post(text: str, visibility: str = "PUBLIC", images: Optional[List[str]] = None, **kwargs) -> Dict[str, Any]:
+    user_id = str(kwargs.get("phone", "") or kwargs.get("user_id", ""))
     return await _composio_call("LINKEDIN_CREATE_LINKED_IN_POST", {
         "text": text[:3000], "visibility": visibility, "images": images or [],
-    })
+    }, user_id=user_id)
 
 
-async def read_post(post_id: str) -> Dict[str, Any]:
-    return await _composio_call("LINKEDIN_GET_POST_CONTENT", {"post_id": post_id})
+async def read_post(post_id: str, **kwargs) -> Dict[str, Any]:
+    user_id = str(kwargs.get("phone", "") or kwargs.get("user_id", ""))
+    return await _composio_call("LINKEDIN_GET_POST_CONTENT", {"post_id": post_id}, user_id=user_id)
 
 
-async def my_profile() -> Dict[str, Any]:
-    return await _composio_call("LINKEDIN_GET_MY_INFO", {})
+async def my_profile(**kwargs) -> Dict[str, Any]:
+    user_id = str(kwargs.get("phone", "") or kwargs.get("user_id", ""))
+    return await _composio_call("LINKEDIN_GET_MY_INFO", {}, user_id=user_id)
 
 
-async def create_article(text: str, title: str = "") -> Dict[str, Any]:
+async def create_article(text: str, title: str = "", **kwargs) -> Dict[str, Any]:
+    user_id = str(kwargs.get("phone", "") or kwargs.get("user_id", ""))
     return await _composio_call("LINKEDIN_CREATE_ARTICLE_OR_URL_SHARE", {
         "text": text[:3000], "title": title[:200],
-    })
+    }, user_id=user_id)
