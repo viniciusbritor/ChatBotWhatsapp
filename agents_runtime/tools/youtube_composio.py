@@ -29,7 +29,8 @@ def _get_api_key() -> str:
 async def _composio_call(tool_slug: str, arguments: Dict[str, Any], user_id: str = "") -> Dict[str, Any]:
     try:
         from composio import Composio
-        client = Composio(api_key=_get_api_key())
+        from tools._composio_common import TOOLKIT_VERSIONS
+        client = Composio(api_key=_get_api_key(), toolkit_versions=TOOLKIT_VERSIONS)
         result = client.tools.execute(slug=tool_slug, arguments=arguments, user_id=user_id)
         return result.get("data", result)
     except ImportError:
@@ -41,9 +42,9 @@ async def _composio_call(tool_slug: str, arguments: Dict[str, Any], user_id: str
 
 async def search_videos(query: str, max_results: int = 5, **kwargs) -> Dict[str, Any]:
     user_id = str(kwargs.get("phone", "") or kwargs.get("user_id", ""))
-    return await _composio_call("YOUTUBE_SEARCH_YOU_TUBE", {"query": query[:500], "max_results": max_results}, user_id=user_id)
+    return await _composio_call("YOUTUBE_SEARCH_YOU_TUBE", {"q": query[:500], "maxResults": max_results}, user_id=user_id)
 
 
 async def get_video_details(video_ids: list, **kwargs) -> Dict[str, Any]:
     user_id = str(kwargs.get("phone", "") or kwargs.get("user_id", ""))
-    return await _composio_call("YOUTUBE_GET_VIDEO_DETAILS_BATCH", {"video_ids": video_ids[:50]}, user_id=user_id)
+    return await _composio_call("YOUTUBE_GET_VIDEO_DETAILS_BATCH", {"id": video_ids[:50]}, user_id=user_id)

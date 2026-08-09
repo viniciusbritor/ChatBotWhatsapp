@@ -358,7 +358,7 @@ async def _linkedin_my_profile(**kwargs):
 
 async def _linkedin_article(**kwargs):
     from tools.linkedin_composio import create_article
-    return await create_article(text=kwargs.get("text", ""), title=kwargs.get("title", ""))
+    return await create_article(text=kwargs.get("text", ""), title=kwargs.get("title", ""), url=kwargs.get("url", ""))
 
 
 async def _youtube_search(**kwargs):
@@ -1182,6 +1182,7 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
             "properties": {
                 "text": {"type": "string", "description": "Texto do artigo (max 3000 caracteres)"},
                 "title": {"type": "string", "description": "Titulo do artigo"},
+                "url": {"type": "string", "description": "URL a compartilhar (opcional)"},
             },
             "required": ["text"],
         },

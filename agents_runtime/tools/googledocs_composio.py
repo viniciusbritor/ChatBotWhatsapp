@@ -29,7 +29,8 @@ def _get_api_key() -> str:
 async def _composio_call(tool_slug: str, arguments: Dict[str, Any], user_id: str = "") -> Dict[str, Any]:
     try:
         from composio import Composio
-        client = Composio(api_key=_get_api_key())
+        from tools._composio_common import TOOLKIT_VERSIONS
+        client = Composio(api_key=_get_api_key(), toolkit_versions=TOOLKIT_VERSIONS)
         result = client.tools.execute(slug=tool_slug, arguments=arguments, user_id=user_id)
         return result.get("data", result)
     except ImportError:
@@ -48,7 +49,7 @@ async def create_document(title: str, markdown_text: str = "", **kwargs) -> Dict
 
 async def read_document(doc_id: str, **kwargs) -> Dict[str, Any]:
     user_id = str(kwargs.get("phone", "") or kwargs.get("user_id", ""))
-    return await _composio_call("GOOGLEDOCS_GET_DOCUMENT_PLAINTEXT", {"id": doc_id}, user_id=user_id)
+    return await _composio_call("GOOGLEDOCS_GET_DOCUMENT_PLAINTEXT", {"document_id": doc_id}, user_id=user_id)
 
 
 async def search_documents(query: str = "", max_results: int = 10, **kwargs) -> Dict[str, Any]:
@@ -60,4 +61,4 @@ async def search_documents(query: str = "", max_results: int = 10, **kwargs) -> 
 
 async def export_pdf(doc_id: str, **kwargs) -> Dict[str, Any]:
     user_id = str(kwargs.get("phone", "") or kwargs.get("user_id", ""))
-    return await _composio_call("GOOGLEDOCS_EXPORT_DOCUMENT_AS_PDF", {"id": doc_id}, user_id=user_id)
+    return await _composio_call("GOOGLEDOCS_EXPORT_DOCUMENT_AS_PDF", {"file_id": doc_id}, user_id=user_id)

@@ -1,5 +1,64 @@
 # Diario de Bordo — ChatBotWhatsapp
 
+## 09/08/2026 (04:40 BRT) — Fix Composio: schemas reais das tools (param names)
+
+### Problema
+Apos fix do toolkit version, tools falhavam com `400 Invalid request data`:
+parametros divergiam entre o codigo e o schema real do Composio.
+
+### Descoberta (via `c.tools.get_raw_composio_tool_by_slug()`)
+| Tool | Codigo passava | Schema real exige |
+|---|---|---|
+| YOUTUBE_SEARCH_YOU_TUBE | `query`, `max_results` | `q` (req), `maxResults` |
+| YOUTUBE_GET_VIDEO_DETAILS_BATCH | `video_ids` | `id` (req) |
+| LINKEDIN_CREATE_LINKED_IN_POST | `text` | `author` (URN req) + `commentary` (req) |
+| LINKEDIN_CREATE_ARTICLE_OR_URL_SHARE | `text`, `title` | `author` + `specificContent` (estrutura complexa) |
+| GOOGLEDOCS_GET_DOCUMENT_PLAINTEXT | `id` | `document_id` |
+| GOOGLEDOCS_EXPORT_DOCUMENT_AS_PDF | `id` | `file_id` |
+
+### Correcao
+- `youtube_composio.py`: `query`→`q`, `max_results`→`maxResults`, `video_ids`→`id`
+- `googledocs_composio.py`: `id`→`document_id` (read), `id`→`file_id` (export_pdf)
+- `linkedin_composio.py`:
+  - `_resolve_author_urn()`: resolve `urn:li:person:{id}` via LINKEDIN_GET_MY_INFO (com cache)
+  - `create_post`: `author` + `commentary` + `visibility` + `images`
+  - `create_article`: `specificContent.com.linkedin.ugc.ShareContent` com
+    shareCommentary/shareMediaCategory (ARTICLE ou NONE)/media; novo param `url`
+- `tool_registry.py`: schema de `linkedin.article` ganha `url` opcional
+
+### Validacao local (REAL, contra API)
+- YouTube: "Marvin Gaye - Sexual Healing (Official HD Video)" OK
+- LinkedIn profile: OK (id u51Xljk3Nc)
+- LinkedIn post: criado + deletado (teste, nao deixou lixo)
+
+---
+
+## 09/08/2026 (04:20 BRT) — Fix Composio: pin toolkit versions (todas as 11)
+
+### Problema
+Apos o fix do user_id, tools.youtube/linkedin/googledocs falhavam com:
+`Toolkit version not specified. For manual execution, pass a specific toolkit version.`
+
+### Causa Raiz
+`client.tools.execute()` em modo manual (sem ToolRouterSession) exige que o
+toolkit tenha versao fixada — "latest" nao e suportado.
+
+### Correcao
+- Novo arquivo `tools/_composio_common.py`: dict `TOOLKIT_VERSIONS` com as 11
+  toolkits conectadas e suas versoes (via `c.toolkits.list()`):
+  youtube=20260721_00, linkedin=20260724_00, googledocs=20260721_00,
+  gmail=20260721_00, github=20260728_00, googlecalendar=20260721_00,
+  notion=20260730_00, googlesheets=20260806_00, googledrive=20260721_00,
+  google_maps=20260721_00, one_drive=20260804_00
+- `tools/{youtube,linkedin,googledocs}_composio.py`: `_composio_call()` agora
+  cria `Composio(api_key=..., toolkit_versions=TOOLKIT_VERSIONS)` (recomendacao
+  da propria SDK, opcao 2 do erro)
+
+### Versoes obtidas
+Consulta real via `c.toolkits.list()` com a COMPOSIO_API_KEY do Secret Manager.
+
+---
+
 ## 08/08/2026 (23:50 BRT) — Fix Composio: tools.execute precisa de user_id
 
 ### Problema
