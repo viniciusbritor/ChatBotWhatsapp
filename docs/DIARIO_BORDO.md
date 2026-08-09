@@ -1,5 +1,30 @@
 # Diario de Bordo — ChatBotWhatsapp
 
+## 08/08/2026 (23:20 BRT) — Fix Composio Connect: connected_accounts.list param
+
+### Problema
+Endpoint `GET /api/v1/composio/status` quebrado em producao — retornava:
+`ConnectedAccountsResource.list() got an unexpected keyword argument 'user_id'`
+
+### Causa Raiz
+O SDK Composio v0.10.10 usa `user_ids` (plural, `SequenceNotStr[str]`) como
+parametro de `connected_accounts.list()`, nao `user_id` (singular).
+
+### Correcao
+`tools/composio_connect.py`:
+- Linha 38 (get_status): `user_id=user_id` → `user_ids=[user_id]`
+- Linha 58 (connect_all): `user_id=user_id` → `user_ids=[user_id]`
+
+### Status dos Apps
+Verificados via MCP — todos 3 apps ja estao conectados e ativos:
+| App | Status | Conta |
+|---|---|---|
+| LinkedIn | ACTIVE | Vinicius Brito Rocha, Ph.D. |
+| YouTube | ACTIVE | @viniciusbritorocha |
+| Google Docs | ACTIVE | viniciusbritor@gmail.com |
+
+---
+
 ## 07/08/2026 (22:00 BRT) — Refatoracao do RAG: Full-Document-First
 
 ### Diagnostico Raiz (6 branches sem efeito visivel no WhatsApp)

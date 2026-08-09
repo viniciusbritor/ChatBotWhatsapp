@@ -35,7 +35,7 @@ async def get_status(user_id: str) -> Dict[str, Any]:
     c = _client()
     try:
         configs = c.auth_configs.list()
-        accts = c.connected_accounts.list(user_id=user_id)
+        accts = c.connected_accounts.list(user_ids=[user_id])
     except Exception as exc:
         return {"error": str(exc)[:200], "apps": {}}
     connected_slugs = {a.toolkit.slug: getattr(a, "id", str(a)) for a in accts.items}
@@ -55,7 +55,7 @@ async def connect_all(user_id: str) -> Dict[str, Any]:
     c = _client()
     session = c.create(user_id=user_id)
     try:
-        accts = c.connected_accounts.list(user_id=user_id)
+        accts = c.connected_accounts.list(user_ids=[user_id])
     except Exception:
         accts = type("_", (), {"items": []})()
     connected_slugs = {a.toolkit.slug for a in accts.items}
