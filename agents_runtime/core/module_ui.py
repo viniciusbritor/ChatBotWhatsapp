@@ -825,6 +825,32 @@ const ENDPOINTS = {
 };
 const TOAST_TIMEOUT_MS = 5000;
 
+async function api(url, options = {}) {
+  const ctrl = new AbortController();
+  const timeoutId = setTimeout(() => ctrl.abort(), 12000);
+  try {
+    const res = await fetch(url, {
+      headers: { 'Content-Type': 'application/json', ...options.headers },
+      signal: ctrl.signal,
+      ...options,
+    });
+    clearTimeout(timeoutId);
+    if (!res.ok) {
+      let detail = 'HTTP ' + res.status;
+      try {
+        const err = await res.json();
+        detail = err.detail || err.message || detail;
+      } catch (_) {}
+      throw new Error(detail);
+    }
+    return res.json();
+  } catch (e) {
+    clearTimeout(timeoutId);
+    if (e.name === 'AbortError') throw new Error('timeout_apos_12s');
+    throw e;
+  }
+};
+
 /* ---- Toasts ---- */
 function toast(msg, type = 'accent') {
   const stack = document.getElementById('toast-stack');
