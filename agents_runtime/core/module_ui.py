@@ -1545,7 +1545,12 @@ const CALLER_PHONE = '__CALLER_PHONE__';
 document.querySelectorAll('nav button').forEach(btn =>
   btn.addEventListener('click', () => setActive(btn.dataset.tab))
 );
-setActive(CALLER_ROLE === 'agent_user' ? 'conexoes' : 'accounts');
+const urlTab = new URLSearchParams(window.location.search).get('tab');
+if (urlTab && document.querySelector('nav button[data-tab="' + urlTab + '"]')) {
+  setActive(urlTab);
+} else {
+  setActive(CALLER_ROLE === 'agent_user' ? 'conexoes' : 'accounts');
+}
 </script>
 </body>
 </html>

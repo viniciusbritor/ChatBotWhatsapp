@@ -231,14 +231,14 @@ class TestRenderDashboardRoles:
         from core.module_ui import render_dashboard
 
         html = render_dashboard("abc", "now", role="admin")
-        assert html.count("data-tab=") == 8
+        assert html.count('<button data-tab=') == 8
         assert 'data-tab="agents"' in html
 
     def test_agent_user_sees_three_tabs(self):
         from core.module_ui import render_dashboard
 
         html = render_dashboard("abc", "now", role="agent_user", caller_phone="5511888888888")
-        assert html.count("data-tab=") == 3
+        assert html.count('<button data-tab=') == 3
         assert 'data-tab="permissoes"' in html
         assert 'data-tab="agents"' not in html
         assert "5511888888888" in html
