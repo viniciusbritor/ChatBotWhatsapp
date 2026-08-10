@@ -22,14 +22,14 @@ import asyncio
 import unicodedata
 import io
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List
 
 from core.llm_provider import LLMProvider, LLMError
 from core.masker import mask_pii
 from core.delay_calculator import calculate_delay_ms, calculate_presence
 from core.commands import detect_command, apply_command
 from tool_registry import get_tool, get_tool_schema, is_user_scoped_tool
-from agent_loader import get_agent, get_skill, list_agents, get_config, has_nickname
+from agent_loader import get_agent, get_skill, has_nickname
 from core.audit import log_action
 from core.timezone import now_brt
 from core.observability import (
@@ -371,7 +371,7 @@ CALENDAR_KEYWORDS = [
     "semana que vem", "proxima semana", "agenda de hoje",
 ]
 DRIVE_KEYWORDS = [
-    "drive", "gdrive", "onedrive", "dropbox", "google drive",
+    "drive", "gdrive", "google drive",
     "meu drive", "no drive", "no gdrive", "meu gdrive",
     "salvar no drive", "salvar no gdrive", "salva no drive",
     "guardar no drive", "guarda no drive", "quero no meu drive",
@@ -759,7 +759,7 @@ def _extract_first_name(sender_name: str) -> str:
 
 # def _resolve_agent_for_intent(intent: Dict[str, Any], instance: str) -> Optional[str]:
 #     """Resolve which agent should handle this intent (hardcoded + dynamic from Firestore).
-# 
+#
 #     Deprecated: prefer ``_resolve_agents_for_intents`` for multi-intent queries.
 #     Kept for callers that expect a single agent id (e.g. group_consent flow).
 #     """
@@ -781,13 +781,13 @@ def _extract_first_name(sender_name: str) -> str:
 #         return "manager-calendar"
 #     if intent["is_web_search"]:
 #         return "manager-web"
-# 
+#
 #     rules = _get_routing_rules()
 #     for rule in sorted(rules, key=lambda r: r.get("priority", 99)):
 #         agent_id = rule.get("agent_id", "")
 #         if intent.get(f"matched_{agent_id}"):
 #             return agent_id
-# 
+#
 #     return None
 
 
@@ -827,22 +827,22 @@ def _extract_first_name(sender_name: str) -> str:
 #     scope_key: str = "",
 # ) -> List[str]:
 #     """Resolve ALL agents that should handle this intent in parallel.
-# 
+#
 #     Multi-intent: when a query triggers more than one intent flag
 #     (e.g., 'quais meus ultimos 5 emails?' matches both is_email AND is_rag
 #     because of the `?` marker), we want BOTH agents to execute in parallel.
-# 
+#
 #     Returns a deduped list of agent ids in stable order. Returns an empty
 #     list when no specialist agent matches (caller decides whether to
 #     fall back to the jennifier orchestrator).
-# 
+#
 #     Defense-in-depth (F4d.9): when a personal-intent agent is in the
 #     list, the knowledge-retriever is excluded. Personal intents
 #     (email/calendar/drive) already have tools that fetch fresh data;
 #     running the retriever in parallel would inflate cost without
 #     adding value (the personal agent can call knowledge.retrieve as
 #     a tool when needed).
-# 
+#
 #     Filename override (30/07/2026): when a query cita um arquivo com
 #     extensao conhecida E houve indexing recente para este scope
 #     (phone ou group_jid), o retriever e preferido sobre Drive/RAG
@@ -857,7 +857,7 @@ def _extract_first_name(sender_name: str) -> str:
 #         return ["agent-learning"]
 #     if intent.get("is_intimacy"):
 #         return ["agent-intimacy"]
-# 
+#
 #     if (
 #         masked_text
 #         and scope_key
@@ -865,20 +865,20 @@ def _extract_first_name(sender_name: str) -> str:
 #         and _import_rag_helpers()(scope_key)
 #     ):
 #         return ["agent-knowledge-retriever"]
-# 
-# 
-# 
+#
+#
+#
 #     seen: set = set()
 #     agents: List[str] = []
 #     for flag, agent_id in _AGENT_INTENT_FLAGS:
 #         if intent.get(flag) and agent_id not in seen:
 #             agents.append(agent_id)
 #             seen.add(agent_id)
-# 
+#
 #     personal_present = any(a.startswith("manager-") for a in agents)
 #     if personal_present:
 #         agents = [a for a in agents if a != "agent-knowledge-retriever"]
-# 
+#
 #     return agents
 
 
@@ -1420,7 +1420,7 @@ async def index_audio_failure_for_audit(body: Dict[str, Any], error_code: str) -
 #     path: List[Dict[str, Any]],
 # ) -> Dict[str, Any]:
 #     """Run one specialist agent end-to-end (legacy single-agent path).
-# 
+#
 #     Wraps the access_guardian check, prefetch logic and tool execution
 #     that used to live inline in `orchestrate`. Returns the agent's
 #     result dict (ready for ``_finalize_orchestration``).
@@ -1447,10 +1447,10 @@ async def index_audio_failure_for_audit(body: Dict[str, Any], error_code: str) -
 #         if not orchestrator:
 #             return _error_response(503, "agent_not_found", f"Orchestrator {orchestrator_id} nao encontrado")
 #         return await _execute_agent(orchestrator, masked_text, payload, extra)
-# 
+#
 #     agent_copy = dict(agent)
 #     prefetch_data = None
-# 
+#
 #     skip_guard = not _is_personal_intent(intent) and (
 #         specialist_id.startswith("manager-")
 #         and _agent_has_tool(specialist_id, "calendar.")
@@ -1459,7 +1459,7 @@ async def index_audio_failure_for_audit(body: Dict[str, Any], error_code: str) -
 #         or specialist_id.startswith("manager-")
 #         and _agent_has_tool(specialist_id, "drive.")
 #     )
-# 
+#
 #     if skip_guard:
 #         guard_result = {"verdict": "noop", "decision": {}, "prefetch": None, "trace": ["guard_skipped:manager_has_tools"]}
 #     else:
@@ -1492,7 +1492,7 @@ async def index_audio_failure_for_audit(body: Dict[str, Any], error_code: str) -
 #                 "blocked": True,
 #             },
 #         }
-# 
+#
 #     if guard_verdict == "allow" and _is_personal_intent(intent):
 #         try:
 #             ack_map = {
@@ -1514,10 +1514,10 @@ async def index_audio_failure_for_audit(body: Dict[str, Any], error_code: str) -
 #             ))
 #         except Exception:
 #             pass
-# 
+#
 #     if guard_result.get("prefetch"):
 #         prefetch_data = guard_result["prefetch"]
-# 
+#
 #     if prefetch_data is None and _is_read_query(masked_text):
 #         if _agent_has_tool(specialist_id, "calendar."):
 #             pass
@@ -1542,7 +1542,7 @@ async def index_audio_failure_for_audit(body: Dict[str, Any], error_code: str) -
 #             except Exception as e:
 #                 logger.warning(f"Prefetch failed for {specialist_id}: {e}")
 #                 prefetch_data = None
-# 
+#
 #     if prefetch_data and _has_real_data(prefetch_data):
 #         prefetch_data = mask_pii(prefetch_data)
 #         data_label = "CALENDARIO" if intent.get("is_calendar") else \
@@ -1554,7 +1554,7 @@ async def index_audio_failure_for_audit(body: Dict[str, Any], error_code: str) -
 #             "NAO chame ferramentas — os dados ja estao prontos."
 #         )
 #         agent_copy["tools"] = []
-# 
+#
 #     if _is_group_message(payload) and intent.get("is_drive"):
 #         group_jid = _extract_group_jid(payload)
 #         if group_jid:
@@ -1579,7 +1579,7 @@ async def index_audio_failure_for_audit(body: Dict[str, Any], error_code: str) -
 #                     )
 #             except Exception:
 #                 pass
-# 
+#
 #     path.append({"step": 2, "phase": "specialist", "agent": specialist_id,
 #                  "prefetch": bool(prefetch_data),
 #                  "reason": {k: v for k, v in intent.items() if v}})
@@ -1599,11 +1599,11 @@ async def index_audio_failure_for_audit(body: Dict[str, Any], error_code: str) -
 #     path: List[Dict[str, Any]],
 # ) -> Dict[str, Any]:
 #     """Run multiple specialist agents in parallel and merge results.
-# 
+#
 #     Multi-intent example: 'quais meus ultimos 5 emails?' matches both
 #     ``is_email`` and ``is_rag`` (because of the `?` marker). The user
 #     expects BOTH agents to execute and return combined output.
-# 
+#
 #     Behavior:
 #     - Each agent is called via ``_execute_agent`` concurrently via
 #       ``asyncio.gather``.
@@ -1618,7 +1618,7 @@ async def index_audio_failure_for_audit(body: Dict[str, Any], error_code: str) -
 #         "agents": list(specialist_ids),
 #         "reason": {k: v for k, v in intent.items() if v},
 #     })
-# 
+#
 #     async def _run_one(specialist_id: str) -> Tuple[str, Optional[Dict[str, Any]]]:
 #         try:
 #             agent = get_agent(specialist_id)
@@ -1630,7 +1630,7 @@ async def index_audio_failure_for_audit(body: Dict[str, Any], error_code: str) -
 #         except Exception as exc:
 #             logger.exception("multi_specialist_failed agent=%s", specialist_id)
 #             return specialist_id, {"reply": "", "metadata": {"error": type(exc).__name__}}
-# 
+#
 #     async def _run_one_safe(specialist_id: str) -> Tuple[str, Optional[Dict[str, Any]]]:
 #         try:
 #             return await asyncio.wait_for(
@@ -1652,18 +1652,18 @@ async def index_audio_failure_for_audit(body: Dict[str, Any], error_code: str) -
 #                 "reply": "",
 #                 "metadata": {"error": "agent_timeout", "agent_id": specialist_id},
 #             }
-# 
+#
 #     pairs = await asyncio.gather(*[_run_one_safe(s) for s in specialist_ids])
 #     successful = [(sid, r) for sid, r in pairs if r and r.get("reply")]
-# 
+#
 #     if not successful:
 #         return _error_response(500, "multi_agent_empty",
 #                                "Os agentes nao conseguiram gerar uma resposta.")
-# 
+#
 #     if len(successful) == 1:
 #         sid, r = successful[0]
 #         return r
-# 
+#
 #     sections: List[str] = []
 #     for sid, r in successful:
 #         reply = (r.get("reply") or "").strip()
@@ -1673,7 +1673,7 @@ async def index_audio_failure_for_audit(body: Dict[str, Any], error_code: str) -
 #     if not sections:
 #         return _error_response(500, "multi_agent_empty",
 #                                "Os agentes nao conseguiram gerar uma resposta.")
-# 
+#
 #     merged_reply = "\n\n---\n\n".join(sections)
 #     merged_metadata = {
 #         "agent_id": "+".join(sid for sid, _ in successful),
@@ -1767,7 +1767,6 @@ async def _handle_runtime_status(payload: dict, instance: str, phone: str) -> di
 async def _handle_morality(payload: dict, masked_text: str, sender_name: str,
                            cache_key, instance: str, phone: str) -> dict:
     path = [{"step": 1, "phase": "morality_handler"}]
-    from agent_loader import get_agent
     agent = get_agent("agent-morality")
     if agent:
         result = await _execute_agent(dict(agent), masked_text, payload, payload.get("extra", {}))
@@ -1784,7 +1783,6 @@ async def _handle_morality(payload: dict, masked_text: str, sender_name: str,
 async def _handle_correction(payload: dict, masked_text: str, sender_name: str,
                               cache_key) -> dict:
     path = [{"step": 1, "phase": "correction_handler"}]
-    from agent_loader import get_agent
     agent = get_agent("agent-learning")
     if agent:
         result = await _execute_agent(dict(agent), masked_text, payload, payload.get("extra", {}))
@@ -1801,7 +1799,6 @@ async def _handle_correction(payload: dict, masked_text: str, sender_name: str,
 async def _handle_intimacy(payload: dict, masked_text: str, sender_name: str,
                             cache_key, first_name: str, phone: str) -> dict:
     path = [{"step": 1, "phase": "intimacy_handler"}]
-    from agent_loader import get_agent
     agent = get_agent("agent-intimacy")
     if agent:
         agent_copy = dict(agent)
@@ -1827,7 +1824,6 @@ async def _handle_intimacy(payload: dict, masked_text: str, sender_name: str,
 async def _handle_web(payload: dict, masked_text: str, sender_name: str,
                        cache_key) -> dict:
     path = [{"step": 1, "phase": "web_handler"}]
-    from agent_loader import get_agent
     agent = get_agent("manager-web")
     if agent:
         result = await _execute_agent(dict(agent), masked_text, payload, payload.get("extra", {}))
@@ -1858,8 +1854,8 @@ _CLASSIFIER_PROMPT = (
     "juridicas    - leis, codigos, artigos, decretos, normas, jurisprudencia\n"
     "editais      - licitacoes, concursos, pregoes, editais publicos\n"
     "academica    - teses, dissertacoes, artigos cientificos, papers\n"
-    "anotacoes    - lembretes, notas, memorias pessoais\n"
-    "ferramentas  - agenda, email, drive, pesquisa web\n"
+    "anotacoes    - lembretes e notas pessoais SEM horario nem agenda (memoria)\n"
+    "ferramentas  - agenda/calendario (criar, listar, marcar evento, compromisso, reuniao com horario/data), email, drive, pesquisa web\n"
     "conversa     - saudacoes, ajuda, perguntas genericas, buscas na base de conhecimento\n\n"
     "Pergunta: {text}\n\n"
     "Categoria:"
@@ -2680,12 +2676,12 @@ def _error_response(status_code: int, error: str, message: str) -> Dict[str, Any
 
 # async def _run_guard_graph(payload: Dict[str, Any], masked_text: str, intent: Dict[str, bool]) -> Dict[str, Any]:
 #     """Run the guard pipeline for a single turn.
-# 
+#
 #     Fase A.2 (30/07/2026): substitui LangGraph StateGraph por chamada
 #     direta aos nodes via ``run_guard_sync``. Mesma semantica, sem
 #     overhead de CompiledStateGraph dispatch. Custo: ~-$0.10/mes
 #     (menos CPU time em warm path).
-# 
+#
 #     Returns a normalized decision dict with ``verdict`` (``allow`` /
 #     ``request_oauth`` / ``deny`` / ``noop``) and an optional ``reply``
 #     the orchestrator should use when the verdict blocks the user.
@@ -2696,7 +2692,7 @@ def _error_response(status_code: int, error: str, message: str) -> Dict[str, Any
 #     except Exception as exc:
 #         logger.warning("agent_orchestration unavailable, skipping guard: %s", exc)
 #         return {"verdict": "noop", "trace": [], "reason": f"graph_unavailable:{exc}"}
-# 
+#
 #     capability = _intent_to_capability(intent)
 #     initial_state = {
 #         "instance": payload.get("instance", ""),
@@ -2708,7 +2704,7 @@ def _error_response(status_code: int, error: str, message: str) -> Dict[str, Any
 #         "intent": dict(intent),
 #         "capability": capability,
 #     }
-# 
+#
 #     try:
 #         final = await run_guard_sync(initial_state)
 #     except Exception as exc:
@@ -2719,7 +2715,7 @@ def _error_response(status_code: int, error: str, message: str) -> Dict[str, Any
 #             capability=capability or "noop",
 #         )
 #         return {"verdict": decision.verdict, "decision": decision.to_dict(), "reason": exc.__class__.__name__}
-# 
+#
 #     decision = (final or {}).get("guardian_decision") or {}
 #     verdict = decision.get("verdict", "allow")
 #     prefetch = (final or {}).get("prefetch")

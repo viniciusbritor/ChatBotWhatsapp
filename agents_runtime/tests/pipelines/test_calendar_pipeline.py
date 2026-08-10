@@ -1,9 +1,8 @@
 """Testes do calendar_pipeline — keyword-only, zero LLM."""
 from __future__ import annotations
 
-import os
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
 
 
 
@@ -18,6 +17,19 @@ class TestCalendarDetect:
     def test_priority_criar_evento(self):
         from pipelines.calendar_pipeline import detect
         assert detect("criar evento amanha as 15h") is True
+
+    def test_priority_criar_compromisso(self):
+        from pipelines.calendar_pipeline import detect
+        assert detect("crie um compromisso para mim hoje as 20:00") is True
+
+    def test_priority_criar_um_compromisso(self):
+        from pipelines.calendar_pipeline import detect
+        assert detect("criar um compromisso amanha") is True
+
+    def test_keyword_compromiss_truncado(self):
+        """'compromiss' (sem 'o' final, digitacao comum) deve acionar calendar."""
+        from pipelines.calendar_pipeline import detect
+        assert detect("crie um compromiss para mim hoje as 20:00") is True
 
     def test_priority_compromissos_hoje(self):
         from pipelines.calendar_pipeline import detect

@@ -14,14 +14,16 @@ logger = logging.getLogger(__name__)
 
 CALENDAR_PRIORITY = (
     "agenda hoje", "agenda de hoje", "compromissos hoje", "compromissos de hoje",
-    "criar evento", "crie um evento", "marcar reuniao", "agendar",
+    "criar evento", "crie um evento", "criar compromisso", "crie um compromisso",
+    "criar um compromisso", "adicionar compromisso", "adicionar evento",
+    "marcar compromisso", "marcar reuniao", "agendar", "novo compromisso",
     "agenda amanha", "compromissos amanha", "agenda da semana",
     "meus compromissos", "minha agenda", "eventos hoje",
 )
 
 CALENDAR_KEYWORDS = (
-    "agenda", "agend", "reuniao", "evento", "eventos", "compromisso",
-    "compromissos", "lembrete", "calendario", "disponivel",
+    "agenda", "agend", "reuniao", "evento", "eventos", "compromiss",
+    "compromisso", "compromissos", "lembrete", "calendario", "disponivel",
     "semana que vem", "proxima semana", "agenda de hoje",
 )
 
