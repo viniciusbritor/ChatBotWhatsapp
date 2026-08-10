@@ -436,6 +436,11 @@ async def _transporte_rota(**kwargs):
     return await calcular_rota(origem=kwargs.get("origem", ""), destino=kwargs.get("destino", ""))
 
 
+async def _onboarding_link_email(**kwargs):
+    from tools.onboarding import link_email
+    return await link_email(phone=kwargs.get("phone", ""), email=kwargs.get("email", ""))
+
+
 async def _transporte_uber(**kwargs):
     from tools.transporte import estimar_uber
     return await estimar_uber(origem=kwargs.get("origem", ""), destino=kwargs.get("destino", ""))
@@ -1529,6 +1534,25 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
             "type": "object",
             "properties": {},
             "required": [],
+        },
+    },
+    "onboarding.link_email": {
+        "function": _onboarding_link_email,
+        "implementation": "onboarding",
+        "description": (
+            "Vincula o email do Portal Coherence ao telefone WhatsApp do usuario. "
+            "Use SEMPRE que um novo usuario se apresentar pela primeira vez: pergunte "
+            "o email do Portal e chame esta tool para salvar usuarios/{phone}.email. "
+            "Isso permite que o usuario acesse o modulo Agentes Omnichannel e conecte "
+            "seus proprios servicos (email, agenda, drive, linkedin, etc)."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string", "description": "Telefone do usuario (vem automaticamente do WhatsApp)"},
+                "email": {"type": "string", "description": "Email do usuario no Portal Coherence"},
+            },
+            "required": ["phone", "email"],
         },
     },
 }

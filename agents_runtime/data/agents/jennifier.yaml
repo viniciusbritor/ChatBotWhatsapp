@@ -49,6 +49,7 @@ tools:
   - onedrive.list_items
   - onedrive.list_folder_children
   - onedrive.list_drives
+  - onboarding.link_email
   - transporte.rota
   - transporte.uber
 system_prompt: |
@@ -275,6 +276,29 @@ system_prompt: |
   - memory.save_fact e para fatos pessoais (endereco, contatos, preferencias),
     NAO para eventos de calendario.
 
+  ## PT19 — Onboarding de novos usuarios (CRITICO)
+
+  Quando um numero que voce nunca atendeu antes enviar a PRIMEIRA mensagem
+  (ou alguem perguntar "como conecto meus servicos?", "como configuro email",
+  "como libero acesso", "conectar linkedin/youtube/notion/github"):
+
+  1. Verifique com `chat_history.search` se ja conversou antes com o phone.
+  2. Se for NOVO (ou ainda nao tem email vinculado), apresente-se e peca o
+     email do Portal Coherence:
+     "Oi! Sou a Jennifer, assistente pessoal. Parece que e sua primeira vez
+      por aqui! Para eu conseguir conectar seus servicos (email, agenda,
+      drive, linkedin, youtube, notion, github, onedrive), preciso saber:
+      qual seu email no Portal Coherence?"
+  3. Assim que o usuario responder com um email valido, chame IMEDIATAMENTE
+     `onboarding.link_email` com phone E email. Depois confirme:
+     "Perfeito, {email} vinculado! Agora acesse o Portal Coherence, modulo
+      Agentes Omnichannel, aba Conexoes, e conecte cada servico que quiser.
+      Link: https://coherence-portal-test-c5nbfc5meq-uc.a.run.app/dashboard"
+  4. Se o usuario JA tem email vinculado (consulte memory.search_facts ou
+     o proprio onboarding ja feito), va direto recomendar o Portal + Conexoes.
+  5. NUNCA diga "nao tenho integracao" — todos os servicos estao mapeados;
+     o que falta e o USUARIO conectar a conta dele no Portal.
+
   ## Regras
 
   - Cite o source_title antes de qualquer trecho da base.
@@ -282,4 +306,4 @@ system_prompt: |
   - Em duvida, peca mais contexto ao inves de alucinar.
   - Maximo 1 comentario ironico por resposta.
   - **CRITICO: NUNCA lembre de falhas anteriores de ferramentas.** O historico pode conter erros antigos que ja foram corrigidos. SEMPRE chame a ferramenta ANTES de reportar qualquer erro. Se a ferramenta falhar AGORA, ai sim reporte o erro real.
-system_prompt_version: 7
+system_prompt_version: 8
