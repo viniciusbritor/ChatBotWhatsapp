@@ -17,7 +17,7 @@ from tools import memory
 logger = logging.getLogger(__name__)
 
 ToolFn = Callable[..., Awaitable[Dict[str, Any]]]
-USER_SCOPED_TOOL_PREFIXES = ("calendar.", "drive.", "gmail.", "youtube.", "linkedin.", "googledocs.")
+USER_SCOPED_TOOL_PREFIXES = ("calendar.", "drive.", "gmail.", "youtube.", "linkedin.", "googledocs.", "notion.", "github.", "onedrive.")
 
 
 def is_user_scoped_tool(tool_id: str) -> bool:
@@ -142,7 +142,6 @@ async def _answer_knowledge(**kwargs):
 
     envelope = {"phone": phone, "extra": {"remote_jid": f"{phone}@s.whatsapp.net"}}
     chunks = []
-    strategy = "no_match"
     resolved = None
 
     # Strategy 1: full-document via alias/dynamic match
@@ -390,6 +389,46 @@ async def _googledocs_search(**kwargs):
 async def _googledocs_export_pdf(**kwargs):
     from tools.googledocs_composio import export_pdf
     return await export_pdf(doc_id=kwargs.get("doc_id", ""), phone=kwargs.get("phone", ""))
+
+
+async def _notion_search(**kwargs):
+    from tools.notion_composio import search_pages
+    return await search_pages(query=kwargs.get("query", ""), page_size=kwargs.get("page_size", 25), phone=kwargs.get("phone", ""))
+
+
+async def _notion_list_all(**kwargs):
+    from tools.notion_composio import list_all
+    return await list_all(query=kwargs.get("query", ""), phone=kwargs.get("phone", ""))
+
+
+async def _notion_retrieve_page(**kwargs):
+    from tools.notion_composio import retrieve_page
+    return await retrieve_page(page_id=kwargs.get("page_id", ""), phone=kwargs.get("phone", ""))
+
+
+async def _github_list_repos(**kwargs):
+    from tools.github_composio import list_repos
+    return await list_repos(page=kwargs.get("page", 1), per_page=kwargs.get("per_page", 30), phone=kwargs.get("phone", ""))
+
+
+async def _github_my_profile(**kwargs):
+    from tools.github_composio import my_profile
+    return await my_profile(phone=kwargs.get("phone", ""))
+
+
+async def _onedrive_list_items(**kwargs):
+    from tools.onedrive_composio import list_items
+    return await list_items(top=kwargs.get("top", 50), phone=kwargs.get("phone", ""))
+
+
+async def _onedrive_list_folder_children(**kwargs):
+    from tools.onedrive_composio import list_folder_children
+    return await list_folder_children(folder_path=kwargs.get("folder_path", "/"), top=kwargs.get("top", 200), phone=kwargs.get("phone", ""))
+
+
+async def _onedrive_list_drives(**kwargs):
+    from tools.onedrive_composio import list_drives
+    return await list_drives(phone=kwargs.get("phone", ""))
 
 
 async def _transporte_rota(**kwargs):
@@ -1385,6 +1424,111 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
                 "destino": {"type": "string", "description": "Local de destino (endereco ou coordenadas)"},
             },
             "required": ["origem", "destino"],
+        },
+    },
+    "notion.search": {
+        "function": _notion_search,
+        "implementation": "notion_composio",
+        "description": (
+            "Busca paginas e databases no Notion do usuario por titulo. "
+            "Use quando o usuario perguntar por projetos, notas ou paginas no Notion."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Termo de busca (vazio = lista tudo)"},
+                "page_size": {"type": "integer", "description": "Maximo de resultados (default 25)"},
+            },
+            "required": [],
+        },
+    },
+    "notion.list_all": {
+        "function": _notion_list_all,
+        "implementation": "notion_composio",
+        "description": (
+            "Lista todos os itens (paginas e databases) acessiveis no Notion do usuario. "
+            "Use para inventariar o espaco do usuario quando a busca especifica nao retorna resultados."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Filtro opcional por titulo"},
+            },
+            "required": [],
+        },
+    },
+    "notion.retrieve_page": {
+        "function": _notion_retrieve_page,
+        "implementation": "notion_composio",
+        "description": "Retorna metadados e propriedades de uma pagina Notion por ID.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "page_id": {"type": "string", "description": "UUID da pagina Notion"},
+            },
+            "required": ["page_id"],
+        },
+    },
+    "github.list_repos": {
+        "function": _github_list_repos,
+        "implementation": "github_composio",
+        "description": (
+            "Lista repositorios do GitHub do usuario autenticado. "
+            "Use quando o usuario perguntar por projetos, repositorios ou codigo no GitHub."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "per_page": {"type": "integer", "description": "Maximo de resultados (default 30)"},
+            },
+            "required": [],
+        },
+    },
+    "github.my_profile": {
+        "function": _github_my_profile,
+        "implementation": "github_composio",
+        "description": "Retorna o perfil do usuario autenticado no GitHub.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    "onedrive.list_items": {
+        "function": _onedrive_list_items,
+        "implementation": "onedrive_composio",
+        "description": (
+            "Lista arquivos e pastas na raiz do OneDrive do usuario. "
+            "Use quando o usuario perguntar por pastas ou arquivos no OneDrive."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "top": {"type": "integer", "description": "Maximo de itens (default 50)"},
+            },
+            "required": [],
+        },
+    },
+    "onedrive.list_folder_children": {
+        "function": _onedrive_list_folder_children,
+        "implementation": "onedrive_composio",
+        "description": "Lista o conteudo de uma pasta do OneDrive por caminho relativo a raiz.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "folder_path": {"type": "string", "description": "Caminho relativo a raiz (default '/')"},
+            },
+            "required": [],
+        },
+    },
+    "onedrive.list_drives": {
+        "function": _onedrive_list_drives,
+        "implementation": "onedrive_composio",
+        "description": "Lista os drives (bibliotecas) acessiveis na conta OneDrive do usuario.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
         },
     },
 }
