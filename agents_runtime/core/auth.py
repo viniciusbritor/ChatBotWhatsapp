@@ -86,8 +86,11 @@ def resolve_caller(request) -> tuple:
     if not token:
         return "", ""
 
+    if not token or not isinstance(token, str):
+        return "", ""
+
     expected = get_sa_token()
-    if expected and hmac.compare_digest(token, expected):
+    if expected and isinstance(expected, str) and hmac.compare_digest(token, expected):
         return "admin", ""
 
     claims = _firebase_claims(token)
