@@ -1,5 +1,29 @@
 # Diario de Bordo — ChatBotWhatsapp
 
+## 10/08/2026 (04:30 BRT) — F2: Evolution Admin Client
+
+### Entregue (branch feat/evolution-admin)
+- `core/evolution_admin.py` (novo): fetch_instances, get_connection_state,
+  create_instance, get_qr_code, set_webhook, delete_instance
+- `main.py`: GET /admin/evolution/health
+
+### Schemas reais descobertos (v2.x)
+- POST /instance/create: `{instanceName, integration: "WHATSAPP-BAILEYS",
+  qrcode, reject_call, msg_call}` — webhook NAO vai no create
+- POST /webhook/set/{name}: `{webhook: {url, enabled, events}}`
+- DELETE /instance/delete/{name} (NAO /instance/{name} — 404)
+- GET /instance/connect/{name}: retorna base64 do QR
+
+### Validacao REAL (nao so mock)
+- fetch_instances: Jennifer state=open ✅
+- create teste_cleanup_03 + webhook set + QR (13KB base64) + delete ✅
+- Jennifer webhook restaurado apos teste de schema (x.example -> url real) ✅
+
+### Testes
+- tests/test_evolution_admin.py: 8 passed (mockado, helper __aenter__)
+
+---
+
 ## 10/08/2026 (03:30 BRT) — Memory de Fatos estruturados (Plano B)
 
 ### Problema
