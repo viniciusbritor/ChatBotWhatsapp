@@ -1,5 +1,28 @@
 # Diario de Bordo — ChatBotWhatsapp
 
+## 09/08/2026 (05:30 BRT) — Portal: aba Conexoes + endpoint composio/authorize
+
+### Nova aba "Conexões" no Portal (core/module_ui.py)
+- Lista 11 servicos em 2 blocos: "Conta Google" (Email/Agenda/Arquivos — OAuth
+  nativo, 1 botao conecta os 3) e "Outros servicos" (LinkedIn, YouTube, Docs,
+  Sheets, GitHub, Notion, Maps, OneDrive — via Composio)
+- Dropdown de usuario (usuarios/ do Firestore)
+- Status visual: tag verde "● OK" ou botao "🔗 Conectar"
+- Google OAuth: abre /oauth/google?phone=... em nova aba
+- Composio: POST /api/v1/composio/authorize -> link de autorizacao exibido no
+  proprio card (expira em 10 min)
+
+### Novo endpoint (main.py)
+- POST /api/v1/composio/authorize: alias multi-tenant do authorize-owner —
+  aceita toolkit opcional para filtrar 1 app; nao exige owner
+
+### Validacao
+- module_ui render OK (50KB, funcoes presentes)
+- main importa + rota registrada
+- pytest test_module_ui_admin + test_portal_loading: 21 passed
+
+---
+
 ## 09/08/2026 (05:00 BRT) — ✅ Composio INTEGRADO em producao (WhatsApp)
 
 ### Validacao final (via WhatsApp com Jennifer)

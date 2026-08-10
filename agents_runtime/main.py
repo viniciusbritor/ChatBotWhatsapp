@@ -1390,6 +1390,29 @@ async def composio_authorize_owner(request: Request):
     return JSONResponse(content=result)
 
 
+@app.post("/api/v1/composio/authorize")
+async def composio_authorize(request: Request):
+    """Gera Connect Link para UM app Composio de qualquer usuario (multi-tenant).
+
+    Body: {"phone": "...", "toolkit": "linkedin|youtube|..."} (toolkit opcional —
+    sem toolkit, gera links para todos os apps pendentes).
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid json"}, status_code=400)
+    phone = (body.get("phone") or "").strip()
+    if not phone:
+        return JSONResponse({"error": "phone required"}, status_code=400)
+    toolkit = (body.get("toolkit") or "").strip()
+    from tools.composio_connect import connect_all
+    result = await connect_all(phone)
+    if toolkit:
+        links = result.get("links", [])
+        result["links"] = [l for l in links if l.get("toolkit") == toolkit]
+    return JSONResponse(content=result)
+
+
 @app.get("/")
 async def root_redirect(request: Request):
     """Return the service metadata for plain API clients, or the HTML module

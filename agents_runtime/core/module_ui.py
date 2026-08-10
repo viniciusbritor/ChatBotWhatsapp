@@ -685,6 +685,7 @@ pre.json-view {
     <button data-tab="skills">Skills</button>
     <button data-tab="tools">Tools</button>
     <button data-tab="owners">Proprietários</button>
+    <button data-tab="conexoes">Conexões</button>
     <button data-tab="knowledge">Conhecimento</button>
     <button data-tab="status">Status</button>
   </nav>
@@ -704,6 +705,10 @@ const ENDPOINTS = {
   knowledgeDoc: id => '/admin/knowledge/' + encodeURIComponent(id),
   status: '/admin/status',
   ping: '/admin/ping',
+  users: '/admin/users',
+  user: phone => '/admin/users/' + encodeURIComponent(phone),
+  composioStatus: phone => '/api/v1/composio/status?phone=' + encodeURIComponent(phone),
+  composioAuthorize: '/api/v1/composio/authorize',
 };
 const TOAST_TIMEOUT_MS = 5000;
 
@@ -787,6 +792,7 @@ function setActive(tab) {
     case 'skills':   renderSkills(root); break;
     case 'tools':    renderTools(root); break;
     case 'owners':   renderOwners(root); break;
+    case 'conexoes': renderConexoes(root); break;
     case 'knowledge':renderKnowledge(root); break;
     case 'status':   renderStatus(root); break;
   }
@@ -1125,6 +1131,150 @@ function renderOwners(root) {
     root.querySelector('#list').innerHTML = emptyState(
       'Falha ao carregar proprietários', e.message,
       'Tentar de novo', 'renderOwners(document.getElementById("root"))');
+  });
+}
+
+function renderConexoes(root) {
+  root.innerHTML =
+    '<div class="panel-header">'
+    + '<div><h2>Conexões</h2>'
+    + '<div class="subtitle">Serviços que a Jennifer pode acessar por você — conecte sua conta para liberar cada funcionalidade</div></div>'
+    + '</div>'
+    + '<div class="toolbar">'
+    + '<label for="conexoes-user" style="font-size:13px;color:var(--fg-soft)">Usuário:&nbsp;</label>'
+    + '<select id="conexoes-user" style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface)"></select>'
+    + '</div>'
+    + '<div id="conexoes-body">' + skeletonList(3) + '</div>';
+
+  api(ENDPOINTS.users).then(data => {
+    const users = (data.users || []);
+    if (!users.length) {
+      root.querySelector('#conexoes-body').innerHTML = emptyState(
+        'Nenhum usuário cadastrado',
+        'Quando alguém conectar uma conta via WhatsApp, o usuário aparece aqui.');
+      return;
+    }
+    const sel = root.querySelector('#conexoes-user');
+    users.forEach(u => {
+      const opt = document.createElement('option');
+      opt.value = u.phone || '';
+      opt.textContent = '+' + (u.phone || '?');
+      sel.appendChild(opt);
+    });
+    sel.addEventListener('change', () => loadConexoes(root, sel.value));
+    loadConexoes(root, sel.value);
+  }).catch(e => {
+    root.querySelector('#conexoes-body').innerHTML = emptyState(
+      'Falha ao carregar usuários', e.message,
+      'Tentar de novo', 'renderConexoes(document.getElementById("root"))');
+  });
+}
+
+function loadConexoes(root, phone) {
+  if (!phone) {
+    root.querySelector('#conexoes-body').innerHTML = emptyState(
+      'Selecione um usuário', 'Escolha um usuário no menu acima para ver as conexões.');
+    return;
+  }
+  const body = root.querySelector('#conexoes-body');
+  body.innerHTML = skeletonList(2);
+  Promise.all([
+    api(ENDPOINTS.user(phone)).catch(() => null),
+    api(ENDPOINTS.composioStatus(phone)).catch(() => null),
+  ]).then(([userData, composioData]) => {
+    const google = ((userData && (userData.user || userData)).google_oauth_token) || null;
+    const hasGoogle = !!(google && google.token);
+    const compApps = (composioData && composioData.apps) || {};
+
+    const googleServices = [
+      { key: 'gmail',  icon: '📧', name: 'Email (Gmail)', desc: 'Ler e enviar emails' },
+      { key: 'calendar', icon: '📅', name: 'Agenda (Google Calendar)', desc: 'Ver e criar compromissos' },
+      { key: 'drive',  icon: '📁', name: 'Arquivos (Google Drive)', desc: 'Buscar e ler seus documentos' },
+    ];
+    const compServices = [
+      { key: 'linkedin',     icon: '💼', name: 'LinkedIn', desc: 'Postar e ler seu perfil' },
+      { key: 'youtube',      icon: '▶️', name: 'YouTube', desc: 'Buscar vídeos' },
+      { key: 'googledocs',   icon: '📝', name: 'Documentos (Google Docs)', desc: 'Criar e ler documentos' },
+      { key: 'googlesheets', icon: '📊', name: 'Planilhas (Google Sheets)', desc: 'Criar e ler planilhas' },
+      { key: 'github',       icon: '🐙', name: 'GitHub', desc: 'Repositórios e código' },
+      { key: 'notion',       icon: '📓', name: 'Notion', desc: 'Notas e bases de dados' },
+      { key: 'google_maps',  icon: '🗺️', name: 'Google Maps', desc: 'Rotas e lugares' },
+      { key: 'one_drive',    icon: '☁️', name: 'OneDrive', desc: 'Arquivos na nuvem' },
+    ];
+
+    const googleCards = googleServices.map(s => {
+      const on = hasGoogle;
+      return '<div class="card" style="display:flex;align-items:center;justify-content:space-between">'
+        + '<div style="display:flex;align-items:center;gap:10px">'
+        + '<span style="font-size:20px">' + s.icon + '</span>'
+        + '<div><h3 style="margin:0">' + s.name + '</h3>'
+        + '<div class="meta" style="margin:2px 0 0">' + s.desc + '</div></div></div>'
+        + (on
+            ? '<span class="tag jade">● OK</span>'
+            : '<button class="primary" onclick="window.open(\'/oauth/google?phone=' + encodeURIComponent(phone) + '\',\'_blank\')">🔗 Conectar</button>')
+        + '</div>';
+    }).join('');
+
+    const compCards = compServices.map(s => {
+      const app = compApps[s.key] || {};
+      const on = app.connected;
+      const statusLabel = on ? '● OK' : '○ Pendente';
+      return '<div class="card" style="display:flex;align-items:center;justify-content:space-between">'
+        + '<div style="display:flex;align-items:center;gap:10px">'
+        + '<span style="font-size:20px">' + s.icon + '</span>'
+        + '<div><h3 style="margin:0">' + s.name + '</h3>'
+        + '<div class="meta" style="margin:2px 0 0">' + s.desc + '</div></div></div>'
+        + (on
+            ? '<span class="tag jade">● OK</span>'
+            : '<button class="primary" data-comp-key="' + s.key + '">🔗 Conectar</button>')
+        + '</div>';
+    }).join('');
+
+    body.innerHTML =
+      '<div class="subtitle" style="margin:4px 0 8px;font-weight:600">Conta Google</div>'
+      + googleCards
+      + (hasGoogle
+          ? ''
+          : '<div class="inline-banner" style="margin-top:8px">Conecte sua conta Google para liberar Email, Agenda e Arquivos de uma vez.</div>')
+      + '<div class="subtitle" style="margin:20px 0 8px;font-weight:600">Outros serviços</div>'
+      + compCards
+      + '<div id="conexoes-comp-result"></div>';
+
+    body.querySelectorAll('[data-comp-key]').forEach(btn => {
+      btn.addEventListener('click', () => connectComposioApp(root, phone, btn.dataset.compKey, btn));
+    });
+  }).catch(e => {
+    body.innerHTML = emptyState('Falha ao carregar conexões', e.message,
+      'Tentar de novo', 'loadConexoes(document.getElementById("root"), ' + JSON.stringify(phone) + ')');
+  });
+}
+
+function connectComposioApp(root, phone, appKey, btn) {
+  btn.disabled = true;
+  btn.textContent = 'Gerando link…';
+  api(ENDPOINTS.composioAuthorize, {
+    method: 'POST',
+    body: JSON.stringify({ phone: phone, toolkit: appKey }),
+  }).then(data => {
+    const links = data.links || [];
+    const match = links.find(l => l.toolkit === appKey);
+    const resultBox = root.querySelector('#conexoes-comp-result');
+    if (match && match.connect_url) {
+      resultBox.innerHTML = '<div class="card">'
+        + '<h3>Autorize o app</h3>'
+        + '<p style="font-size:13px;color:var(--fg-soft)">Clique no link abaixo para autorizar. O link expira em 10 minutos.</p>'
+        + '<a class="primary" href="' + esc(match.connect_url) + '" target="_blank" rel="noopener" style="display:inline-block;padding:10px 14px;border-radius:8px;text-decoration:none">🔗 Abrir autorização</a>'
+        + '<div class="meta" style="margin-top:8px">Depois de autorizar, volte aqui e recarregue para ver o status atualizado.</div>'
+        + '</div>';
+    } else {
+      resultBox.innerHTML = '<div class="inline-banner" style="margin-top:8px">' + (match && match.error ? esc(match.error) : 'Link não gerado.') + '</div>';
+    }
+    btn.disabled = false;
+    btn.textContent = '🔗 Conectar';
+  }).catch(e => {
+    btn.disabled = false;
+    btn.textContent = '🔗 Conectar';
+    toast('Erro ao gerar link: ' + e.message, 'error');
   });
 }
 
