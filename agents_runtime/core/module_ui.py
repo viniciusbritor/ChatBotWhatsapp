@@ -1552,7 +1552,7 @@ setActive(CALLER_ROLE === 'agent_user' ? 'conexoes' : 'accounts');
 """
 
 
-def render_dashboard(commit: str, deployed_at: str, role: str = "admin", caller_phone: str = "") -> str:
+def render_dashboard(commit: str, deployed_at: str, role: str = "admin") -> str:
     role = role if role in ("admin", "agent_user") else "admin"
     nav_html = (
         _NAV_ADMIN
@@ -1563,7 +1563,7 @@ def render_dashboard(commit: str, deployed_at: str, role: str = "admin", caller_
         "commit": html.escape(commit or "local"),
         "deployed": html.escape(deployed_at or "-"),
         "role": role,
-        "caller_phone": html.escape(caller_phone or ""),
+        "caller_phone": html.escape(""),
     }
     return (
         _TEMPLATE
