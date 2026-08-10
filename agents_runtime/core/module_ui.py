@@ -687,6 +687,34 @@ pre.json-view {
   margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap;
   border: 0;
 }
+.sec-title {
+  font-size: 14px;
+  color: var(--fg-soft);
+  margin: 24px 0 8px;
+  font-weight: 600;
+}
+.status-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.status-table th {
+  text-align: left;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg-muted);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.status-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg);
+}
+.status-table tr:hover td {
+  background: var(--surface-alt);
+}
 </style>
 </head>
 <body>
@@ -1493,7 +1521,7 @@ function renderStatus(root) {
   root.innerHTML =
     '<div class="panel-header">'
     + '<div><h2>Status operacional</h2>'
-    + '<div class="subtitle">KPIs do runtime e da stack LLM/STT</div></div>'
+    + '<div class="subtitle">Monitoramento do runtime, usuarios e conexoes</div></div>'
     + '</div>'
     + '<div id="kpi-grid" class="kpi-grid">' + skeletonList(6) + '</div>'
     + '<div id="sections"></div>';
@@ -1507,10 +1535,59 @@ function renderStatus(root) {
     ).join('');
     root.querySelector('#kpi-grid').innerHTML = kpis || '<p>Nenhum KPI disponível</p>';
     const sections = [];
-    if (data.llm) sections.push('<h3 style="font-size:14px;color:var(--fg-soft);margin:24px 0 8px;font-weight:600">LLM</h3><pre class="json-view">' + esc(JSON.stringify(data.llm, null, 2)) + '</pre>');
-    if (data.stt) sections.push('<h3 style="font-size:14px;color:var(--fg-soft);margin:16px 0 8px;font-weight:600">STT</h3><pre class="json-view">' + esc(JSON.stringify(data.stt, null, 2)) + '</pre>');
-    if (data.agents_summary) sections.push('<h3 style="font-size:14px;color:var(--fg-soft);margin:16px 0 8px;font-weight:600">Agentes</h3><pre class="json-view">' + esc(JSON.stringify(data.agents_summary, null, 2)) + '</pre>');
-    root.querySelector('#sections').innerHTML = sections.join('');
+
+    if (data.users_summary) {
+      const rows = (data.users_summary.users || []);
+      const table = rows.length
+        ? '<table class="status-table"><thead><tr>'
+          + '<th>Telefone</th><th>Email</th><th>Role</th><th>Google</th><th>LinkedAt</th>'
+          + '</tr></thead><tbody>'
+          + rows.map(u => '<tr>'
+              + '<td>' + esc(u.phone) + '</td>'
+              + '<td>' + esc(u.email || '-') + '</td>'
+              + '<td>' + esc(u.role) + '</td>'
+              + '<td>' + (u.has_google ? '<span class="tag jade">ok</span>' : '<span class="tag">—</span>') + '</td>'
+              + '<td>' + esc((u.google_linked_at || '').slice(0, 19).replace('T', ' ')) + '</td>'
+              + '</tr>').join('')
+          + '</tbody></table>'
+        : '<p style="color:var(--fg-soft)">Nenhum usuario cadastrado.</p>';
+      sections.push('<h3 class="sec-title">Usuarios (' + (data.users_summary.total || 0) + ' · ' + (data.users_summary.with_google || 0) + ' com Google)</h3>' + table);
+    }
+
+    if (data.my_connections) {
+      const c = data.my_connections;
+      const googleCard = '<div class="card" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
+        + '<div><h3 style="margin:0">Conta Google</h3><div class="meta">' + esc(c.email || c.phone) + '</div></div>'
+        + (c.google ? '<span class="tag jade">conectada</span>' : '<span class="tag">nao conectada</span>')
+        + '</div>';
+      const compApps = Object.keys(c.composio || {});
+      const compCards = compApps.map(slug =>
+        '<div class="card" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
+        + '<div><h3 style="margin:0">' + esc(slug) + '</h3></div>'
+        + (c.composio[slug] ? '<span class="tag jade">ok</span>' : '<span class="tag">—</span>')
+        + '</div>'
+      ).join('');
+      sections.push('<h3 class="sec-title">Minhas conexoes</h3>' + googleCard + (compCards || '<p style="color:var(--fg-soft)">Nenhum app Composio conectado.</p>'));
+    }
+
+    if (data.agents_summary) {
+      const counts = data.agents_summary.counts || {};
+      sections.push('<h3 class="sec-title">Agentes</h3>'
+        + '<div class="card">'
+        + '<div class="meta">configurados: ' + esc(counts.configured || 0)
+        + ' · roteaveis: ' + esc(counts.routable || 0)
+        + ' · saudaveis: ' + esc(counts.healthy || 0)
+        + ' · degradados: ' + esc(counts.degraded || 0)
+        + '</div></div>');
+    }
+
+    if (data.stt && data.stt.daily_limit) {
+      sections.push('<h3 class="sec-title">STT (fallback Gemini)</h3>'
+        + '<div class="card"><div class="meta">chamadas hoje: ' + esc(data.stt.calls_today || 0)
+        + ' / ' + esc(data.stt.daily_limit || 20) + '</div></div>');
+    }
+
+    root.querySelector('#sections').innerHTML = sections.join('') || '<p>Sem dados adicionais.</p>';
   }).catch(e => {
     root.querySelector('#kpi-grid').innerHTML = emptyState(
       'Falha ao carregar status', e.message,

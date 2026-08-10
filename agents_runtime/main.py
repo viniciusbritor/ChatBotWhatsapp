@@ -880,7 +880,73 @@ async def admin_status(request: Request):
             "counts": counts,
             "generated_at": inventory.get("generated_at"),
         }
+        try:
+            payload["users_summary"] = _build_users_status()
+        except Exception:
+            payload["users_summary"] = {"users": [], "total": 0}
+    else:
+        try:
+            payload["my_connections"] = _build_user_connections(request)
+        except Exception:
+            payload["my_connections"] = {"google": False, "composio": {}}
     return JSONResponse(content=payload)
+
+
+def _build_users_status() -> Dict[str, Any]:
+    """Resumo de usuarios + status de conexoes (admin, tabela de monitoramento).
+
+    Varre usuarios/* e cruza com folder_permissions e composio (best-effort).
+    """
+    from agent_loader import list_users
+
+    users = list_users()
+    rows = []
+    for u in users:
+        phone = u.get("phone_canonical") or u.get("phone") or ""
+        google_token = u.get("google_oauth_token") or {}
+        rows.append({
+            "phone": phone,
+            "email": u.get("email", ""),
+            "role": u.get("role", "agent_user"),
+            "has_google": bool(google_token and google_token.get("token")),
+            "google_linked_at": u.get("google_oauth_linked_at", ""),
+            "has_composio": bool(u.get("composio_linked_at")),
+            "created_at": u.get("created_at", "") or u.get("updated_at", ""),
+        })
+    rows.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+    return {
+        "users": rows,
+        "total": len(rows),
+        "with_google": sum(1 for r in rows if r["has_google"]),
+    }
+
+
+def _build_user_connections(request: Request) -> Dict[str, Any]:
+    """Status das conexoes do proprio agente_user (cards no Portal)."""
+    role, phone = _caller_role(request)
+    if not phone:
+        return {"google": False, "composio": {}, "phone": ""}
+    from agent_loader import get_user
+
+    user = get_user(phone) or {}
+    google_token = user.get("google_oauth_token") or {}
+    has_google = bool(google_token and google_token.get("token"))
+    composio_apps: Dict[str, Any] = {}
+    try:
+        from tools.composio_connect import get_status as composio_status
+
+        result = asyncio.run(composio_status(phone))
+        if result.get("apps"):
+            composio_apps = result["apps"]
+    except Exception:
+        pass
+    return {
+        "phone": phone,
+        "email": user.get("email", ""),
+        "google": has_google,
+        "google_linked_at": user.get("google_oauth_linked_at", ""),
+        "composio": {slug: bool(app.get("connected")) for slug, app in composio_apps.items()},
+    }
 
 
 @app.get("/admin/accounts")
