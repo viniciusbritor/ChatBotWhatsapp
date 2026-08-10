@@ -51,7 +51,7 @@ async def get_status(user_id: str) -> Dict[str, Any]:
     return {"phone": user_id, "apps": apps, "total": len(apps)}
 
 
-async def connect_all(user_id: str) -> Dict[str, Any]:
+async def connect_all(user_id: str, toolkit: str = "") -> Dict[str, Any]:
     c = _client()
     session = c.create(user_id=user_id)
     try:
@@ -64,6 +64,8 @@ async def connect_all(user_id: str) -> Dict[str, Any]:
     already = 0
     for cfg in configs.items:
         slug = cfg.toolkit.slug
+        if toolkit and slug != toolkit:
+            continue
         if slug in connected_slugs:
             already += 1
             links.append({"toolkit": slug, "status": "connected", "connect_url": None})

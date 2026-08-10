@@ -1,5 +1,29 @@
 # Diario de Bordo — ChatBotWhatsapp
 
+## 10/08/2026 (02:30 BRT) — Fix Portal: timeout ao conectar app Composio
+
+### Problema
+Aba Conexoes -> botao "Conectar" em "Outros servicos" retornava
+`Erro ao gerar link: timeout_apos_12s` (AbortController do JS).
+
+### Causa Raiz
+`connect_all()` chamava `session.authorize(toolkit=slug)` para TODOS os
+apps pendentes em sequencia (~8 x 2-3s = 16-24s), mesmo quando o usuario
+clicava em 1 unico app. A filtragem por `toolkit` so ocorria DEPOIS, no
+endpoint `authorize`.
+
+### Correcao
+- `tools/composio_connect.py::connect_all()`: novo parametro `toolkit=""` —
+  quando presente, pula todos os outros apps (1 chamada authorize so)
+- `main.py` `/api/v1/composio/authorize`: passa `toolkit` para `connect_all()`
+
+### Validacao local
+- connect_all(phone, toolkit="google_maps"): 8.8s, 1 link, status pending
+- connect_all(phone, toolkit="notion"): 7.8s, 1 link, status connected
+- pytest test_composio_tools: 4 passed
+
+---
+
 ## 10/08/2026 (02:00 BRT) — Portal: redesign Clean Light Coherence
 
 ### Escopo

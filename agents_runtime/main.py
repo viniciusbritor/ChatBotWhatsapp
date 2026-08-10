@@ -1406,7 +1406,7 @@ async def composio_authorize(request: Request):
         return JSONResponse({"error": "phone required"}, status_code=400)
     toolkit = (body.get("toolkit") or "").strip()
     from tools.composio_connect import connect_all
-    result = await connect_all(phone)
+    result = await connect_all(phone, toolkit=toolkit)
     if toolkit:
         links = result.get("links", [])
         result["links"] = [l for l in links if l.get("toolkit") == toolkit]
