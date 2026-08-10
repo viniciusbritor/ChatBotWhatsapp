@@ -1,5 +1,34 @@
 # Diario de Bordo — ChatBotWhatsapp
 
+## 10/08/2026 (02:00 BRT) — Portal: redesign Clean Light Coherence
+
+### Escopo
+Redesign do modulo Agents Omnichannel (`core/module_ui.py`) para estetica
+elegante e minimalista, mantendo light theme + logo Coherence.
+
+### Mudancas (Fases 1-4)
+- **F1 Tokens**: Clean Light Coherence (`--bg:#f9fafb`, fg `#171717`, accent
+  `#3b82f6`, radius 8/12/18, sombras suaves) — alinhado a skill coherence_identity
+- **F1 Header**: logo Coherence SVG inline (gradiente azul->jade, "C" com ponto)
+  + divisor vertical + titulo "Agentes Omnichannel · Coherence" (skill coherence_logo)
+- **F1 Nav**: icones emoji nas 8 secoes (📱🤖🧩🔧👤🔗📚📊), active state accent-soft
+- **F2 Cards**: padding 16x20, radius 12, hover com shadow-md
+- **F2 Buttons**: primary com gradiente azul + shadow + hover translateY(-1px),
+  secondary 1.5px border, ghost refinado
+- **F2 Tags**: padding 4x10, font 12px
+- **F3 JS**: fixes ja aplicados anteriormente (ternario + onclick) — validados
+- **F4 Responsivo**: nav horizontal scroll em <960px, compactacao em <600px
+- **F4 Animacao**: fadeIn staggered nos cards (card-in, delays 0.03-0.15s)
+
+### Validacao
+- render_dashboard OK (52KB), JS `node --check` ALL OK
+- pytest test_module_ui_admin + test_portal_loading + test_composio_tools: 25 passed
+
+### Rollback
+`git revert <commit>` + push — 1 commit atomico por fase.
+
+---
+
 ## 09/08/2026 (05:30 BRT) — Portal: aba Conexoes + endpoint composio/authorize
 
 ### Nova aba "Conexões" no Portal (core/module_ui.py)

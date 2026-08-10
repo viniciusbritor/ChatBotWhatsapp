@@ -29,18 +29,18 @@ _TEMPLATE = """<!DOCTYPE html>
 <style>
 :root {
   color-scheme: light;
-  /* Neutrals */
-  --bg: #fafbfc;
+  /* Neutrals — Coherence Clean Light */
+  --bg: #f9fafb;
   --surface: #ffffff;
-  --surface-alt: #f7f8fa;
-  --border: #e5e7eb;
-  --border-strong: #d1d5db;
-  --fg: #111827;
-  --fg-soft: #4b5563;
-  --fg-muted: #9ca3af;
-  /* Accents */
-  --accent: #1d4ed8;
-  --accent-hover: #1740b8;
+  --surface-alt: #f3f4f6;
+  --border: #eceef1;
+  --border-strong: #d8dce2;
+  --fg: #171717;
+  --fg-soft: #52525b;
+  --fg-muted: #a1a1aa;
+  /* Accents — Coherence */
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
   --accent-soft: #eff6ff;
   --jade: #1a6b52;
   --amber: #b8962a;
@@ -52,12 +52,12 @@ _TEMPLATE = """<!DOCTYPE html>
   --warn: #d97706;
   --warn-soft: #fffbeb;
   /* Effects */
-  --shadow-sm: 0 1px 2px rgba(17, 24, 39, .04);
-  --shadow-md: 0 1px 2px rgba(17, 24, 39, .04), 0 4px 12px rgba(17, 24, 39, .06);
-  --shadow-lg: 0 8px 24px rgba(17, 24, 39, .10);
-  --radius-sm: 6px;
-  --radius: 10px;
-  --radius-lg: 16px;
+  --shadow-sm: 0 1px 2px rgba(23, 23, 23, .04);
+  --shadow-md: 0 1px 3px rgba(23, 23, 23, .06), 0 4px 16px rgba(23, 23, 23, .06);
+  --shadow-lg: 0 12px 32px rgba(23, 23, 23, .10);
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 18px;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
@@ -110,23 +110,19 @@ header {
 .brand {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
   font-weight: 600;
   font-size: 15px;
   letter-spacing: -0.01em;
+  color: var(--fg);
 }
-.brand-mark {
-  width: 28px;
-  height: 28px;
-  border-radius: 7px;
-  background: linear-gradient(135deg, #1d4ed8 0%, #1a6b52 100%);
-  display: grid;
-  place-items: center;
-  color: #fff;
-  font-weight: 700;
-  font-size: 13px;
-  letter-spacing: -0.02em;
+.brand svg { display: block; }
+.brand-divider {
+  width: 1px;
+  height: 24px;
+  background: var(--border-strong);
 }
+.brand-title { font-size: 14px; font-weight: 600; color: var(--fg); }
 .brand small { font-weight: 400; color: var(--fg-soft); margin-left: 4px; font-size: 12px; }
 .runtime-info { display: flex; gap: 14px; align-items: center; font-size: 12px; color: var(--fg-soft); }
 .runtime-info code {
@@ -189,26 +185,26 @@ nav h2 {
   padding: 0 8px;
 }
 nav button {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   width: 100%;
   text-align: left;
   background: transparent;
   border: 0;
-  padding: 8px 10px;
+  padding: 9px 12px;
   border-radius: var(--radius);
   font-size: 13.5px;
   color: var(--fg-soft);
   cursor: pointer;
-  transition: background .12s, color .12s;
+  transition: background .12s, color .12s, transform .12s;
   font-weight: 500;
-  border-left: 2px solid transparent;
-  margin-left: -2px;
 }
+nav button .nav-icon { font-size: 15px; width: 18px; text-align: center; flex-shrink: 0; }
 nav button:hover { background: var(--surface-alt); color: var(--fg); }
 nav button.active {
   background: var(--accent-soft);
   color: var(--accent);
-  border-left-color: var(--accent);
   font-weight: 600;
 }
 nav button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -249,9 +245,9 @@ section.panel .subtitle {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 14px 16px;
+  padding: 16px 20px;
   margin-bottom: 10px;
-  transition: border-color .12s, box-shadow .12s;
+  transition: border-color .15s, box-shadow .15s, transform .15s;
 }
 .card:hover {
   border-color: var(--border-strong);
@@ -289,12 +285,13 @@ section.panel .subtitle {
 .tag {
   display: inline-flex;
   align-items: center;
-  padding: 3px 9px;
+  padding: 4px 10px;
   border-radius: 999px;
   background: var(--surface-alt);
   color: var(--fg-soft);
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 500;
+  border: 1px solid transparent;
 }
 .tag.accent { background: var(--accent-soft); color: var(--accent); }
 .tag.good { background: var(--good-soft); color: var(--good); }
@@ -327,34 +324,35 @@ section.panel .subtitle {
 
 /* Buttons */
 button.primary {
-  background: var(--accent);
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
   color: #fff;
   border: 0;
-  padding: 9px 16px;
-  border-radius: var(--radius);
+  padding: 10px 18px;
+  border-radius: 10px;
   font-weight: 500;
   font-size: 13.5px;
-  transition: background .12s;
+  transition: box-shadow .15s, transform .15s, filter .15s;
+  box-shadow: 0 1px 2px rgba(37, 99, 235, .2);
 }
-button.primary:hover { background: var(--accent-hover); }
-button.primary:disabled { background: var(--fg-muted); cursor: not-allowed; }
+button.primary:hover { filter: brightness(1.05); box-shadow: 0 2px 8px rgba(37, 99, 235, .25); transform: translateY(-1px); }
+button.primary:disabled { background: var(--fg-muted); cursor: not-allowed; box-shadow: none; transform: none; }
 button.secondary {
   background: var(--surface);
   color: var(--fg);
-  border: 1px solid var(--border-strong);
-  padding: 8px 14px;
-  border-radius: var(--radius);
+  border: 1.5px solid var(--border-strong);
+  padding: 9px 15px;
+  border-radius: 10px;
   font-weight: 500;
   font-size: 13.5px;
-  transition: border-color .12s, color .12s;
+  transition: border-color .12s, color .12s, background .12s;
 }
-button.secondary:hover { border-color: var(--accent); color: var(--accent); }
+button.secondary:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 button.secondary.danger:hover { border-color: var(--bad); color: var(--bad); background: var(--bad-soft); }
 button.ghost {
   background: transparent;
   color: var(--fg-soft);
   border: 0;
-  padding: 5px 9px;
+  padding: 6px 10px;
   border-radius: var(--radius-sm);
   font-size: 12.5px;
   font-weight: 500;
@@ -641,10 +639,33 @@ pre.json-view {
   margin: 8px 0 16px;
 }
 
+/* Card appear animation */
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+#list .card, #knowledge-list .card, #conexoes-body .card {
+  animation: card-in .25s ease both;
+}
+#list .card:nth-child(2) { animation-delay: .03s; }
+#list .card:nth-child(3) { animation-delay: .06s; }
+#list .card:nth-child(4) { animation-delay: .09s; }
+#list .card:nth-child(5) { animation-delay: .12s; }
+#list .card:nth-child(6) { animation-delay: .15s; }
+
 /* Responsive */
 @media (max-width: 960px) {
   main { grid-template-columns: 1fr; padding: 0 16px; }
-  nav { position: static; }
+  nav {
+    position: static;
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    padding: 10px;
+    scrollbar-width: thin;
+  }
+  nav h2 { display: none; }
+  nav button { width: auto; white-space: nowrap; flex-shrink: 0; }
   header { padding: 12px 16px; }
   .drawer { width: 100vw; }
 }
@@ -652,6 +673,9 @@ pre.json-view {
   .runtime-info { display: none; }
   .brand small { display: none; }
   section.panel { padding: 18px; }
+  section.panel h2 { font-size: 17px; }
+  button.primary { padding: 9px 14px; }
+  .card { padding: 13px 15px; }
 }
 
 /* Accessibility: visible focus styles */
@@ -668,8 +692,19 @@ pre.json-view {
 <body>
 <header>
   <div class="brand">
-    <div class="brand-mark">C</div>
-    <div>Agentes Omnichannel <small>· Coherence</small></div>
+    <svg width="26" height="26" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <linearGradient id="coh-g" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+          <stop stop-color="#3b82f6"/>
+          <stop offset="1" stop-color="#1a6b52"/>
+        </linearGradient>
+      </defs>
+      <rect width="32" height="32" rx="9" fill="url(#coh-g)"/>
+      <path d="M22 11.5a8 8 0 1 0 0 9" stroke="#fff" stroke-width="3.2" stroke-linecap="round" fill="none"/>
+      <circle cx="22.5" cy="16" r="2.1" fill="#fff"/>
+    </svg>
+    <span class="brand-divider"></span>
+    <span class="brand-title">Agentes Omnichannel <small>· Coherence</small></span>
   </div>
   <div class="runtime-info">
     <span class="badge" id="runtime-badge" aria-live="polite">runtime</span>
@@ -680,14 +715,14 @@ pre.json-view {
 <main>
   <nav aria-label="Seções do módulo">
     <h2>Seções</h2>
-    <button data-tab="accounts" class="active">Contas WhatsApp</button>
-    <button data-tab="agents">Agentes</button>
-    <button data-tab="skills">Skills</button>
-    <button data-tab="tools">Tools</button>
-    <button data-tab="owners">Proprietários</button>
-    <button data-tab="conexoes">Conexões</button>
-    <button data-tab="knowledge">Conhecimento</button>
-    <button data-tab="status">Status</button>
+    <button data-tab="accounts" class="active"><span class="nav-icon">📱</span>Contas WhatsApp</button>
+    <button data-tab="agents"><span class="nav-icon">🤖</span>Agentes</button>
+    <button data-tab="skills"><span class="nav-icon">🧩</span>Skills</button>
+    <button data-tab="tools"><span class="nav-icon">🔧</span>Tools</button>
+    <button data-tab="owners"><span class="nav-icon">👤</span>Proprietários</button>
+    <button data-tab="conexoes"><span class="nav-icon">🔗</span>Conexões</button>
+    <button data-tab="knowledge"><span class="nav-icon">📚</span>Conhecimento</button>
+    <button data-tab="status"><span class="nav-icon">📊</span>Status</button>
   </nav>
   <section class="panel" id="panel" role="region" aria-live="polite">
     <div id="root"></div>
@@ -994,7 +1029,7 @@ function editAgentForm(agentId) {
       });
   Promise.resolve(cur).then(c => {
     const skillsCsv = Array.isArray(c.skills) ? c.skills.join(', ') : '';
-    const toolsCsv = Array.isArray(c.tools) ? c.tools.join(', ');
+    const toolsCsv = Array.isArray(c.tools) ? c.tools.join(', ') : '';
     const instCsv = Array.isArray(c.instances) ? c.instances.join(', ') : 'jennifer';
     const body =
       '<div class="field-row"><label>ID (slug)</label><input id="id" value="' + esc(c.id) + '"' + (agentId ? ' readonly' : '') + '"></div>'
@@ -1211,7 +1246,7 @@ function loadConexoes(root, phone) {
         + '<div class="meta" style="margin:2px 0 0">' + s.desc + '</div></div></div>'
         + (on
             ? '<span class="tag jade">● OK</span>'
-            : '<button class="primary" onclick="window.open(\'/oauth/google?phone=' + encodeURIComponent(phone) + '\',\'_blank\')">🔗 Conectar</button>')
+            : '<button class="primary" onclick="window.open(\\\'/oauth/google?phone=' + encodeURIComponent(phone) + '\\\',\\\'_blank\\\')">🔗 Conectar</button>')
         + '</div>';
     }).join('');
 
