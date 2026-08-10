@@ -143,7 +143,6 @@ class TestR2VectorFirestoreReadWrite:
 
     def test_r2_private_collection_isolated_per_owner(self):
         """R2: RAG_PRIVATE_COLLECTION filtra por owner_hash em todas as leituras."""
-        from core import rag
         from core.lgpd import _owner_hash
 
         # O filtro DEVE usar owner_hash como primeira clausula
@@ -183,20 +182,20 @@ class TestR3GroupIsolation:
                     "results": [],  # grupo B nao tem nada
                     "count": 0,
                 }),
-            ) as mock_group_search:
-                with patch(
-                    "agent_orchestration.knowledge_retriever.search_legal_knowledge",
-                    AsyncMock(return_value={
-                        "results": [{"text": "doc privado do user", "score": 0.8}],
-                        "owner_hash": "user-hash",
-                    }),
-                ) as mock_private_search:
-                    result = await retrieve(
-                        envelope_group_b,
-                        "qualquer query",
-                        limit=3,
-                        min_score=0.5,
-                    )
+                ) as mock_group_search:
+                    with patch(
+                        "agent_orchestration.knowledge_retriever.search_legal_knowledge",
+                        AsyncMock(return_value={
+                            "results": [{"text": "doc privado do user", "score": 0.8}],
+                            "owner_hash": "user-hash",
+                        }),
+                    ):
+                        result = await retrieve(
+                            envelope_group_b,
+                            "qualquer query",
+                            limit=3,
+                            min_score=0.5,
+                        )
 
         # Grupo B nao tem conteudo (vazio)
         assert result["count"] == 0 or result["decision"] != "group"
@@ -244,8 +243,6 @@ class TestR3GroupIsolation:
         conteudo nao pode ser indexado com visibility=group."""
         from skills.knowledge.pdf_handler import persist as pdf_persist
         from skills.knowledge.text_handler import persist as text_persist
-        from skills.knowledge.docx_handler import persist as docx_persist
-        from skills.knowledge.xlsx_handler import persist as xlsx_persist
 
         # Envelope de conversa privada (NAO grupo)
         envelope_no_group = {
@@ -359,6 +356,105 @@ class TestR4UserPrivacyIsolation:
         assert owner_a != owner_b, (
             "owner_hash deve ser diferente para cada user (R4)"
         )
+
+
+# ============================================================================
+# R3.1: Anti-spoofing em grupo - indexacao e leitura exigem membro ativo
+# ============================================================================
+
+class TestR31GroupIndexingAntiSpoofing:
+    """R3.1: um telefone NAO-membro nao pode indexar nem ler conhecimento
+    de um grupo via tools.group (defense-in-depth alem do retriever)."""
+
+    def _member_db(self, is_active: bool = True):
+        db = MagicMock()
+        member_doc = MagicMock()
+        member_doc.exists = True
+        member_doc.to_dict.return_value = {"is_active": is_active}
+        db.collection.return_value.document.return_value.collection.return_value.document.return_value.get.return_value = member_doc
+        return db
+
+    @pytest.mark.asyncio
+    async def test_non_member_cannot_index_group_visibility(self):
+        """Nao-membro tentando indexar com visibility=group -> not_group_member."""
+        from tools.group import index_group_document
+
+        db = MagicMock()
+        member_doc = MagicMock()
+        member_doc.exists = False
+        db.collection.return_value.document.return_value.collection.return_value.document.return_value.get.return_value = member_doc
+
+        with patch("tools.group._get_firestore", return_value=db):
+            result = await index_group_document(
+                "5511888888888", "120363-X@g.us", "texto", "group"
+            )
+        assert result.get("error") == "not_group_member"
+
+    @pytest.mark.asyncio
+    async def test_non_member_cannot_index_public_visibility(self):
+        """Nao-membro tambem NAO pode tornar conteudo do grupo publico."""
+        from tools.group import index_group_document
+
+        db = MagicMock()
+        member_doc = MagicMock()
+        member_doc.exists = False
+        db.collection.return_value.document.return_value.collection.return_value.document.return_value.get.return_value = member_doc
+
+        with patch("tools.group._get_firestore", return_value=db):
+            result = await index_group_document(
+                "5511888888888", "120363-X@g.us", "texto", "public"
+            )
+        assert result.get("error") == "not_group_member"
+
+    @pytest.mark.asyncio
+    async def test_active_member_can_index_group(self):
+        """Membro ativo indexa normalmente (sem erro de membro)."""
+        from tools.group import index_group_document
+
+        db = self._member_db(is_active=True)
+
+        def _fake_embed(text, api_key=""):
+            return [0.1] * 1536
+
+        with patch("tools.group._get_firestore", return_value=db):
+            with patch("tools.group._embed_text", side_effect=_fake_embed):
+                result = await index_group_document(
+                    "5511966830020", "120363-X@g.us", "conteudo do grupo", "group",
+                    source_name="ata.pdf",
+                )
+        assert result.get("error") is None
+        assert result["indexed"] >= 1
+        assert result["visibility"] == "group"
+
+    @pytest.mark.asyncio
+    async def test_inactive_member_cannot_index(self):
+        """Membro com is_active=False NAO pode indexar (left do grupo)."""
+        from tools.group import index_group_document
+
+        db = self._member_db(is_active=False)
+
+        with patch("tools.group._get_firestore", return_value=db):
+            result = await index_group_document(
+                "5511966830020", "120363-X@g.us", "texto", "group"
+            )
+        assert result.get("error") == "not_group_member"
+
+    @pytest.mark.asyncio
+    async def test_search_group_knowledge_denies_non_member(self):
+        """search_group_knowledge com phone nao-membro -> not_group_member."""
+        from tools.group import search_group_knowledge
+
+        db = MagicMock()
+        member_doc = MagicMock()
+        member_doc.exists = False
+        db.collection.return_value.document.return_value.collection.return_value.document.return_value.get.return_value = member_doc
+
+        with patch("tools.group._get_firestore", return_value=db):
+            result = await search_group_knowledge(
+                "120363-X@g.us", "query", phone="5511888888888"
+            )
+        assert result.get("error") == "not_group_member"
+        assert result.get("count") == 0
 
 
 # ============================================================================

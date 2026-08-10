@@ -354,6 +354,7 @@ def _build_group_rag_tools() -> List[Any]:
 
     @tool
     async def search_group_knowledge(
+        phone: str,
         group_jid: str,
         query: str,
         limit: int = 5,
@@ -365,12 +366,13 @@ def _build_group_rag_tools() -> List[Any]:
         similar chunks filtered by group membership (or visibility=public).
 
         Args:
+            phone: User phone (used to verify group membership).
             group_jid: WhatsApp group JID.
             query: Search text.
             limit: Max results (default 5).
         """
         return await group.search_group_knowledge(
-            group_jid=group_jid, query=query, limit=limit,
+            group_jid=group_jid, query=query, limit=limit, phone=phone,
         )
 
     return [index_group_document, search_group_knowledge]

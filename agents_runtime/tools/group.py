@@ -33,6 +33,25 @@ def _get_firestore():
         return None
 
 
+def _is_user_member(db, group_jid: str, phone: str) -> bool:
+    """Returns True when ``phone`` is an active member of ``group_jid``."""
+    if not phone or not group_jid:
+        return False
+    try:
+        doc = (
+            db.collection("grupos")
+            .document(group_jid.replace("/", "_"))
+            .collection("membros")
+            .document(phone)
+            .get()
+        )
+        if doc.exists:
+            return bool(doc.to_dict().get("is_active", False))
+    except Exception:
+        return False
+    return False
+
+
 async def register_group(
     group_jid: str,
     name: str,
@@ -471,12 +490,18 @@ async def index_group_document(
     if visibility not in ("group", "public"):
         return {"error": "visibility_must_be_group_or_public"}
 
-    chars_soft_limit = _get_chars_soft_limit()
-    chunks_soft_limit = _get_chunks_soft_limit()
-
     db = _get_firestore()
     if db is None:
         return {"error": "firestore_unavailable"}
+
+    if not _is_user_member(db, group_jid, phone):
+        return {
+            "error": "not_group_member",
+            "message": "somente membros ativos do grupo podem indexar conhecimento do grupo",
+        }
+
+    chars_soft_limit = _get_chars_soft_limit()
+    chunks_soft_limit = _get_chunks_soft_limit()
 
     gh = _group_hash(group_jid)
 
@@ -591,12 +616,15 @@ async def search_group_knowledge(
     group_jid: str,
     query: str,
     limit: int = 5,
+    phone: str = "",
 ) -> Dict[str, Any]:
     if not query or not group_jid:
         return {"results": [], "count": 0}
     db = _get_firestore()
     if db is None:
         return {"results": [], "count": 0}
+    if phone and not _is_user_member(db, group_jid, phone):
+        return {"results": [], "count": 0, "error": "not_group_member"}
     query_embedding = _embed_text(query)
     if query_embedding is None:
         return {"results": [], "count": 0, "error": "embedding_failed"}
