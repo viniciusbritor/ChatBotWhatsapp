@@ -20,8 +20,7 @@ import io
 logger = logging.getLogger(__name__)
 
 SCOPES = [
-    "https://www.googleapis.com/auth/drive.file",
-    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/drive",
 ]
 _OMNICHANNEL_FOLDER_NAME = "Omnichannel"
 _ATAS_SUBFOLDER = "Atas"

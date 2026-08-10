@@ -96,7 +96,6 @@ LLM cascade, Whisper e Pub/Sub geram custo variável conforme o tráfego.
 
 ## Próximos passos
 
-- Rotacionar credenciais expostas no commit `ad6399a`.
 - Drenar backlog legado com `gcloud pubsub subscriptions seek agents-runtime-consumer --time=<deploy_ts>`.
 - Backfill de embeddings para a nova coleção `agent-knowledge-v2` por
   `owner_id`.

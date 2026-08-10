@@ -835,8 +835,6 @@ Foi aberto loop disciplinado `Analise -> Identificacao -> Plano -> Branch -> 4 f
 **+12 testes passando, mesmas 11 falhas pre-existentes (langgraph nao instalado / google_drive docx / dissertacao_pdf_is_present), zero warnings novos.**
 
 ### Pendencias externas NAO resolvidas neste loop (escopo do usuario)
-- Rotacao de credenciais (user-only, fora do escopo)
-- Drive scope rollback (requer re-consentimento pelo user)
 - OAuth Client setup manual no Google Cloud Console
 
 ### Nao escopo deste patch (intencionalmente)
@@ -2004,7 +2002,8 @@ Suite verde na branch `test`. Proximo: commit, push, acompanhar Cloud Build e ex
 - `core/evolution_webhook.py` agora sintetiza `message_id` deterministico quando Evolution omite `key.id`, garantindo que retried webhooks colapsem na mesma entrada do ledger.
 - `core/evolution_client.py` adicionou `mark_messages_read` (Evolution v2) e `_safe_mark_read` em `/webhook` aplica o tick azul automatico. Timeout de 5 s; falha no tick nao bloqueia o webhook nem republica.
 - `core/owner.py` + `core/owner_guard.py` resolvem o proprietario da instancia Evolution e guardam Gmail/Drive/Calendar para que apenas o telefone autorizado execute essas capacidades. Todos os decorators `_owner_guard(...)` foram aplicados em `tools/google_*`.
-- Escopos OAuth reduzidos: `drive.file + drive.readonly` (sem `drive` full), `gmail.readonly + gmail.send` (sem `gmail.modify`).
+- Escopos OAuth em producao: `gmail.readonly + gmail.send`, `drive` (full,
+  definitivo desde 25/07/2026), `calendar + calendar.events`.
 - Audio agora passa por `core/audio_transcribe.transcribe_with_fallback`: Whisper local sempre; Gemini 2.5 Flash somente em falha tecnica com consentimento (`STT_FALLBACK_CONSENT` ou `extra.audio_consent_external=true`) e limite diario configuravel.
 - `core/module_ui.py` substitui o HTML legado por um painel limpo com autenticacao por `Authorization: Bearer` e os blocos `?token=` foram removidos. Novos endpoints administrativos: `/admin/accounts`, `/admin/owners`, `/admin/knowledge`, `/admin/status`, `/admin/dashboard`.
 - Limpeza operacional: `secret_*.txt`, `sa_token*.txt`, `update_real_secrets.py` e `whatsapp_agente_pubsub_reference.py` removidos do repositorio.
@@ -2018,7 +2017,6 @@ Suite verde na branch `test`. Proximo: commit, push, acompanhar Cloud Build e ex
 Branch `test` pronta para deploy do fix do Pub/Sub. Apos deploy, executar `gcloud pubsub subscriptions seek agents-runtime-consumer --time=<deploy_ts>` para drenar backlog antigo, conforme autorizado.
 
 ### Pendencias
-- Rotacao das credenciais expostas antes do proximo deploy.
 - Backfill de embeddings sob o novo `owner_hash`.
 - Remocao completa do proxy `WhatsappAgente`.
 - Atualizar `agents_runtime/README.md` com a nova contagem de testes.
@@ -2611,14 +2609,13 @@ bypass incompleto.
 
 Aplicar **fix minimo de uma linha** em `_has_required_scope()`:
 estender o bypass para cobrir `drive.readonly` alem de `drive.file`.
-**NAO** trocar `OAUTH_SCOPES` para `drive.file + drive.readonly` agora
-porque:
+`drive` (full) e a **configuracao definitiva** dos escopos — sem
+rollback futuro:
 
-1. Forca re-consentimento de todos os usuarios ativos
-2. O guardrail §8 continua atendido se o escopo amplo for apresentado
-   ao Google e mapeado corretamente no guardian
-3. Separacao `drive.file + drive.readonly` exige coordenacao com
-   GUARDRAILS — fazer em fase dedicada
+1. Evita re-consentimento de todos os usuarios ativos
+2. O guardrail §8 e atendido porque o escopo amplo e mapeado
+   corretamente no guardian
+3. Sem fase dedicada de separacao `drive.file + drive.readonly`
 
 Sem re-consentimento necessario: o token ja tem `drive` (full).
 

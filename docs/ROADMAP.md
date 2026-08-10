@@ -56,8 +56,6 @@ Chatbot WhatsApp único, humano-latência, humano-forma, FinOps consciente. Priv
 
 | Item | Bloqueio | Janela |
 |---|---|---|
-| Rotação credenciais `ad6399a` | Usuário precisa adicionar nova key | Quando quiser |
-| Drive scope rollback | Re-consentimento | Próxima janela |
 | OAuth Client Console config | Setup manual | Quando user quiser |
 | Backfill embeddings legacy | Script `scripts/backfill_owner_hash_embeddings.py` | Fase 5 |
 | README desatualizado (contagens) | Refresh após estabilizar | Após Fase 0.5+ |

@@ -19,20 +19,21 @@
 
 > Documento vivo. Cada fase termina com gate binário e deploy isolado.
 
-### TASK B RAG — runtime enforcement (Fase 2)
-- **Status:** 🟡 Pendente
+### TASK B RAG — runtime enforcement
+- **Status:** ✅ **IMPLEMENTADO** (PT6 F5 + owner bypass 01/08/2026)
 - **Resolve:** Tools (drive/gmail/calendar) filtram resultados por folder_permissions
-- **Esforço:** 4h | **Custo:** zero
+- **Cobertura:** `tools/google_*.py` aplicam `check_folder_permission` (pré) +
+  `post_filter_tool_result` (pós) via `core/owner_guard.py`; owner da instância
+  tem bypass automático. Tests: `test_folder_permissions_enforcement.py` (9),
+  `test_owner_guard.py` (21), `test_folder_permissions.py` (11).
 
-### TASK A Admin — runtime enforcement (Fase 2)
-- **Status:** 🟡 Pendente
+### TASK A Admin — runtime enforcement
+- **Status:** ✅ **IMPLEMENTADO** (mesma esteira da TASK B)
 - **Resolve:** Tools consultam `get_user_allowed_tools()` antes de retornar resultados
 
 ### Pendências externas (bloqueio usuário)
 > **Restrição (user 30/07):** rotacao de credenciais NAO sera feita por mim. Quebraria tudo.
 > Apenas o user tem acesso ao Secret Manager. Manter as chaves atuais.
-- [ ] ~~Rotação de credenciais expostas em `ad6399a`~~ — **EXCLUIDA** por user
-- [ ] Drive scope rollback para `drive.file + drive.readonly` (requer re-consentimento pelo user)
 - [ ] OAuth Client setup no Google Cloud Console para telefone `+5511966830020` (setup manual user)
 - [ ] Backfill embeddings legacy (script não criado)
 - [ ] README desatualizado em `agents_runtime/README.md`

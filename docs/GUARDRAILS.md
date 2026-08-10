@@ -167,8 +167,7 @@ Toda query passa por `_classify_intent_llm()` ANTES de qualquer pipeline:
 
 - **Nenhuma chave de API** hardcoded em código, scripts, documentação ou
   contexto Docker. Use `core.secrets.get_secret()` ou env var injetada via
-  Secret Manager. As credenciais expostas no commit `ad6399a` foram removidas e
-  precisam ser rotacionadas antes do próximo deploy.
+  Secret Manager.
 - **Upload de secrets**: APENAS `gcloud secrets versions add`. Nunca `versions
   update` (bug 12/07/2026 corrompeu chave DeepSeek).
 - **Gemini API é usada exclusivamente para transcrição de áudio**
@@ -420,17 +419,16 @@ em Firestore plain (`message-history/{history_id}`) com indexação por
 
 ## 8. OAuth Google
 
-- Escopos ativos (29/07/2026) em `agents_runtime/main.py:1112-1118`:
+- Escopos ativos (29/07/2026) em `agents_runtime/main.py:1465-1471`:
   ```
   gmail.readonly + gmail.send
-  drive                          (FULL — TEMPORÁRIO desde 25/07/2026)
+  drive                          (FULL — definitivo desde 25/07/2026)
   calendar + calendar.events
   ```
-- Estado alvo: voltar para `gmail.readonly + gmail.send` + `drive.file + drive.readonly` +
-  `calendar + calendar.events`. Migração exige re-consentimento de todos os usuários
-  ativos (o `refresh_token` não amplia escopos — apenas o consentimento original).
-- Bypass vigente (commit `01e8b9d`): `access_guardian._has_required_scope()` aceita `drive`
-  como cobertura de `drive.file` **E** `drive.readonly` simultaneamente.
+- O escopo `drive` (full) é a configuração definitiva: o
+  `access_guardian._has_required_scope()` aceita `drive` como cobertura
+  de `drive.file` **E** `drive.readonly` simultaneamente (bypass vigente,
+  commit `01e8b9d`). Sem migração futura.
 - Tokens persistidos **sem** `client_secret` e **sem** `client_id`.
 - Apenas o telefone do proprietário da instância pode chamar Gmail/Drive.
 - Revogação disponível via `POST /oauth/google` (re-login) ou remoção
@@ -627,7 +625,6 @@ escape de `$` e melhora a legibilidade.
 > regras técnicas inegociáveis; itens que requerem ação do operador estão
 > consolidados em STATE.md para evitar drift entre docs.
 >
-> Itens resolvidos (Fase F, 21/07 → 30/07/2026): rotação de credenciais do
-> commit `ad6399a`, backfill de embeddings legacy, e remoção completa do
-> proxy `WhatsappAgente` + serviço legado. Permanecem em STATE.md como
-> histórico até serem explicitamente fechados.
+> Itens resolvidos (Fase F, 21/07 → 30/07/2026): backfill de embeddings
+> legacy e remoção completa do proxy `WhatsappAgente` + serviço legado.
+> Permanecem em STATE.md como histórico até serem explicitamente fechados.

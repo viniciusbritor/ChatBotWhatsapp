@@ -280,26 +280,6 @@ chmod +x scripts/upload_secrets.sh
 ./scripts/upload_secrets.sh evolution-api-key "..."
 ```
 
-## Cloud Scheduler (Triggers)
-
-> ⚠️ Todas as triggers abaixo foram **pausadas** em 23/07/2026 para
-> evitar execuções caras durante a fase de estabilização. A reativação
-> é responsabilidade do operador após validação local. Triggers legadas
-> `ping-whatsapp-agente`, `agents-runtime-ping` e qualquer referência
-> ao serviço `whatsapp-agente-test` foram **removidas** (o serviço
-> legado foi deletado).
-
-| Job | Frequencia original | Acao | Status atual |
-|---|---|---|---|
-| `ata-worker-trigger` | `*/10 * * * *` | Chama `ata-worker-test` | pausado |
-| `proactive-worker-events-trigger` | `*/15 * * * *` | Chama `proactive-worker-test` (eventos Calendar) | pausado |
-| `proactive-worker-topics-trigger` | `0 8 * * 2,5` | Chama `proactive-worker-test` (terca + sexta 8h BRT) | pausado |
-| `ping-agents-runtime` | `*/5 * * * *` | GET `/healthz` em agents-runtime-test | pausado |
-| `ping-whatsapp-agente` | `*/5 * * * *` | GET `/healthz` em whatsapp-agente-test | **deletado** (serviço removido) |
-| `group-sync-trigger` | `0 */6 * * *` | Sincroniza membros dos grupos via Evolution API | pausado |
-| `proactive-weekly-eval` | `0 20 * * 0` | Auto-avaliacao semanal (domingo 20h BRT) | pausado |
-| `history-cleanup` | `0 3 * * *` | Limpa historico e `conversation-memory-v2` expirados ha mais de 90 dias | pausado |
-
 ## Estrutura de Diretorios
 
 ```
@@ -550,11 +530,6 @@ python scripts/check_lgpd_compliance.py
 ```
 
 Resultado do gate isolado: 316 testes aprovados (10 ignorados); zero falhas, zero erros e zero warnings; Ruff sem erros; mypy sem erros em 25 arquivos; LGPD compliance check aprovado. `cloudbuild-proactive-test.yaml` NAO referencia mais `GOOGLE_OAUTH_TOKEN`. Os 4 testes do `TestPrivacyGuard` cobrem: grupo sem confirmacao (pending_action), grupo com confirmacao (executa agent), privado (executa agent) e unregistered user (link Portal).
-
-Para deploy do `proactive-worker-test` no GCP via Cloud Scheduler:
-1. Buildar via `cloudbuild-proactive-test.yaml` no push em `test`.
-2. Provisionar Cloud Scheduler jobs: `*/15 * * * *` para `python proactive_worker/main.py --mode events`; `0 8 * * 2,5` (Tue+Fri 8h BRT) para `python proactive_worker/main.py --mode topics`.
-3. Definir `PROACTIVE_WORKER_PHONES` no Cloud Run env (CSV dos telefones elegiveis).
 
 
 ```bash

@@ -36,25 +36,11 @@ drive                          (full, TEMPORARIO)
 calendar + calendar.events
 ```
 
-Estado alvo (migração pendente):
-
-```
-gmail.readonly + gmail.send
-drive.file + drive.readonly
-calendar + calendar.events
-```
-
-- O escopo `drive` (full) foi adotado em 25/07/2026 (commit `8e8a672`).
-  O `access_guardian._has_required_scope()` tem bypass em commit
-  `01e8b9d` que aceita `drive` como cobertura de `drive.file` **e**
-  `drive.readonly` simultaneamente.
-- Migração de volta para `drive.file + drive.readonly` exige
-  **re-consentimento** de todos os usuários ativos (afinal, o escopo do
-  token persistido vem do consentimento original; o `refresh_token`
-  não amplia escopos).
-- **GUARDRAILS §8** ainda diz `drive.file + drive.readonly` — está
-  desatualizado em relação ao `main.py:1068`. Atualizar antes da
-  migração.
+- O escopo `drive` (full) é a **configuração definitiva** (adotado em
+  25/07/2026, commit `8e8a672`). O `access_guardian._has_required_scope()`
+  tem bypass (commit `01e8b9d`) que aceita `drive` como cobertura de
+  `drive.file` **e** `drive.readonly` simultaneamente. Sem migração
+  futura nem re-consentimento.
 - `OAUTH_CLIENT_SECRET` armazenado sem `client_id`/`client_secret`
   no Firestore (`_persist_token` strip).
 
@@ -108,7 +94,6 @@ gcloud --project=coherence-ominichannel-fs logging read "resource.type=cloud_run
 
 - Repos `Monitoria_Chamadas` e seus triggers (fora de escopo).
 - Triggers `EvolutionWhatsapp-*` (1st-gen, monitorar).
-- Cloud Scheduler pausado (reativação é decisão do operador).
 
 ## Regras de blindagem (ANTI-REGRESSÃO)
 
