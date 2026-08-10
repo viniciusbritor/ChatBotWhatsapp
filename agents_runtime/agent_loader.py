@@ -292,11 +292,36 @@ def get_user(phone: str) -> Optional[Dict[str, Any]]:
 
 
 def get_user_role(phone: str) -> str:
-    """Role do usuario: 'admin' ou 'agent_user' (default)."""
+    """Role do usuario: 'admin' ou 'agent_user' (default).
+
+    Owner de qualquer instancia (whatsapp_accounts.owner_phone) eh admin
+    automatico — nao depende do campo role no Firestore. Demais telefones
+    usam usuarios/{phone}.role (default 'agent_user').
+    """
+    if _is_instance_owner(phone):
+        return "admin"
     user = get_user(phone)
     if not user:
         return "agent_user"
     return "agent_user" if user.get("role") not in ("admin", "agent_user") else user["role"]
+
+
+def _is_instance_owner(phone: str) -> bool:
+    """True se ``phone`` for owner_phone de alguma instancia Evolution."""
+    digits = "".join(c for c in str(phone or "") if c.isdigit())
+    if not digits:
+        return False
+    db = _get_firestore_client()
+    if db is None:
+        return False
+    try:
+        for doc in db.collection("whatsapp_accounts").stream():
+            owner = (doc.to_dict() or {}).get("owner_phone", "") or ""
+            if "".join(c for c in str(owner) if c.isdigit()) == digits:
+                return True
+    except Exception:
+        return False
+    return False
 
 
 def _normalize_phones(phone: str) -> List[str]:
