@@ -29,45 +29,45 @@ _TEMPLATE = """<!DOCTYPE html>
 <style>
 :root {
   color-scheme: light;
-  /* Neutrals — Coherence Clean Light */
-  --bg: #f9fafb;
+  /* Palette — Coherence Clean Light (Google Stitch Spec) */
+  --bg: #f9f9ff;
   --surface: #ffffff;
-  --surface-alt: #f3f4f6;
-  --border: #eceef1;
-  --border-strong: #d8dce2;
-  --fg: #171717;
-  --fg-soft: #52525b;
-  --fg-muted: #a1a1aa;
-  /* Accents — Coherence */
-  --accent: #3b82f6;
-  --accent-hover: #2563eb;
-  --accent-soft: #eff6ff;
-  --jade: #1a6b52;
-  --amber: #b8962a;
+  --surface-alt: #f2f3fd;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --fg: #191b23;
+  --fg-soft: #424754;
+  --fg-muted: #727785;
+  /* Accents — Coherence Brand */
+  --accent: #0058be;
+  --accent-hover: #004395;
+  --accent-soft: #d8e2ff;
+  --jade: #196b52;
+  --jade-soft: #a3efcf;
+  --amber: #924700;
   /* Semantic */
   --good: #16a34a;
   --good-soft: #f0fdf4;
-  --bad: #dc2626;
-  --bad-soft: #fef2f2;
+  --bad: #ba1a1a;
+  --bad-soft: #ffdad6;
   --warn: #d97706;
   --warn-soft: #fffbeb;
-  /* Effects */
-  --shadow-sm: 0 1px 2px rgba(23, 23, 23, .04);
-  --shadow-md: 0 1px 3px rgba(23, 23, 23, .06), 0 4px 16px rgba(23, 23, 23, .06);
-  --shadow-lg: 0 12px 32px rgba(23, 23, 23, .10);
+  /* Visual Effects */
+  --shadow-sm: 0 1px 3px 0 rgba(25, 27, 35, 0.04);
+  --shadow-md: 0 4px 6px -1px rgba(25, 27, 35, 0.06), 0 2px 4px -2px rgba(25, 27, 35, 0.04);
+  --shadow-lg: 0 10px 25px -5px rgba(25, 27, 35, 0.08);
   --radius-sm: 8px;
   --radius: 12px;
-  --radius-lg: 18px;
+  --radius-lg: 16px;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter,
-               Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   background: var(--bg);
   color: var(--fg);
   font-size: 14px;
-  line-height: 1.55;
+  line-height: 1.5;
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
 }
@@ -715,14 +715,7 @@ pre.json-view {
 <main>
   <nav aria-label="Seções do módulo">
     <h2>Seções</h2>
-    <button data-tab="accounts" class="active"><span class="nav-icon">📱</span>Contas WhatsApp</button>
-    <button data-tab="agents"><span class="nav-icon">🤖</span>Agentes</button>
-    <button data-tab="skills"><span class="nav-icon">🧩</span>Skills</button>
-    <button data-tab="tools"><span class="nav-icon">🔧</span>Tools</button>
-    <button data-tab="owners"><span class="nav-icon">👤</span>Proprietários</button>
-    <button data-tab="conexoes"><span class="nav-icon">🔗</span>Conexões</button>
-    <button data-tab="knowledge"><span class="nav-icon">📚</span>Conhecimento</button>
-    <button data-tab="status"><span class="nav-icon">📊</span>Status</button>
+    __NAV__
   </nav>
   <section class="panel" id="panel" role="region" aria-live="polite">
     <div id="root"></div>
@@ -828,6 +821,7 @@ function setActive(tab) {
     case 'tools':    renderTools(root); break;
     case 'owners':   renderOwners(root); break;
     case 'conexoes': renderConexoes(root); break;
+    case 'permissoes': renderPermissoes(root); break;
     case 'knowledge':renderKnowledge(root); break;
     case 'status':   renderStatus(root); break;
   }
@@ -1175,11 +1169,25 @@ function renderConexoes(root) {
     + '<div><h2>Conexões</h2>'
     + '<div class="subtitle">Serviços que a Jennifer pode acessar por você — conecte sua conta para liberar cada funcionalidade</div></div>'
     + '</div>'
-    + '<div class="toolbar">'
-    + '<label for="conexoes-user" style="font-size:13px;color:var(--fg-soft)">Usuário:&nbsp;</label>'
-    + '<select id="conexoes-user" style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface)"></select>'
-    + '</div>'
+    + (CALLER_ROLE === 'agent_user'
+        ? ''
+        : '<div class="toolbar">'
+        + '<label for="conexoes-user" style="font-size:13px;color:var(--fg-soft)">Usuário:&nbsp;</label>'
+        + '<select id="conexoes-user" style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface)"></select>'
+        + '</div>')
     + '<div id="conexoes-body">' + skeletonList(3) + '</div>';
+
+  if (CALLER_ROLE === 'agent_user') {
+    const phone = CALLER_PHONE;
+    if (!phone) {
+      root.querySelector('#conexoes-body').innerHTML = emptyState(
+        'Telefone não identificado',
+        'Não foi possível identificar seu telefone na sessão.');
+      return;
+    }
+    loadConexoes(root, phone);
+    return;
+  }
 
   api(ENDPOINTS.users).then(data => {
     const users = (data.users || []);
@@ -1203,6 +1211,88 @@ function renderConexoes(root) {
     root.querySelector('#conexoes-body').innerHTML = emptyState(
       'Falha ao carregar usuários', e.message,
       'Tentar de novo', 'renderConexoes(document.getElementById("root"))');
+  });
+}
+
+function renderPermissoes(root) {
+  root.innerHTML =
+    '<div class="panel-header">'
+    + '<div><h2>Permissões de acesso</h2>'
+    + '<div class="subtitle">Pastas e dados que a Jennifer pode acessar na sua conta (Drive, Gmail, Agenda)</div></div>'
+    + '</div>'
+    + '<div id="permissoes-body">' + skeletonList(2) + '</div>';
+
+  const phone = CALLER_PHONE;
+  if (!phone) {
+    root.querySelector('#permissoes-body').innerHTML = emptyState(
+      'Telefone não identificado',
+      'Não foi possível identificar seu telefone na sessão.');
+    return;
+  }
+
+  api(ENDPOINTS.user + '/' + encodeURIComponent(phone) + '/folder-permissions').then(data => {
+    const perms = (data.permissions || data.folder_permissions || []);
+    const tools = [
+      { key: 'drive', name: 'Google Drive', desc: 'Pastas/arquivos' },
+      { key: 'gmail', name: 'Gmail', desc: 'Padrões de email' },
+      { key: 'calendar', name: 'Agenda', desc: 'Agendas/eventos' },
+    ];
+    const cards = perms.length
+      ? perms.map(p => (
+          '<div class="card" style="display:flex;align-items:center;justify-content:space-between">'
+          + '<div style="display:flex;align-items:center;gap:10px">'
+          + '<span style="font-size:18px">' + (p.tool === 'drive' ? '📁' : p.tool === 'gmail' ? '📧' : '📅') + '</span>'
+          + '<div><h3 style="margin:0">' + esc(p.tool) + '</h3>'
+          + '<div class="meta" style="margin:2px 0 0">' + esc(p.pattern) + ' · ' + esc(p.scope) + '</div></div></div>'
+          + '<button class="secondary" data-revoke="' + esc(p.permission_id) + '">Revogar</button>'
+          + '</div>'
+        )).join('')
+      : emptyState('Sem permissões concedidas',
+          'A Jennifer acessa seus dados com o escopo padrão do OAuth. Conceda permissões específicas de pasta quando quiser restringir.');
+
+    const form =
+      '<div class="card" style="margin-top:16px">'
+      + '<h3>Conceder permissão</h3>'
+      + '<div class="field-row" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">'
+      + '<select id="perm-tool" style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface)">'
+      + tools.map(t => '<option value="' + t.key + '">' + esc(t.name) + '</option>').join('')
+      + '</select>'
+      + '<input id="perm-pattern" placeholder="pattern (pasta id, email, *)" style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);flex:1;min-width:180px">'
+      + '<select id="perm-scope" style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface)">'
+      + '<option value="whitelist">whitelist</option><option value="blacklist">blacklist</option>'
+      + '</select>'
+      + '<button class="primary" id="perm-grant">Conceder</button>'
+      + '</div></div>';
+
+    root.querySelector('#permissoes-body').innerHTML = cards + form;
+
+    const grantBtn = root.querySelector('#perm-grant');
+    if (grantBtn) {
+      grantBtn.addEventListener('click', () => {
+        const tool = root.querySelector('#perm-tool').value;
+        const pattern = root.querySelector('#perm-pattern').value.trim();
+        const scope = root.querySelector('#perm-scope').value;
+        if (!pattern) { toast('Informe um pattern', 'error'); return; }
+        api(ENDPOINTS.user + '/' + encodeURIComponent(phone) + '/folder-permissions', {
+          method: 'POST',
+          body: JSON.stringify({ tool: tool, pattern: pattern, scope: scope, created_by: phone }),
+        }).then(() => { toast('Permissão concedida'); renderPermissoes(root); })
+          .catch(e => toast('Erro: ' + e.message, 'error'));
+      });
+    }
+    root.querySelectorAll('[data-revoke]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const pid = btn.dataset.revoke;
+        api(ENDPOINTS.user + '/' + encodeURIComponent(phone) + '/folder-permissions/' + encodeURIComponent(pid), {
+          method: 'DELETE',
+        }).then(() => { toast('Permissão revogada'); renderPermissoes(root); })
+          .catch(e => toast('Erro: ' + e.message, 'error'));
+      });
+    });
+  }).catch(e => {
+    root.querySelector('#permissoes-body').innerHTML = emptyState(
+      'Falha ao carregar permissões', e.message,
+      'Tentar de novo', 'renderPermissoes(document.getElementById("root"))');
   });
 }
 
@@ -1429,6 +1519,8 @@ function renderStatus(root) {
 }
 
 /* ---- boot ---- */
+const CALLER_ROLE = '__ROLE__';
+const CALLER_PHONE = '__CALLER_PHONE__';
 (async () => {
   try {
     const s = await api(ENDPOINTS.status);
@@ -1453,23 +1545,52 @@ function renderStatus(root) {
 document.querySelectorAll('nav button').forEach(btn =>
   btn.addEventListener('click', () => setActive(btn.dataset.tab))
 );
-setActive('accounts');
+setActive(CALLER_ROLE === 'agent_user' ? 'conexoes' : 'accounts');
 </script>
 </body>
 </html>
 """
 
 
-def render_dashboard(commit: str, deployed_at: str) -> str:
+def render_dashboard(commit: str, deployed_at: str, role: str = "admin") -> str:
+    role = role if role in ("admin", "agent_user") else "admin"
+    nav_html = (
+        _NAV_ADMIN
+        if role == "admin"
+        else _NAV_AGENT_USER
+    )
     payload = {
         "commit": html.escape(commit or "local"),
         "deployed": html.escape(deployed_at or "-"),
+        "role": role,
+        "caller_phone": html.escape(""),
     }
     return (
         _TEMPLATE
         .replace("__COMMIT__", payload["commit"])
         .replace("__DEPLOYED__", payload["deployed"])
+        .replace("__NAV__", nav_html)
+        .replace("__ROLE__", payload["role"])
+        .replace("__CALLER_PHONE__", payload["caller_phone"])
     )
+
+
+_NAV_ADMIN = (
+    '<button data-tab="accounts" class="active"><span class="nav-icon">📱</span>Contas WhatsApp</button>\n'
+    '    <button data-tab="agents"><span class="nav-icon">🤖</span>Agentes</button>\n'
+    '    <button data-tab="skills"><span class="nav-icon">🧩</span>Skills</button>\n'
+    '    <button data-tab="tools"><span class="nav-icon">🔧</span>Tools</button>\n'
+    '    <button data-tab="owners"><span class="nav-icon">👤</span>Proprietários</button>\n'
+    '    <button data-tab="conexoes"><span class="nav-icon">🔗</span>Conexões</button>\n'
+    '    <button data-tab="knowledge"><span class="nav-icon">📚</span>Conhecimento</button>\n'
+    '    <button data-tab="status"><span class="nav-icon">📊</span>Status</button>'
+)
+
+_NAV_AGENT_USER = (
+    '<button data-tab="conexoes" class="active"><span class="nav-icon">🔗</span>Conexões</button>\n'
+    '    <button data-tab="permissoes"><span class="nav-icon">🔑</span>Permissões</button>\n'
+    '    <button data-tab="status"><span class="nav-icon">📊</span>Status</button>'
+)
 
 
 __all__ = ["render_dashboard"]
