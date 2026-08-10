@@ -726,15 +726,43 @@ def _authorise_admin(request: Request) -> bool:
     return False
 
 
+def _caller_role(request: Request) -> tuple:
+    """Retorna (role, phone) do caller. SA token = admin."""
+    from core.auth import resolve_caller
+
+    return resolve_caller(request)
+
+
+def _require_admin(request: Request) -> None:
+    """Raise 403 se o caller nao for admin."""
+    role, _ = _caller_role(request)
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="admin_required")
+
+
+def _require_self_or_admin(request: Request, phone: str) -> None:
+    """Raise 403 se agent_user tentar acessar recurso de outro phone."""
+    role, caller_phone = _caller_role(request)
+    if role == "admin":
+        return
+    if role == "":
+        raise HTTPException(status_code=403, detail="auth_required")
+    target = "".join(c for c in str(phone or "") if c.isdigit())
+    if not caller_phone or target != caller_phone:
+        raise HTTPException(status_code=403, detail="forbidden_resource")
+
+
 @app.get("/admin/dashboard")
 async def admin_dashboard(request: Request):
     """Render the Agentes Omnichannel control plane."""
+    from core.auth import resolve_caller
     from core.module_ui import render_dashboard
 
     token = _bearer_token(request)
     if not token:
         token = request.query_params.get("token", "")
-    response = HTMLResponse(content=render_dashboard(COMMIT_SHA, DEPLOYED_AT))
+    role, caller_phone = resolve_caller(request)
+    response = HTMLResponse(content=render_dashboard(COMMIT_SHA, DEPLOYED_AT, role=role or "admin", caller_phone=caller_phone))
     # Anti-cache headers para Portal sempre servir versao nova
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
@@ -747,7 +775,7 @@ async def admin_dashboard(request: Request):
 @app.get("/admin/evolution/health")
 async def admin_evolution_health():
     """Health-check da integracao Evolution admin: lista instancias + estado."""
-    from core.evolution_admin import fetch_instances, get_connection_state
+    from core.evolution_admin import fetch_instances
 
     instances = await fetch_instances()
     summary = []
@@ -804,10 +832,11 @@ async def admin_cache_invalidate(request: Request):
 
 
 @app.get("/admin/status")
-async def admin_status():
+async def admin_status(request: Request):
     from core.audio_transcribe import fallback_stats
     from core.agent_status import build_agent_inventory
 
+    role, _ = _caller_role(request)
     api_key_set = False
     try:
         from core.llm_provider import LLMProvider
@@ -831,7 +860,7 @@ async def admin_status():
         {"label": "agents_healthy", "value": counts.get("healthy", 0), "sub": f"{counts.get('degraded', 0)} degradados"},
         {"label": "in_flight", "value": counts.get("in_flight", 0), "sub": "execucoes em andamento"},
     ]
-    return JSONResponse(content={
+    payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "runtime_ok": health_state == "ok" and api_key_set,
         "health_state": health_state,
@@ -845,15 +874,18 @@ async def admin_status():
             "note": "Fase N (25/07/2026) removeu o cascade MiniMax/Gemini para LLM. Apenas DeepSeek V4 Flash atende chat/completions+tool_calls.",
         },
         "stt": fallback_stats(),
-        "agents_summary": {
+    }
+    if role == "admin":
+        payload["agents_summary"] = {
             "counts": counts,
             "generated_at": inventory.get("generated_at"),
-        },
-    })
+        }
+    return JSONResponse(content=payload)
 
 
 @app.get("/admin/accounts")
-async def admin_accounts_list():
+async def admin_accounts_list(request: Request):
+    _require_admin(request)
     from agent_loader import _get_firestore_client
 
     db = _get_firestore_client()
@@ -1164,6 +1196,11 @@ async def admin_register_user(request: Request):
     phone = body.get("phone")
     if not phone:
         raise HTTPException(status_code=422, detail="phone required")
+    role, _ = _caller_role(request)
+    if role == "agent_user":
+        _require_self_or_admin(request, phone)
+    if "role" in body and body["role"] == "admin" and role != "admin":
+        raise HTTPException(status_code=403, detail="admin_required")
     success = save_user(phone, body)
     return JSONResponse(content={
         "status": "ok" if success else "error",
@@ -1173,14 +1210,16 @@ async def admin_register_user(request: Request):
 
 
 @app.get("/admin/users")
-async def admin_users_list():
-    """List all registered users."""
+async def admin_users_list(request: Request):
+    """List all registered users (admin only)."""
+    _require_admin(request)
     return JSONResponse(content={"users": list_users()})
 
 
 @app.get("/admin/users/{phone}")
-async def admin_users_get(phone: str):
-    """Get a specific user."""
+async def admin_users_get(phone: str, request: Request):
+    """Get a specific user (self or admin)."""
+    _require_self_or_admin(request, phone)
     user = get_user(phone)
     if not user:
         raise HTTPException(status_code=404, detail="user_not_found")
@@ -1200,6 +1239,7 @@ async def admin_users_folder_permissions_grant(phone: str, request: Request):
     Permissoes sao armazenadas em
     usuarios/{phone}/folder_permissions/{permission_id}.
     """
+    _require_self_or_admin(request, phone)
     from core.folder_permissions import grant_folder_permission
 
     body = await request.json()
@@ -1229,8 +1269,9 @@ async def admin_users_folder_permissions_grant(phone: str, request: Request):
 
 
 @app.get("/admin/users/{phone}/folder-permissions")
-async def admin_users_folder_permissions_list(phone: str):
+async def admin_users_folder_permissions_list(phone: str, request: Request):
     """Lista todas as permissoes do user."""
+    _require_self_or_admin(request, phone)
     from core.folder_permissions import list_folder_permissions
 
     return JSONResponse(
@@ -1239,8 +1280,9 @@ async def admin_users_folder_permissions_list(phone: str):
 
 
 @app.delete("/admin/users/{phone}/folder-permissions/{permission_id}")
-async def admin_users_folder_permissions_revoke(phone: str, permission_id: str):
+async def admin_users_folder_permissions_revoke(phone: str, permission_id: str, request: Request):
     """Revoga permissao por ID."""
+    _require_self_or_admin(request, phone)
     from core.folder_permissions import revoke_folder_permission
 
     ok = revoke_folder_permission(phone, permission_id)
@@ -1369,10 +1411,11 @@ async def admin_cache_stats():
 
 
 @app.get("/api/v1/composio/status")
-async def composio_status(phone: str = ""):
+async def composio_status(request: Request, phone: str = ""):
     """Retorna status de conexao de todos os auth configs do usuario."""
     if not phone:
         return JSONResponse({"error": "phone required"}, status_code=400)
+    _require_self_or_admin(request, phone)
     from tools.composio_connect import get_status
     result = await get_status(phone)
     return JSONResponse(content=result)
@@ -1388,6 +1431,7 @@ async def composio_connect_all(request: Request):
     phone = (body.get("phone") or "").strip()
     if not phone:
         return JSONResponse({"error": "phone required"}, status_code=400)
+    _require_self_or_admin(request, phone)
     from tools.composio_connect import connect_all
     result = await connect_all(phone)
     return JSONResponse(content=result)
@@ -1396,6 +1440,7 @@ async def composio_connect_all(request: Request):
 @app.post("/api/v1/composio/authorize-owner")
 async def composio_authorize_owner(request: Request):
     """Gera Connect Links para TODOS os 12 auth configs (owner)."""
+    _require_admin(request)
     try:
         body = await request.json()
     except Exception:
@@ -1422,12 +1467,13 @@ async def composio_authorize(request: Request):
     phone = (body.get("phone") or "").strip()
     if not phone:
         return JSONResponse({"error": "phone required"}, status_code=400)
+    _require_self_or_admin(request, phone)
     toolkit = (body.get("toolkit") or "").strip()
     from tools.composio_connect import connect_all
     result = await connect_all(phone, toolkit=toolkit)
     if toolkit:
         links = result.get("links", [])
-        result["links"] = [l for l in links if l.get("toolkit") == toolkit]
+        result["links"] = [item for item in links if item.get("toolkit") == toolkit]
     return JSONResponse(content=result)
 
 
