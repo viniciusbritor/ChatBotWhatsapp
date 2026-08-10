@@ -12,6 +12,7 @@ from typing import Dict, Any, Callable, Awaitable
 
 from tools import google_calendar, google_drive, google_gmail, web_search, nickname
 from tools import locomotion, youtube, group, correction, chat_history
+from tools import memory
 
 logger = logging.getLogger(__name__)
 
@@ -1127,6 +1128,77 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
                 "limit": {"type": "integer", "description": "Numero de turnos (default 10)"},
             },
             "required": ["phone"],
+        },
+    },
+    "memory.save_fact": {
+        "function": memory.save_fact,
+        "implementation": "memory",
+        "description": (
+            "Salva um fato pessoal do usuario de forma persistente (endereco, nome de "
+            "pessoa, preferencia, data importante, relacionamento). Use SEMPRE que o "
+            "usuario compartilhar uma informacao pessoal que voce deve lembrar no futuro. "
+            "Fatos NAO expiram e sao injetados automaticamente nas proximas conversas."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string", "description": "Telefone do usuario"},
+                "key": {"type": "string", "description": "Identificador curto do fato, ex: 'endereco_casa', 'nome_do_rafa'"},
+                "value": {"type": "string", "description": "Valor do fato, ex: 'Av. Portugal, 401, Brooklin, SP'"},
+                "category": {"type": "string", "description": "Categoria opcional: endereco, contato, preferencia, data, outro"},
+            },
+            "required": ["phone", "key", "value"],
+        },
+    },
+    "memory.search_facts": {
+        "function": memory.search_facts,
+        "implementation": "memory",
+        "description": (
+            "Busca fatos salvos do usuario por palavra-chave ou categoria. "
+            "Use SEMPRE antes de responder perguntas sobre dados pessoais do usuario "
+            "(endereco, onde mora alguem, nomes, preferencias, contatos)."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string", "description": "Telefone do usuario"},
+                "query": {"type": "string", "description": "Palavra-chave do fato, ex: 'endereco', 'casa', 'rafa'"},
+                "category": {"type": "string", "description": "Filtrar por categoria opcional"},
+                "limit": {"type": "integer", "description": "Maximo de resultados (default 10)"},
+            },
+            "required": ["phone"],
+        },
+    },
+    "memory.list_facts": {
+        "function": memory.list_facts,
+        "implementation": "memory",
+        "description": (
+            "Lista todos os fatos salvos do usuario. Use quando o usuario perguntar "
+            "'o que voce sabe sobre mim' ou para revisar o que esta memorizado."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string", "description": "Telefone do usuario"},
+                "limit": {"type": "integer", "description": "Maximo de resultados (default 20)"},
+            },
+            "required": ["phone"],
+        },
+    },
+    "memory.delete_fact": {
+        "function": memory.delete_fact,
+        "implementation": "memory",
+        "description": (
+            "Remove um fato salvo do usuario. Use quando o usuario pedir para esquecer "
+            "ou corrigir uma informacao pessoal."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string", "description": "Telefone do usuario"},
+                "key": {"type": "string", "description": "Identificador do fato a remover, ex: 'endereco_casa'"},
+            },
+            "required": ["phone", "key"],
         },
     },
     "linkedin.post": {

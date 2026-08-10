@@ -1,5 +1,42 @@
 # Diario de Bordo — ChatBotWhatsapp
 
+## 10/08/2026 (03:30 BRT) — Memory de Fatos estruturados (Plano B)
+
+### Problema
+Jennifer esqueceu enderecos entre 08/08 e 09/08: no dia 08 sabia
+("Av. Portugal 401 -> Rua Macaia Mirim 89" e calculou Uber), no dia 09
+respondeu "nunca tive seu endereco salvo".
+
+### Causa Raiz (estrutural)
+1. Sem persistencia estruturada de fatos — enderecos eram so texto cru no
+   `message-history` (truncado a 80 chars por turno na injecao)
+2. Janela de 10 turnos: fatos antigos saiam do [HISTORICO RECENTE]
+3. `chat_history.search` usa substring matching (nao semantico) e o LLM so
+   busca quando o user diz "lembra?"
+
+### Solucao (Plano B — fatos estruturados)
+- `tools/memory.py` (novo): `save_fact`, `search_facts`, `list_facts`,
+  `delete_fact` em `usuarios/{phone}/facts/{key}`
+- `tool_registry.py`: 4 tools `memory.*` registradas
+- `orchestrator.py`: injeta `[FATOS DO USUARIO - NAO pergunte novamente]`
+  automaticamente no system prompt (limit 30)
+- `jennifier.yaml`: tools memory.* + secao 6 no prompt (quando salvar,
+  buscar antes de responder, corrigir com delete+save)
+
+### Tambem corrigido (P1 — Portal Conexoes)
+- `module_ui.py:1220`: `((userData && ...).google_oauth_token)` crashava com
+  TypeError quando user 404 (userData=null). Fix: `(userData && ((...).google_oauth_token))`
+
+### Validacao
+- Tools memory: save/search/list/delete OK contra Firestore real (GCP_PROJECT setado)
+- Enderecos reais semeados: endereco_casa (Av. Portugal 401) + endereco_rafa (Rua Macaia Mirim 89)
+- pytest test_memory_tools: 7 passed
+- pytest test_composio + module_ui + portal_loading: 25 passed
+- JS node --check ALL OK
+- `main` importa sem erro
+
+---
+
 ## 10/08/2026 (02:30 BRT) — Fix Portal: timeout ao conectar app Composio
 
 ### Problema

@@ -1217,7 +1217,7 @@ function loadConexoes(root, phone) {
     api(ENDPOINTS.user(phone)).catch(() => null),
     api(ENDPOINTS.composioStatus(phone)).catch(() => null),
   ]).then(([userData, composioData]) => {
-    const google = ((userData && (userData.user || userData)).google_oauth_token) || null;
+    const google = (userData && ((userData.user || userData).google_oauth_token)) || null;
     const hasGoogle = !!(google && google.token);
     const compApps = (composioData && composioData.apps) || {};
 

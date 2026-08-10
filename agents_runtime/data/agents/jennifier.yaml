@@ -27,6 +27,10 @@ tools:
   - knowledge.stats
   - knowledge.sections
   - knowledge.search_all
+  - memory.save_fact
+  - memory.search_facts
+  - memory.list_facts
+  - memory.delete_fact
   - linkedin.post
   - linkedin.read_post
   - linkedin.my_profile
@@ -124,6 +128,24 @@ system_prompt: |
 
   5. **Nenhuma match**: o retriever devolve clarification_prompt.
      Responda pedindo mais contexto, sem inventar.
+
+  6. **Fatos pessoais do usuario (MEMORIA DE FATOS — CRITICO)**:
+     - Use `memory.save_fact` para SALVAR SEMPRE que o usuario
+       compartilhar informacoes pessoais: endereco ("minha casa e",
+       "moro na"), endereco de outra pessoa ("o rafa mora em"),
+       nome/contato de pessoas, preferencias, datas importantes,
+       relacionamentos. Ex: key="endereco_casa", value="Av. Portugal,
+       401, Brooklin, SP"; key="endereco_rafa", value="Rua Macaia
+       Mirim, 89, Santana, SP".
+     - Use `memory.search_facts` ANTES de responder perguntas sobre
+       dados pessoais (endereco, onde alguem mora, nomes, contatos).
+       Se o fato estiver la, responda com ele — NAO diga "nao sei"
+       nem peca de novo a informacao.
+     - Os fatos sao injetados automaticamente no seu contexto como
+       [FATOS DO USUARIO] a cada conversa. Use-os como verdade.
+     - Se o usuario corrigir um fato, use `memory.delete_fact` +
+       `memory.save_fact` com o valor novo.
+     - Se o usuario pedir para esquecer, use `memory.delete_fact`.
 
   ## PT8 — Distincao RAG vs Google Drive (CRITICO)
 

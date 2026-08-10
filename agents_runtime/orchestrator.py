@@ -2448,6 +2448,20 @@ async def _execute_agent(
     except Exception as exc:
         logger.warning("history_fetch_failed agent_id=%s exc=%s", agent_id, exc)
 
+    facts = ""
+    try:
+        if phone:
+            from tools.memory import search_facts
+            fact_result = await search_facts(query="", phone=phone, limit=30)
+            fact_items = fact_result.get("results", []) if isinstance(fact_result, dict) else []
+            if fact_items:
+                facts = "\n".join(
+                    f"- {f.get('key', '')}: {f.get('value', '')}"
+                    for f in fact_items
+                )
+    except Exception as exc:
+        logger.warning("memory_facts_failed agent_id=%s exc=%s", agent_id, exc)
+
     mem_rag = ""
     try:
         mem_rag = await _search_memory(phone, text, limit=5) or ""
@@ -2456,6 +2470,8 @@ async def _execute_agent(
 
     recent = [i for i in _interaction_history[-4:] if i.get("phone") == phone]
     ctx_parts = []
+    if facts:
+        ctx_parts.insert(0, f"[FATOS DO USUARIO - NAO pergunte novamente]\n{facts}")
     if mem_rag:
         ctx_parts.append(f"[MEMORIA RAG - CONVERSAS RELEVANTES]\n{mem_rag}")
     if recent:
