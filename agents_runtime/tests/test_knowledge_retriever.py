@@ -201,6 +201,14 @@ class TestRetrievalCache:
         with patch(
             "agent_orchestration.knowledge_retriever.search_legal_knowledge",
             mock,
+        ), patch(
+            "agent_orchestration.knowledge_retriever._llm_enrich_query",
+            AsyncMock(return_value={
+                "enriched_query": "query A", "source_hint": "", "class_hint": "",
+            }),
+        ), patch(
+            "agent_orchestration.knowledge_retriever._match_source_title_dynamic",
+            AsyncMock(return_value=None),
         ):
             await retrieve(envelope, "query A")
             await retrieve(envelope, "query B")
