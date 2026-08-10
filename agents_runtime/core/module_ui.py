@@ -1192,8 +1192,9 @@ function renderConexoes(root) {
     const sel = root.querySelector('#conexoes-user');
     users.forEach(u => {
       const opt = document.createElement('option');
-      opt.value = u.phone || '';
-      opt.textContent = '+' + (u.phone || '?');
+      const p = u.phone_canonical || u.phone || '';
+      opt.value = p;
+      opt.textContent = '+' + p;
       sel.appendChild(opt);
     });
     sel.addEventListener('change', () => loadConexoes(root, sel.value));
