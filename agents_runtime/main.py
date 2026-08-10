@@ -744,6 +744,24 @@ async def admin_dashboard(request: Request):
     return response
 
 
+@app.get("/admin/evolution/health")
+async def admin_evolution_health():
+    """Health-check da integracao Evolution admin: lista instancias + estado."""
+    from core.evolution_admin import fetch_instances, get_connection_state
+
+    instances = await fetch_instances()
+    summary = []
+    for inst in instances:
+        name = inst.get("name", "?")
+        state = inst.get("connectionStatus") or inst.get("state") or "unknown"
+        summary.append({"instance": name, "state": state})
+    return JSONResponse(content={
+        "connected": True,
+        "instances": summary,
+        "total": len(summary),
+    })
+
+
 @app.get("/admin/ping")
 async def admin_ping():
     """Health-check rapido para o Portal e Cloud Scheduler warm-up.
