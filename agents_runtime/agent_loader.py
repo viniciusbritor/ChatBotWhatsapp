@@ -291,6 +291,14 @@ def get_user(phone: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def get_user_role(phone: str) -> str:
+    """Role do usuario: 'admin' ou 'agent_user' (default)."""
+    user = get_user(phone)
+    if not user:
+        return "agent_user"
+    return "agent_user" if user.get("role") not in ("admin", "agent_user") else user["role"]
+
+
 def _normalize_phones(phone: str) -> List[str]:
     """Gera variacoes de formato de telefone para busca robusta."""
     candidates = []
