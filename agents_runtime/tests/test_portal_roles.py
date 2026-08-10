@@ -149,3 +149,66 @@ class TestRenderDashboardRoles:
         assert 'data-tab="permissoes"' in html
         assert 'data-tab="agents"' not in html
         assert "5511888888888" in html
+
+
+class TestAdminWhitelist:
+    """Whitelist config/admins: email e UID do admin."""
+
+    def _patch_admins(self, emails=None, uids=None):
+        from unittest.mock import patch
+
+        return patch(
+            "agent_loader._get_admins_config",
+            return_value={
+                "admin_emails": emails or ["viniciusbritor@gmail.com"],
+                "admin_uids": uids or [],
+            },
+        )
+
+    def test_admin_email_in_whitelist(self):
+        from agent_loader import get_user_role
+
+        with self._patch_admins():
+            with patch("agent_loader._is_instance_owner", return_value=False):
+                with patch("agent_loader.get_user", return_value=None):
+                    assert get_user_role("viniciusbritor@gmail.com") == "admin"
+
+    def test_non_admin_email_is_agent_user(self):
+        from agent_loader import get_user_role
+
+        with self._patch_admins():
+            with patch("agent_loader._is_instance_owner", return_value=False):
+                with patch("agent_loader.get_user", return_value=None):
+                    assert get_user_role("ana@company.com") == "agent_user"
+
+    def test_admin_email_case_insensitive(self):
+        from agent_loader import get_user_role
+
+        with self._patch_admins():
+            with patch("agent_loader._is_instance_owner", return_value=False):
+                with patch("agent_loader.get_user", return_value=None):
+                    assert get_user_role("VINICIUSBRITOR@GMAIL.COM") == "admin"
+
+    def test_admin_uid_in_whitelist(self):
+        from agent_loader import get_user_role
+
+        with self._patch_admins(uids=["o9ztuVhozgRIp3lGzyWdkw6G9JD3"]):
+            with patch("agent_loader._is_instance_owner", return_value=False):
+                with patch("agent_loader.get_user", return_value=None):
+                    assert get_user_role("o9ztuVhozgRIp3lGzyWdkw6G9JD3") == "admin"
+
+    def test_owner_phone_still_admin_without_whitelist(self):
+        """Owner check continua funcionando mesmo com whitelist vazia."""
+        from agent_loader import get_user_role
+
+        with patch("agent_loader._is_instance_owner", return_value=True):
+            assert get_user_role("5511966830020") == "admin"
+
+    def test_missing_config_falls_back_to_agent_user(self):
+        """Se config/admins nao existir, email desconhecido -> agent_user."""
+        from agent_loader import get_user_role
+
+        with patch("agent_loader._get_admins_config", return_value={"admin_emails": [], "admin_uids": []}):
+            with patch("agent_loader._is_instance_owner", return_value=False):
+                with patch("agent_loader.get_user", return_value=None):
+                    assert get_user_role("ana@company.com") == "agent_user"

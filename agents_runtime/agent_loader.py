@@ -291,19 +291,65 @@ def get_user(phone: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def get_user_role(phone: str) -> str:
+def get_user_role(identifier: str) -> str:
     """Role do usuario: 'admin' ou 'agent_user' (default).
 
-    Owner de qualquer instancia (whatsapp_accounts.owner_phone) eh admin
-    automatico — nao depende do campo role no Firestore. Demais telefones
-    usam usuarios/{phone}.role (default 'agent_user').
+    Ordem de resolucao:
+    1. Owner de instancia (whatsapp_accounts.owner_phone) -> admin.
+    2. Email/UID na whitelist config/admins -> admin.
+    3. Role explicito em usuarios/{identifier}.role.
+    4. Default seguro: agent_user.
     """
-    if _is_instance_owner(phone):
+    if _is_instance_owner(identifier):
         return "admin"
-    user = get_user(phone)
+    if _is_admin_email(identifier):
+        return "admin"
+    if _is_admin_uid(identifier):
+        return "admin"
+    user = get_user(identifier)
     if not user:
         return "agent_user"
     return "agent_user" if user.get("role") not in ("admin", "agent_user") else user["role"]
+
+
+def _is_admin_email(identifier: str) -> bool:
+    """True se ``identifier`` for um email na whitelist config/admins."""
+    value = str(identifier or "").strip().lower()
+    if not value or "@" not in value:
+        return False
+    admins = _get_admins_config()
+    return value in {e.strip().lower() for e in admins.get("admin_emails", []) if e}
+
+
+def _is_admin_uid(identifier: str) -> bool:
+    """True se ``identifier`` for um Firebase UID na whitelist config/admins."""
+    value = str(identifier or "").strip()
+    if not value:
+        return False
+    admins = _get_admins_config()
+    return value in {u.strip() for u in admins.get("admin_uids", []) if u}
+
+
+def _get_admins_config() -> Dict[str, Any]:
+    """Le config/admins do Firestore (com cache in-process de 60s)."""
+    cached = getattr(_get_admins_config, "_cache", None)
+    if cached and cached[1] > time.time() - 60:
+        return cached[0]
+    result = {"admin_emails": [], "admin_uids": []}
+    db = _get_firestore_client()
+    if db is not None:
+        try:
+            doc = db.collection("config").document("admins").get()
+            if doc.exists:
+                data = doc.to_dict() or {}
+                result = {
+                    "admin_emails": data.get("admin_emails") or [],
+                    "admin_uids": data.get("admin_uids") or [],
+                }
+        except Exception:
+            pass
+    _get_admins_config._cache = (result, time.time())  # type: ignore[attr-defined]
+    return result
 
 
 def _is_instance_owner(phone: str) -> bool:
