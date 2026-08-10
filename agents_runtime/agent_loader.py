@@ -349,13 +349,42 @@ def save_user(phone: str, data: Dict[str, Any]) -> bool:
         return False
 
 
+def _canonical_phone(phone: str) -> str:
+    """Canonicaliza phone para E.164 BR: '55' + 11 digitos.
+
+    Aceita +5511966830020, 55119966830020, 11966830020, 119966830020
+    → sempre retorna 5511966830020 (ou o primeiro formato valido com 55).
+    """
+    digits = "".join(c for c in str(phone or "") if c.isdigit())
+    if len(digits) == 12 and digits.startswith("55"):
+        return digits  # já é 55 + 11
+    if len(digits) == 11:
+        return "55" + digits
+    if len(digits) == 10:
+        return "55" + digits
+    return digits
+
+
 def list_users() -> List[Dict[str, Any]]:
-    """List all registered users."""
+    """List all registered users, deduplicated by canonical phone."""
     db = _get_firestore_client()
     if db is None:
         return []
     try:
-        return [doc.to_dict() for doc in db.collection("usuarios").stream()]
+        seen: Dict[str, Dict[str, Any]] = {}
+        for doc in db.collection("usuarios").stream():
+            data = doc.to_dict() or {}
+            phone = data.get("phone") or doc.id or ""
+            canonical = _canonical_phone(phone)
+            # Prefere o doc com google_oauth_token (mais completo)
+            prev = seen.get(canonical)
+            if prev is None or (not prev.get("google_oauth_token") and data.get("google_oauth_token")):
+                merged = dict(prev or {})
+                merged.update({k: v for k, v in data.items() if v})
+                merged["phone"] = canonical
+                merged["phone_canonical"] = canonical
+                seen[canonical] = merged
+        return list(seen.values())
     except Exception as e:
         logger.error(f"Failed to list users: {e}")
         return []
