@@ -67,9 +67,13 @@ def resolve_caller(request) -> tuple:
     """Resolve (role, phone) do caller autenticado.
 
     - SA token (Bearer) -> ("admin", "").
-    - Firebase JWT -> role de ``usuarios/{phone}.role`` (default
-      "agent_user"), phone extraido do claim ``phone_number``.
-    - Nenhum token valido -> ("", "").
+    - Firebase JWT -> phone em 3 fontes, na ordem:
+        1. claim ``phone_number`` (custom claim setado pelo Portal).
+        2. lookup Firestore por ``email`` (usuarios/{phone}.email).
+        3. lookup Firestore por ``sub`` (usuarios/{phone}.firebase_uid).
+      Role resolvida via get_user_role(phone).
+    - JWT sem phone mas email/UID admin (config/admins) -> ("admin", "").
+    - Nenhum identificador -> ("agent_user", "") — seguro.
     """
     token = ""
     auth_header = request.headers.get("Authorization", "")
@@ -89,17 +93,35 @@ def resolve_caller(request) -> tuple:
     claims = _firebase_claims(token)
     if not claims:
         return "", ""
+
+    from agent_loader import get_user_role
+
     raw_phone = claims.get("phone_number", "") or ""
     phone = "".join(c for c in str(raw_phone) if c.isdigit())
-    if not phone:
-        return "admin", ""
-    try:
-        from agent_loader import get_user_role
+    email = str(claims.get("email", "") or "").strip().lower()
+    uid = str(claims.get("sub", "") or claims.get("user_id", "") or "").strip()
 
-        role = get_user_role(phone)
-    except Exception:
-        role = "agent_user"
-    return role, phone
+    if not phone and email:
+        from agent_loader import lookup_phone_by_email
+
+        phone = lookup_phone_by_email(email)
+    if not phone and uid:
+        from agent_loader import lookup_phone_by_uid
+
+        phone = lookup_phone_by_uid(uid)
+
+    if phone:
+        try:
+            role = get_user_role(phone)
+        except Exception:
+            role = "agent_user"
+        return role, phone
+
+    if email and get_user_role(email) == "admin":
+        return "admin", ""
+    if uid and get_user_role(uid) == "admin":
+        return "admin", ""
+    return "agent_user", ""
 
 
 AGENT_USER_ALLOWED_PREFIXES = (

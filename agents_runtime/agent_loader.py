@@ -352,6 +352,49 @@ def _get_admins_config() -> Dict[str, Any]:
     return result
 
 
+def lookup_phone_by_email(email: str) -> str:
+    """Encontra o phone do usuario que tem ``email`` vinculado.
+
+    Varre usuarios/{phone} procurando doc com campo ``email``
+    (setado pelo Portal no cadastro ou pela Jennifer no onboarding).
+    Retorna o doc id (phone) ou "" se nao encontrar.
+    """
+    value = str(email or "").strip().lower()
+    if not value or "@" not in value:
+        return ""
+    db = _get_firestore_client()
+    if db is None:
+        return ""
+    try:
+        for doc in db.collection("usuarios").stream():
+            data = doc.to_dict() or {}
+            doc_email = str(data.get("email", "") or "").strip().lower()
+            if doc_email == value:
+                return doc.id
+    except Exception:
+        return ""
+    return ""
+
+
+def lookup_phone_by_uid(uid: str) -> str:
+    """Encontra o phone do usuario que tem ``firebase_uid`` vinculado."""
+    value = str(uid or "").strip()
+    if not value:
+        return ""
+    db = _get_firestore_client()
+    if db is None:
+        return ""
+    try:
+        for doc in db.collection("usuarios").stream():
+            data = doc.to_dict() or {}
+            doc_uid = str(data.get("firebase_uid", "") or "").strip()
+            if doc_uid == value:
+                return doc.id
+    except Exception:
+        return ""
+    return ""
+
+
 def _is_instance_owner(phone: str) -> bool:
     """True se ``phone`` for owner_phone de alguma instancia Evolution."""
     digits = "".join(c for c in str(phone or "") if c.isdigit())

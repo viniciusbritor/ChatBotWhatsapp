@@ -85,22 +85,115 @@ class TestResolveCaller:
         assert role == "admin"
         assert phone == ""
 
-    def test_firebase_jwt_without_phone_is_admin(self):
-        """JWT valido sem phone_number -> admin (Portal Coherence)."""
+
+class TestResolveCallerHybrid:
+    """resolve_caller hibrido: phone_number claim -> email lookup -> uid lookup."""
+
+    def _request(self, claims):
         from core.auth import resolve_caller
 
-        with patch("core.auth.get_sa_token", return_value="different-token"):
-            with patch(
-                "core.auth._firebase_claims",
-                return_value={"sub": "abc", "email": "user@example.com"},
-            ):
+        with patch("core.auth.get_sa_token", return_value="sa-token"):
+            with patch("core.auth._firebase_claims", return_value=claims):
                 request = MagicMock()
-                request.headers = {"Authorization": "Bearer firebase-jwt"}
+                request.headers = {"Authorization": "Bearer jwt"}
                 request.query_params = {}
                 request.cookies = {}
-                role, phone = resolve_caller(request)
+                return resolve_caller(request)
+
+    def test_phone_claim_wins(self):
+        """Claim phone_number tem prioridade sobre lookup."""
+        role, phone = self._request({"sub": "uid1", "email": "ana@company.com", "phone_number": "+5511888888888"})
+        assert phone == "5511888888888"
+        assert role == "agent_user"
+
+    def test_email_lookup_finds_phone(self):
+        """Sem phone no claim, busca usuarios/* pelo email."""
+        with patch("agent_loader.lookup_phone_by_email", return_value="5511777777777"):
+            with patch("agent_loader.get_user_role", return_value="agent_user"):
+                role, phone = self._request({"sub": "uid1", "email": "ana@company.com"})
+        assert phone == "5511777777777"
+        assert role == "agent_user"
+
+    def test_admin_email_without_phone_is_admin(self):
+        """Email admin na whitelist, sem phone vinculado -> admin."""
+        with patch("agent_loader.lookup_phone_by_email", return_value=""):
+            with patch("agent_loader.get_user_role", side_effect=lambda x: "admin" if "@" in x else "agent_user"):
+                role, phone = self._request({"sub": "uid1", "email": "viniciusbritor@gmail.com"})
         assert role == "admin"
         assert phone == ""
+
+    def test_unknown_email_is_agent_user(self):
+        """Email desconhecido e sem phone vinculado -> agent_user (seguro)."""
+        with patch("agent_loader.lookup_phone_by_email", return_value=""):
+            with patch("agent_loader.get_user_role", return_value="agent_user"):
+                role, phone = self._request({"sub": "uid1", "email": "nobody@example.com"})
+        assert role == "agent_user"
+        assert phone == ""
+
+    def test_uid_lookup_fallback(self):
+        """Sem email, tenta lookup por firebase_uid."""
+        claims = {"sub": "firebase-uid-xyz"}
+        with patch("agent_loader.lookup_phone_by_email", return_value=""):
+            with patch("agent_loader.lookup_phone_by_uid", return_value="5511666666666"):
+                with patch("agent_loader.get_user_role", return_value="agent_user"):
+                    role, phone = self._request(claims)
+        assert phone == "5511666666666"
+        assert role == "agent_user"
+
+
+class TestLookupPhone:
+    def test_lookup_phone_by_email_finds_doc(self):
+        from agent_loader import lookup_phone_by_email
+
+        db = MagicMock()
+        doc1 = MagicMock()
+        doc1.id = "5511777777777"
+        doc1.to_dict.return_value = {"email": "ana@company.com"}
+        doc2 = MagicMock()
+        doc2.id = "5511888888888"
+        doc2.to_dict.return_value = {"email": "outro@x.com"}
+        db.collection.return_value.stream.return_value = [doc1, doc2]
+
+        with patch("agent_loader._get_firestore_client", return_value=db):
+            assert lookup_phone_by_email("ANA@company.com") == "5511777777777"
+
+    def test_lookup_phone_by_email_case_insensitive(self):
+        from agent_loader import lookup_phone_by_email
+
+        db = MagicMock()
+        doc = MagicMock()
+        doc.id = "5511777777777"
+        doc.to_dict.return_value = {"email": "ana@company.com"}
+        db.collection.return_value.stream.return_value = [doc]
+
+        with patch("agent_loader._get_firestore_client", return_value=db):
+            assert lookup_phone_by_email("Ana@Company.COM") == "5511777777777"
+
+    def test_lookup_phone_by_email_not_found(self):
+        from agent_loader import lookup_phone_by_email
+
+        db = MagicMock()
+        db.collection.return_value.stream.return_value = []
+        with patch("agent_loader._get_firestore_client", return_value=db):
+            assert lookup_phone_by_email("nobody@x.com") == ""
+
+    def test_lookup_phone_by_email_invalid(self):
+        from agent_loader import lookup_phone_by_email
+
+        assert lookup_phone_by_email("") == ""
+        assert lookup_phone_by_email("not-an-email") == ""
+
+    def test_lookup_phone_by_uid_finds_doc(self):
+        from agent_loader import lookup_phone_by_uid
+
+        db = MagicMock()
+        doc = MagicMock()
+        doc.id = "5511777777777"
+        doc.to_dict.return_value = {"firebase_uid": "uid-abc"}
+        db.collection.return_value.stream.return_value = [doc]
+
+        with patch("agent_loader._get_firestore_client", return_value=db):
+            assert lookup_phone_by_uid("uid-abc") == "5511777777777"
 
 
 class TestAgentUserWhitelist:
