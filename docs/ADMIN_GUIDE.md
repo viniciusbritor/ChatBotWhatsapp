@@ -115,9 +115,9 @@ curl -X DELETE -H "Authorization: Bearer $TOKEN" \
 | Fase | Status |
 |---|---|
 | Storage + endpoints + tests | ✅ deployado (30/07/2026) |
-| Tools filtram results por permissions | 🔴 **pendente** (próxima janela) |
+| Tools filtram results por permissions | ✅ **deployado** — `tools/google_*.py` aplicam `check_folder_permission` (pré) + `post_filter_tool_result` (pós) via `core/owner_guard.py`; owner da instância tem bypass automático (01/08/2026) |
 
-Por enquanto, **conceder/revogar é apenas storage** — as tools (Drive/Gmail/Calendar) não estão checando as permissions antes de retornar resultados. Próxima fase: instrumentar tools para filtrar.
+**Comportamento:** para non-owners, whitelist vazia = `folder_permission_required` (lock-down). Com whitelist, o pré-check valida folder_id/query/calendar_id e o pós-filter corta resultados que não batem com `name`, `id` ou `parent_id`. Toggle via env `RAG_FOLDER_PERMISSIONS_ENFORCE` (default `true`).
 
 ## 🔄 Refresh após write
 

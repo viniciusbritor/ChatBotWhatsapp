@@ -16,15 +16,14 @@ Schema:
   created_by: 'admin-sa-token' ou phone
 }
 
-Runtime enforcement (Fase 2):
+Runtime enforcement (IMPLEMENTADO):
 - tools/google_drive.py::search_files filtra resultados por
   permissions.whitelist[pattern] e exclui blacklisted[pattern]
 - tools/google_gmail.py::search_messages similar
 - tools/google_calendar.py::list_events similar
-
-Por enquanto (Fase 1): storage + endpoints + tests. Runtime
-enforcement sera adicionado em commit separado para reduzir
-risco de regressao em tools.
+- core/owner_guard.py: check_folder_permission (pre) +
+  post_filter_tool_result (pos). Owner da instancia tem bypass.
+- Toggle: RAG_FOLDER_PERMISSIONS_ENFORCE (default "true").
 """
 from __future__ import annotations
 

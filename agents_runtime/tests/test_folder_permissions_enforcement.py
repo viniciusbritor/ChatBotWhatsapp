@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -197,6 +197,27 @@ class TestToolsWithEnforcement:
             r = await search_files(phone="5511966830020", query="")
             assert "error" in r
             assert r["error"] == "folder_permission_required"
+
+    @pytest.mark.asyncio
+    async def test_post_filter_matches_by_id_not_only_name(self, _fake_drive_service):
+        """Whitelist por folder/file ID filtra a listagem (match em `id`)."""
+        from core.folder_permissions import (
+            force_reload_cache,
+            grant_folder_permission,
+            list_folder_permissions,
+            revoke_folder_permission,
+        )
+
+        with patch("tools.google_drive._get_service", return_value=_fake_drive_service):
+            for p in list_folder_permissions("5511966830020"):
+                revoke_folder_permission("5511966830020", p["permission_id"])
+            grant_folder_permission("5511966830020", "drive", "f2")
+            force_reload_cache("5511966830020")
+            from tools.google_drive import search_files
+            r = await search_files(phone="5511966830020", query="")
+            names = [f["name"] for f in r["files"]]
+            assert names == ["lgpd-capitulo-1.pdf"], names
+            assert r["count"] == 1
 
     @pytest.mark.asyncio
     async def test_upload_file_within_whitelist_passes(self, _fake_drive_service):

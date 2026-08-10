@@ -231,7 +231,7 @@ async def _invoke_with_guard(
                 filtered = [
                     f for f in result["files"]
                     if not isinstance(f, dict)
-                    or any(p in (f.get("name", "") or "") for p in allowed)
+                    or any(p in " ".join(str(f.get(k, "")) for k in ("name", "id", "parent_id", "parents")) for p in allowed)
                     or not _extract_patterns_for_capability(capability, kwargs)
                 ]
                 result = {**result, "files": filtered, "count": len(filtered)}
@@ -239,8 +239,7 @@ async def _invoke_with_guard(
                 filtered = [
                     m for m in result["messages"]
                     if not isinstance(m, dict)
-                    or any(p in (m.get("from", "") + m.get("subject", "") + m.get("to", ""))
-                           for p in allowed)
+                    or any(p in " ".join(str(m.get(k, "")) for k in ("from", "subject", "to")) for p in allowed)
                     or not _extract_patterns_for_capability(capability, kwargs)
                 ]
                 result = {**result, "messages": filtered, "count": len(filtered)}
@@ -295,23 +294,24 @@ async def post_filter_tool_result(
             return {**result, "files": [], "count": 0} if "files" in result else (
                 {**result, "messages": [], "count": 0} if "messages" in result else result
             )
+
+        def _drive_match(f: Any) -> bool:
+            if not isinstance(f, dict):
+                return True
+            haystack = " ".join(str(f.get(k, "")) for k in ("name", "id", "parent_id", "parents"))
+            return any(p in haystack for p in allowed)
+
+        def _mail_match(m: Any) -> bool:
+            if not isinstance(m, dict):
+                return True
+            haystack = " ".join(str(m.get(k, "")) for k in ("from", "subject", "to"))
+            return any(p in haystack for p in allowed)
+
         if "files" in result and isinstance(result["files"], list):
-            filtered = [
-                f for f in result["files"]
-                if not isinstance(f, dict)
-                or any(p in (f.get("name", "") or "") for p in allowed)
-            ]
+            filtered = [f for f in result["files"] if _drive_match(f)]
             return {**result, "files": filtered, "count": len(filtered)}
         if "messages" in result and isinstance(result["messages"], list):
-            filtered = [
-                m for m in result["messages"]
-                if not isinstance(m, dict)
-                or any(p in (
-                    (m.get("from", "") or "")
-                    + (m.get("subject", "") or "")
-                    + (m.get("to", "") or "")
-                ) for p in allowed)
-            ]
+            filtered = [m for m in result["messages"] if _mail_match(m)]
             return {**result, "messages": filtered, "count": len(filtered)}
     except Exception as exc:
         logger.debug("post_filter_tool_result no-op: %s", exc)
