@@ -1601,8 +1601,11 @@ async def oauth_google(request: Request):
     phone = request.query_params.get("phone", "")
     if not phone:
         raise HTTPException(status_code=422, detail="phone required")
-    if _bearer_token(request) or request.query_params.get("token") or request.cookies.get("session_token"):
-        _require_self_or_admin(request, phone)
+    role, caller_phone = _caller_role(request)
+    if role == "agent_user":
+        target = "".join(c for c in str(phone) if c.isdigit())
+        if not caller_phone or target != caller_phone:
+            raise HTTPException(status_code=403, detail="forbidden_resource")
     if not OAUTH_CLIENT_ID or not OAUTH_CLIENT_SECRET:
         raise HTTPException(status_code=503, detail="oauth_not_configured")
     try:
