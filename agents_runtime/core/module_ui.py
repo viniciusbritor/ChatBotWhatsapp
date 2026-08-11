@@ -1046,40 +1046,86 @@ function renderTools(root) {
 
 /* -- Conexões / OAuth -- */
 function renderConexoes(root) {
-  root.innerHTML = panelHtml('Conexões', 'Status OAuth por usuário', null, skel(2));
+  root.innerHTML = panelHtml('Conexões', 'Autorize o acesso do agente às suas contas', null, skel(2));
 
   const phone = CALLER_ROLE === 'agent_user' ? CALLER_PHONE : null;
   const endpoint = phone ? '/admin/users/' + encodeURIComponent(phone) : '/admin/users';
 
   api(endpoint).then(data => {
-    const list = data.users || (data.phone ? [data] : []);
+    let list = data.users || [];
+    if (data.user) list = [data.user];
+    else if (data.phone) list = [data];
     if (!list.length) { setTabBody(emptyHtml('Nenhum usuário', 'Nenhum usuário encontrado.')); return; }
     setTabBody(
       '<div id="list">'
       + list.map(u => {
         const hasOAuth = !!(u.google_oauth_token);
-        const composio = u.composio_connected ? 'conectado' : 'não conectado';
         return (
           '<div class="card">'
           + '<div class="card-title-row"><h3>' + esc(u.phone || u.id) + '</h3>'
           + '<span class="tag ' + (hasOAuth ? 'good' : 'warn') + '">'
-          + (hasOAuth ? 'Google OK' : 'Sem OAuth')
+          + (hasOAuth ? 'Google conectado' : 'Google pendente')
           + '</span></div>'
           + '<div class="meta">'
-          + '<span>Composio: ' + esc(composio) + '</span>'
+          + '<span>Composio: <strong id="composio-state-' + esc(u.phone) + '">consultando…</strong></span>'
           + (u.name ? '<span>Nome: ' + esc(u.name) + '</span>' : '')
           + '</div>'
-          + (CALLER_ROLE === 'admin' && !hasOAuth
-              ? '<div class="actions-inline" style="margin-top:12px">'
-                + '<button class="secondary" onclick="requestOAuth(' + JSON.stringify(esc(u.phone)) + ')">Solicitar OAuth</button>'
-                + '</div>'
-              : '')
+          + '<div class="actions-inline" style="margin-top:12px">'
+          + (hasOAuth
+              ? '<span class="tag good">✓ OAuth Google</span>'
+              : '<button class="secondary" onclick="requestOAuth(' + JSON.stringify(esc(u.phone)) + ')">Conectar Google</button>')
+          + '<button class="secondary" onclick="conectarComposio(' + JSON.stringify(esc(u.phone)) + ')">Conectar Apps (Composio)</button>'
+          + '</div>'
           + '</div>'
         );
       }).join('')
       + '</div>'
     );
+    list.forEach(u => { if (u.phone) refreshComposioState(u.phone); });
   }).catch(e => setTabBody(errHtml(e.message, e.status)));
+}
+
+function refreshComposioState(phone) {
+  api('/api/v1/composio/status?phone=' + encodeURIComponent(phone))
+    .then(data => {
+      const el = document.getElementById('composio-state-' + escapeHtml(phone));
+      if (!el) return;
+      const apps = (data && data.apps) || {};
+      const slugs = Object.keys(apps);
+      const connected = slugs.filter(s => apps[s] && apps[s].connected).length;
+      el.textContent = connected + '/' + slugs.length + ' apps conectados';
+    })
+    .catch(() => {
+      const el = document.getElementById('composio-state-' + escapeHtml(phone));
+      if (el) el.textContent = 'erro ao consultar';
+    });
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
+  );
+}
+
+async function conectarComposio(phone) {
+  try {
+    const res = await api('/api/v1/composio/connect-all', { method: 'POST', body: JSON.stringify({ phone: phone }) });
+    const url = (res && res.url) || (res && res.connect_url) || (res && res.session && res.session.redirectUrl) || '';
+    if (url) {
+      toast('Abrindo conexão Composio…', '');
+      window.open(url, '_blank');
+    } else {
+      const links = (res && res.links) || [];
+      if (links.length) {
+        toast('Abrindo ' + links.length + ' link(s) de conexão…', '');
+        links.forEach(l => window.open(l, '_blank'));
+      } else {
+        toast('Nenhum app pendente ou resposta inesperada.', 'warn');
+      }
+    }
+  } catch (e) {
+    toast('Falha ao iniciar Composio: ' + e.message, 'warn');
+  }
 }
 
 /* -- Permissões (agent_user) -- */
@@ -1135,17 +1181,48 @@ function renderStatus(root) {
   root.innerHTML = panelHtml('Status', 'Diagnóstico do runtime', null, skel(1));
 
   api('/admin/status').then(data => {
-    const rows = Object.entries(data).map(([k, v]) => (
-      '<tr><td><strong>' + esc(k) + '</strong></td>'
-      + '<td>' + esc(typeof v === 'object' ? JSON.stringify(v) : String(v)) + '</td></tr>'
+    const kpis = Array.isArray(data.kpis) ? data.kpis : _statusToKpis(data);
+    const cards = kpis.map(k => (
+      '<div class="kpi">'
+      + '<div class="kpi-value">' + esc(k.value === null || k.value === undefined ? '—' : k.value) + '</div>'
+      + '<div class="kpi-label">' + esc(k.label || '') + '</div>'
+      + (k.sub ? '<div class="kpi-sub">' + esc(k.sub) + '</div>' : '')
+      + '</div>'
     )).join('');
+
+    const rawRows = Object.entries(data)
+      .filter(([k]) => k !== 'kpis')
+      .map(([k, v]) => (
+        '<tr><td><strong>' + esc(k) + '</strong></td>'
+        + '<td>' + esc(typeof v === 'object' ? JSON.stringify(v) : String(v)) + '</td></tr>'
+      )).join('');
+
     setTabBody(
-      '<table class="status-table">'
-      + '<thead><tr><th>Chave</th><th>Valor</th></tr></thead>'
-      + '<tbody>' + rows + '</tbody>'
-      + '</table>'
+      '<div class="kpi-grid">' + cards + '</div>'
+      + (rawRows
+          ? '<h3 style="margin-top:24px">Detalhes</h3><table class="status-table">'
+            + '<thead><tr><th>Chave</th><th>Valor</th></tr></thead>'
+            + '<tbody>' + rawRows + '</tbody>'
+            + '</table>'
+          : '')
     );
   }).catch(e => setTabBody(errHtml(e.message, e.status)));
+}
+
+function _statusToKpis(data) {
+  const map = [
+    ['runtime_ok', 'Runtime'],
+    ['llm_provider', 'LLM'],
+    ['agents_total', 'Agentes'],
+    ['agents_healthy', 'Agentes saudáveis'],
+    ['tools_total', 'Tools'],
+    ['commit', 'Commit'],
+  ];
+  const kpis = [];
+  map.forEach(([k, label]) => {
+    if (k in data) kpis.push({ label: label, value: data[k], sub: typeof data[k] === 'object' ? JSON.stringify(data[k]).slice(0, 60) : undefined });
+  });
+  return kpis;
 }
 
 /* ==========================================
@@ -1166,7 +1243,12 @@ function toolEdit(id)     { toast('Editar tool: ' + id, 'warn'); }
 function toolDel(id)      { toast('Excluir tool: ' + id, 'warn'); }
 function uploadKnowledge(){ toast('Em breve: upload de documento', 'warn'); }
 function delKnowledge(id) { toast('Excluir doc: ' + id, 'warn'); }
-function requestOAuth(ph) { toast('Solicitar OAuth para: ' + ph, 'warn'); }
+function requestOAuth(ph) {
+  if (!ph) { toast('Telefone inválido para OAuth.', 'warn'); return; }
+  const target = '/oauth/google?phone=' + encodeURIComponent(ph) + (_tok ? '&token=' + encodeURIComponent(_tok) : '');
+  toast('Redirecionando para autorização do Google…', '');
+  window.open(target, '_blank');
+}
 
 /* ==========================================
    NAV ROUTING
