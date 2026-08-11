@@ -1,4 +1,4 @@
-﻿"""Main FastAPI application for agents_runtime.
+"""Main FastAPI application for agents_runtime.
 
 Endpoints:
 - GET  /healthz       (public)
@@ -28,7 +28,7 @@ from core.masker import mask_pii
 from core.timezone import now_brt
 from core import metrics
 from agent_loader import start_loader, stop_loader, list_agents, list_skills, list_tools, get_agent
-from agent_loader import upsert_agent, delete_agent, upsert_skill, upsert_tool
+from agent_loader import upsert_agent, delete_agent, upsert_skill, delete_skill, upsert_tool, delete_tool
 from agent_loader import get_user, save_user, list_users
 from orchestrator import orchestrate, get_recent_interactions, drain_indexing_tasks, index_audio_failure_for_audit
 
@@ -1233,6 +1233,15 @@ async def admin_skills_list():
     return JSONResponse(content={"skills": list_skills()})
 
 
+@app.delete("/admin/skills/{skill_id}")
+async def admin_skills_delete(skill_id: str):
+    """Delete a skill (Portal proxy)."""
+    success = delete_skill(skill_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="delete_failed")
+    return JSONResponse(content={"status": "ok", "skill_id": skill_id, "deleted": True})
+
+
 @app.post("/admin/tools")
 async def admin_tools_post(request: Request):
     """Create or update a tool (Portal proxy)."""
@@ -1253,6 +1262,15 @@ async def admin_tools_post(request: Request):
 async def admin_tools_list():
     """List all tools (Portal proxy)."""
     return JSONResponse(content={"tools": list_tools()})
+
+
+@app.delete("/admin/tools/{tool_id}")
+async def admin_tools_delete(tool_id: str):
+    """Delete a tool (Portal proxy)."""
+    success = delete_tool(tool_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="delete_failed")
+    return JSONResponse(content={"status": "ok", "tool_id": tool_id, "deleted": True})
 
 
 @app.post("/admin/register-user")

@@ -120,6 +120,18 @@ class TestAdminAgentsEndpoints(_AuthFixture):
             resp = self.client.delete("/admin/agents/agent-x", headers=self.headers)
         assert resp.status_code == 500
 
+    def test_admin_skills_delete_success(self):
+        with patch("main.delete_skill", return_value=True):
+            resp = self.client.delete("/admin/skills/skill-test-1", headers=self.headers)
+        assert resp.status_code == 200
+        assert resp.json()["deleted"] is True
+
+    def test_admin_tools_delete_success(self):
+        with patch("main.delete_tool", return_value=True):
+            resp = self.client.delete("/admin/tools/tool-test-1", headers=self.headers)
+        assert resp.status_code == 200
+        assert resp.json()["deleted"] is True
+
 
 class TestAdminKnowledgeGrouping(_AuthFixture):
     def setup_method(self):

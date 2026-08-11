@@ -260,6 +260,20 @@ def upsert_skill(skill_id: str, data: Dict[str, Any]) -> bool:
         return False
 
 
+def delete_skill(skill_id: str) -> bool:
+    db = _get_firestore_client()
+    if db is None:
+        return False
+    try:
+        db.collection("skills").document(skill_id).delete()
+        logger.info(f"Skill '{skill_id}' deleted from Firestore")
+        force_reload()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to delete skill '{skill_id}': {e}")
+        return False
+
+
 def upsert_tool(tool_id: str, data: Dict[str, Any]) -> bool:
     db = _get_firestore_client()
     if db is None:
@@ -271,6 +285,20 @@ def upsert_tool(tool_id: str, data: Dict[str, Any]) -> bool:
         return True
     except Exception as e:
         logger.error(f"Failed to upsert tool '{tool_id}': {e}")
+        return False
+
+
+def delete_tool(tool_id: str) -> bool:
+    db = _get_firestore_client()
+    if db is None:
+        return False
+    try:
+        db.collection("tools").document(tool_id).delete()
+        logger.info(f"Tool '{tool_id}' deleted from Firestore")
+        force_reload()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to delete tool '{tool_id}': {e}")
         return False
 
 

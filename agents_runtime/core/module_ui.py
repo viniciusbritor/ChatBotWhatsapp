@@ -1134,21 +1134,50 @@ function deleteAgent(agentId) {
 
 function renderSkills(root) {
   root.innerHTML =
-    '<div class="panel-header">'
+    '<div class="panel-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
     + '<div><h2>Skills</h2>'
-    + '<div class="subtitle">Snippets injetados no system prompt dos agentes</div></div>'
-    + '</div><div id="list">' + skeletonList(3) + '</div>';
+    + '<div class="subtitle">Instruções e comportamentos injetados nos agentes</div></div>'
+    + (CALLER_ROLE === 'admin' ? '<button class="primary" onclick="editSkillForm()">+ Nova Skill</button>' : '')
+    + '</div>'
+    + '<div class="toolbar">'
+    + '<input id="skills-search" placeholder="Filtrar por nome, ID ou instrução…">'
+    + '</div>'
+    + '<div id="list">' + skeletonList(3) + '</div>';
+
   api(ENDPOINTS.skills).then(data => {
     const skills = data.skills || [];
-    const cards = skills.length
-      ? skills.map(s => (
-          '<div class="card"><h3>' + esc(s.name || s.id) + '</h3>'
-          + '<div class="meta"><span class="tag jade">' + esc(s.id) + '</span></div>'
-          + '<p>' + esc((s.content || '').slice(0, 360)) + ((s.content || '').length > 360 ? '…' : '') + '</p></div>'
-        )).join('')
-      : emptyState('Nenhuma skill cadastrada',
-          'Use o endpoint POST /admin/skills para criar a primeira.');
-    root.querySelector('#list').innerHTML = cards;
+    const renderList = (filter) => {
+      const filtered = filter
+        ? skills.filter(s => (s.name || s.id || '').toLowerCase().includes(filter.toLowerCase()) || (s.content || s.instruction || '').toLowerCase().includes(filter.toLowerCase()))
+        : skills;
+      return filtered.length
+        ? filtered.map(s => (
+            '<div class="card">'
+            + '<div>'
+            + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
+            + '<div style="display:flex;align-items:center;gap:8px">'
+            + '<span class="material-symbols-outlined" style="color:var(--accent);font-size:22px">psychology</span>'
+            + '<h3 style="margin:0;font-size:16px;font-weight:600">' + esc(s.name || s.id) + '</h3>'
+            + '</div>'
+            + '<span class="tag jade" style="font-family:\'JetBrains Mono\',monospace">' + esc(s.id) + '</span>'
+            + '</div>'
+            + '<p style="color:var(--fg-soft);font-size:13px;margin:8px 0 16px 0;line-height:1.5">'
+            + esc((s.content || s.instruction || '').slice(0, 240)) + ((s.content || s.instruction || '').length > 240 ? '…' : '')
+            + '</p>'
+            + '</div>'
+            + '<div style="display:flex;gap:8px;justify-content:flex-end;border-top:1px solid var(--border);padding-top:12px;margin-top:auto">'
+            + '<button class="ghost" onclick="viewSkill(\'' + esc(s.id) + '\')">👁️ Ver Conteúdo</button>'
+            + (CALLER_ROLE === 'admin' ? '<button class="secondary" onclick="editSkillForm(\'' + esc(s.id) + '\')">✏️ Editar</button>' : '')
+            + (CALLER_ROLE === 'admin' ? '<button class="secondary danger" onclick="deleteSkill(\'' + esc(s.id) + '\')">🗑️ Excluir</button>' : '')
+            + '</div>'
+            + '</div>'
+          )).join('')
+        : emptyState('Nenhuma skill encontrada', filter ? 'Tente mudar o termo de busca.' : 'Clique no botão acima para cadastrar a primeira.');
+    };
+    root.querySelector('#list').innerHTML = renderList('');
+    root.querySelector('#skills-search').oninput = (e) => {
+      root.querySelector('#list').innerHTML = renderList(e.target.value);
+    };
   }).catch(e => {
     root.querySelector('#list').innerHTML = emptyState(
       'Falha ao carregar skills', e.message,
@@ -1156,27 +1185,147 @@ function renderSkills(root) {
   });
 }
 
+function viewSkill(skillId) {
+  api(ENDPOINTS.skills).then(data => {
+    const s = (data.skills || []).find(item => item.id === skillId);
+    if (!s) { toast('Skill não encontrada', 'bad'); return; }
+    openDrawer('Skill: ' + (s.name || s.id),
+      '<div class="meta" style="margin-bottom:14px"><span class="tag jade">' + esc(s.id) + '</span></div>'
+      + '<pre style="background:var(--surface-alt);padding:14px;border-radius:8px;font-family:\'JetBrains Mono\',monospace;font-size:12px;white-space:pre-wrap">' + esc(s.content || s.instruction || '') + '</pre>',
+      null, 'Fechar');
+    const saveBtn = document.querySelector('.drawer [data-action="save"]');
+    if (saveBtn) saveBtn.style.display = 'none';
+  });
+}
+
+function editSkillForm(skillId) {
+  api(ENDPOINTS.skills).then(data => {
+    const s = (data.skills || []).find(item => item.id === skillId) || {};
+    const body =
+      '<div class="field-row"><label>ID (slug)</label><input id="skill_id" value="' + esc(s.id || '') + '" ' + (s.id ? 'disabled' : '') + ' placeholder="ex: skill-exemplo"></div>'
+      + '<div class="field-row"><label>Nome</label><input id="skill_name" value="' + esc(s.name || '') + '" placeholder="ex: Assistente Financeiro"></div>'
+      + '<div class="field-row full"><label>Conteúdo / Prompt Snippet</label><textarea id="skill_content" class="mono" rows="8" placeholder="Instruções para o agente...">' + esc(s.content || s.instruction || '') + '</textarea></div>'
+      + '<div id="skill-flash"></div>';
+    openDrawer(skillId ? 'Editar Skill' : 'Nova Skill', body, (drawer) => {
+      const id = drawer.querySelector('#skill_id').value.trim();
+      const name = drawer.querySelector('#skill_name').value.trim();
+      const content = drawer.querySelector('#skill_content').value;
+      if (!id) {
+        drawer.querySelector('#skill-flash').innerHTML = '<div class="inline-banner">ID é obrigatório</div>';
+        return;
+      }
+      api(ENDPOINTS.skills, { method: 'POST', body: JSON.stringify({ id, name, content }) }).then(() => {
+        toast('Skill salva', 'good');
+        closeDrawer();
+        renderSkills(document.getElementById('root'));
+      }).catch(e => {
+        drawer.querySelector('#skill-flash').innerHTML = '<div class="inline-banner">' + esc(e.message) + '</div>';
+      });
+    }, 'Salvar Skill');
+  });
+}
+
+function deleteSkill(skillId) {
+  openDrawer('Excluir Skill',
+    '<p>Tem certeza que deseja excluir a skill <strong>' + esc(skillId) + '</strong>?</p>',
+    () => {
+      api(ENDPOINTS.skills + '/' + skillId, { method: 'DELETE' }).then(() => {
+        toast('Skill excluída', 'good');
+        closeDrawer();
+        renderSkills(document.getElementById('root'));
+      }).catch(e => toast('Falha: ' + e.message, 'bad'));
+    }, 'Excluir definitivamente');
+}
+
 function renderTools(root) {
   root.innerHTML =
-    '<div class="panel-header">'
-    + '<div><h2>Tools</h2>'
-    + '<div class="subtitle">Catálogo (somente leitura) de tools registradas</div></div>'
-    + '</div><div id="list">' + skeletonList(3) + '</div>';
+    '<div class="panel-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
+    + '<div><h2>Tools & Integrações</h2>'
+    + '<div class="subtitle">Catálogo de ferramentas Google Native e Composio MCP registradas</div></div>'
+    + (CALLER_ROLE === 'admin' ? '<button class="primary" onclick="editToolForm()">+ Nova Tool</button>' : '')
+    + '</div>'
+    + '<div class="toolbar">'
+    + '<input id="tools-search" placeholder="Filtrar por nome ou ID…">'
+    + '</div>'
+    + '<div id="list">' + skeletonList(3) + '</div>';
+
   api(ENDPOINTS.tools).then(data => {
     const tools = data.tools || [];
-    const cards = tools.length
-      ? tools.map(t => (
-          '<div class="card"><h3>' + esc(t.name || t.id) + '</h3>'
-          + '<div class="meta"><span class="tag jade">' + esc(t.implementation || t.id) + '</span></div></div>'
-        )).join('')
-      : emptyState('Nenhuma tool registrada',
-          'Tools são carregadas do tool_registry.py em tempo de execução.');
-    root.querySelector('#list').innerHTML = cards;
+    const renderList = (filter) => {
+      const filtered = filter
+        ? tools.filter(t => (t.name || t.id || '').toLowerCase().includes(filter.toLowerCase()) || (t.description || t.implementation || '').toLowerCase().includes(filter.toLowerCase()))
+        : tools;
+      return filtered.length
+        ? filtered.map(t => (
+            '<div class="card">'
+            + '<div>'
+            + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
+            + '<div style="display:flex;align-items:center;gap:8px">'
+            + '<span class="material-symbols-outlined" style="color:var(--accent);font-size:22px">build</span>'
+            + '<h3 style="margin:0;font-size:16px;font-weight:600">' + esc(t.name || t.id) + '</h3>'
+            + '</div>'
+            + '<span class="tag jade" style="font-family:\'JetBrains Mono\',monospace">' + esc(t.id) + '</span>'
+            + '</div>'
+            + '<p style="color:var(--fg-soft);font-size:13px;margin:8px 0 16px 0">'
+            + esc(t.description || t.implementation || 'Tool ativa do sistema.')
+            + '</p>'
+            + '</div>'
+            + '<div style="display:flex;gap:8px;justify-content:flex-end;border-top:1px solid var(--border);padding-top:12px;margin-top:auto">'
+            + (CALLER_ROLE === 'admin' ? '<button class="secondary" onclick="editToolForm(\'' + esc(t.id) + '\')">✏️ Editar</button>' : '')
+            + (CALLER_ROLE === 'admin' ? '<button class="secondary danger" onclick="deleteTool(\'' + esc(t.id) + '\')">🗑️ Excluir</button>' : '')
+            + '</div>'
+            + '</div>'
+          )).join('')
+        : emptyState('Nenhuma tool encontrada', filter ? 'Tente mudar o termo de busca.' : 'Tools registradas aparecem aqui.');
+    };
+    root.querySelector('#list').innerHTML = renderList('');
+    root.querySelector('#tools-search').oninput = (e) => {
+      root.querySelector('#list').innerHTML = renderList(e.target.value);
+    };
   }).catch(e => {
     root.querySelector('#list').innerHTML = emptyState(
       'Falha ao carregar tools', e.message,
       'Tentar de novo', 'renderTools(document.getElementById("root"))');
   });
+}
+
+function editToolForm(toolId) {
+  api(ENDPOINTS.tools).then(data => {
+    const t = (data.tools || []).find(item => item.id === toolId) || {};
+    const body =
+      '<div class="field-row"><label>ID (slug)</label><input id="tool_id" value="' + esc(t.id || '') + '" ' + (t.id ? 'disabled' : '') + ' placeholder="ex: google_calendar"></div>'
+      + '<div class="field-row"><label>Nome</label><input id="tool_name" value="' + esc(t.name || '') + '" placeholder="ex: Google Calendar"></div>'
+      + '<div class="field-row full"><label>Descrição</label><textarea id="tool_desc" class="mono" rows="4">' + esc(t.description || t.implementation || '') + '</textarea></div>'
+      + '<div id="tool-flash"></div>';
+    openDrawer(toolId ? 'Editar Tool' : 'Nova Tool', body, (drawer) => {
+      const id = drawer.querySelector('#tool_id').value.trim();
+      const name = drawer.querySelector('#tool_name').value.trim();
+      const description = drawer.querySelector('#tool_desc').value;
+      if (!id) {
+        drawer.querySelector('#tool-flash').innerHTML = '<div class="inline-banner">ID é obrigatório</div>';
+        return;
+      }
+      api(ENDPOINTS.tools, { method: 'POST', body: JSON.stringify({ id, name, description }) }).then(() => {
+        toast('Tool salva', 'good');
+        closeDrawer();
+        renderTools(document.getElementById('root'));
+      }).catch(e => {
+        drawer.querySelector('#tool-flash').innerHTML = '<div class="inline-banner">' + esc(e.message) + '</div>';
+      });
+    }, 'Salvar Tool');
+  });
+}
+
+function deleteTool(toolId) {
+  openDrawer('Excluir Tool',
+    '<p>Tem certeza que deseja excluir a tool <strong>' + esc(toolId) + '</strong>?</p>',
+    () => {
+      api(ENDPOINTS.tools + '/' + toolId, { method: 'DELETE' }).then(() => {
+        toast('Tool excluída', 'good');
+        closeDrawer();
+        renderTools(document.getElementById('root'));
+      }).catch(e => toast('Falha: ' + e.message, 'bad'));
+    }, 'Excluir definitivamente');
 }
 
 function renderOwners(root) {
