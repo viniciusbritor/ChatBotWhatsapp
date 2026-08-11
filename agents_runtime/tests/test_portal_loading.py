@@ -100,7 +100,8 @@ class TestJSHelpers:
 
         html = render_dashboard("abc1234", "2026-07-30T00:00:00Z")
         assert "drawer" in html
-        assert "openDrawer" in html
+        # Rewrite usa agentEdit/skillEdit em vez de openDrawer gen\u00e9rico
+        assert "agentEdit" in html
 
     def test_module_ui_no_dark_mode(self):
         from core.module_ui import render_dashboard

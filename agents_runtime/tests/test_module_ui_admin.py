@@ -44,18 +44,21 @@ class TestRenderDashboard:
 
     def test_has_agent_edit_button_handler(self):
         html = self.render_dashboard("deadbee", "local")
-        assert "data-edit=" not in html or "editAgent" in html
-        assert "editAgentForm" in html
-        assert "deleteAgent" in html
+        # Rewrite usa agentEdit / agentDel como funções de CRUD
+        assert "agentEdit" in html
+        assert "agentDel" in html
 
     def test_has_knowledge_view_handler(self):
         html = self.render_dashboard("deadbee", "local")
-        assert "viewKnowledgeDoc" in html
-        assert "knowledge-search" in html
+        # Rewrite usa delKnowledge para ações na aba Conhecimento
+        assert "delKnowledge" in html
+        assert "renderKnowledge" in html
 
     def test_has_status_section_reflecting_deepseek(self):
         html = self.render_dashboard("deadbee", "local")
-        assert "deepseek-v4-flash" in html
+        # deepseek-v4-flash vem da API em runtime, não fica hardcoded no HTML
+        # Verifica que a aba Status existe (renderStatus) e o badge também
+        assert "renderStatus" in html
         assert 'id="runtime-badge"' in html
 
 
