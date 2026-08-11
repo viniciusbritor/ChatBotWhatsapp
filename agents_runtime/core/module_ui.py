@@ -26,6 +26,8 @@ _TEMPLATE = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <meta name="color-scheme" content="light">
 <title>Agentes Omnichannel — Coherence</title>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
 <style>
 :root {
   color-scheme: light;
@@ -240,14 +242,27 @@ section.panel .subtitle {
   margin-top: 4px;
 }
 
-/* Cards */
+/* Cards & Grid */
+#list, #knowledge-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+}
+@media (max-width: 720px) {
+  #list, #knowledge-list {
+    grid-template-columns: 1fr;
+  }
+}
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 16px 20px;
-  margin-bottom: 10px;
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+  box-shadow: var(--shadow-sm);
   transition: border-color .15s, box-shadow .15s, transform .15s;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
 }
 .card:hover {
   border-color: var(--border-strong);
