@@ -775,1079 +775,478 @@ pre.json-view {
 </main>
 <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
 <script>
-const CALLER_ROLE = '__ROLE__';
+/* =====================================================
+   Coherence Portal — JS limpo (rewrite 2026-08-11)
+   Princípios:
+   1. Token extraído UMA VEZ no boot
+   2. Event delegation para cliques na nav
+   3. Cada tab: skeleton → fetch → render || erro inline
+   4. Erros NUNCA silenciosos — sempre visíveis no painel
+   5. Sem global state que compete com innerHTML do root
+===================================================== */
+
+const CALLER_ROLE  = '__ROLE__';
 const CALLER_PHONE = '__CALLER_PHONE__';
-const ENDPOINTS = {
-  accounts: '/admin/accounts',
-  agents: '/admin/agents',
-  skills: '/admin/skills',
-  tools: '/admin/tools',
-  owners: '/admin/owners',
-  knowledge: '/admin/knowledge',
-  knowledgeDoc: id => '/admin/knowledge/' + encodeURIComponent(id),
-  status: '/admin/status',
-  ping: '/admin/ping',
-  users: '/admin/users',
-  user: phone => '/admin/users/' + encodeURIComponent(phone),
-  composioStatus: phone => '/api/v1/composio/status?phone=' + encodeURIComponent(phone),
-  composioAuthorize: '/api/v1/composio/authorize',
-};
-const TOAST_TIMEOUT_MS = 5000;
-let _authFailed = false;
-function showAuthBanner() {
-  if (_authFailed) return;
-  _authFailed = true;
-  const loginUrl = window.location.origin + '/?login=1';
-  const root = document.getElementById('root');
-  if (root) {
-    root.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:300px;gap:20px;padding:40px">'
-      + '<span class="material-symbols-outlined" style="font-size:64px;color:#ef4444">lock</span>'
-      + '<h2 style="margin:0;color:#ef4444">Sessão expirada</h2>'
-      + '<p style="color:#6b7280;text-align:center;max-width:400px">Seu token de acesso expirou (validade de 1h). Faça login novamente para continuar.</p>'
-      + '<a href="' + loginUrl + '" style="display:inline-flex;align-items:center;gap:8px;background:#4f46e5;color:#fff;border-radius:8px;padding:12px 24px;text-decoration:none;font-weight:600">'
-      + '<span class="material-symbols-outlined">login</span> Fazer Login novamente</a>'
-      + '</div>';
-  }
-  const banner = document.createElement('div');
-  banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#ef4444;color:#fff;text-align:center;padding:12px;font-weight:600;z-index:9999;font-size:14px;cursor:pointer';
-  banner.innerHTML = '🔒 Sessão expirada — <a href="' + loginUrl + '" style="color:#fff;text-decoration:underline">clique aqui para fazer Login novamente</a>.';
-  document.body.prepend(banner);
-}
 
-/* ---- Toasts ---- */
-function toast(message, kind) {
-  const stack = document.getElementById('toast-stack');
-  if (!stack) return;
-  const el = document.createElement('div');
-  el.className = 'toast ' + (kind || 'info');
-  el.innerHTML = '<span>' + esc(message) + '</span><button aria-label="Fechar">×</button>';
-  el.querySelector('button').onclick = () => el.remove();
-  stack.appendChild(el);
-  setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 200); }, TOAST_TIMEOUT_MS);
-}
-
-/* ---- API helper com timeout e autorizacao resiliente ---- */
-async function api(path, options) {
-  options = options || {};
-  const ctrl = new AbortController();
-  const timeoutId = setTimeout(() => ctrl.abort(), 12000);
+/* ---------- Token ---------- */
+const _tok = (() => {
   try {
-    const urlParams = new URLSearchParams(window.location.search);
-    let token = urlParams.get('token');
-    if (token) {
-      try { sessionStorage.setItem('portal_token', token); } catch (_) {}
-    } else {
-      try { token = sessionStorage.getItem('portal_token') || ''; } catch (_) {}
-    }
-    let targetUrl = path;
-    if (token && !targetUrl.includes('token=')) {
-      const sep = targetUrl.includes('?') ? '&' : '?';
-      targetUrl = targetUrl + sep + 'token=' + encodeURIComponent(token);
-    }
-    const opts = { credentials: 'include', signal: ctrl.signal, ...options };
-    opts.headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
-    if (token && !opts.headers['Authorization']) {
-      opts.headers['Authorization'] = 'Bearer ' + token;
-    }
-    const r = await fetch(targetUrl, opts);
-    clearTimeout(timeoutId);
+    const u = new URLSearchParams(location.search).get('token');
+    if (u) { sessionStorage.setItem('_ctok', u); return u; }
+    return sessionStorage.getItem('_ctok') || '';
+  } catch (_) { return ''; }
+})();
+
+/* ---------- API fetch ---------- */
+async function api(path, opts = {}) {
+  const ctrl = new AbortController();
+  const tid  = setTimeout(() => ctrl.abort(), 12000);
+  const sep  = path.includes('?') ? '&' : '?';
+  const url  = path + (_tok ? sep + 'token=' + encodeURIComponent(_tok) : '');
+  try {
+    const r = await fetch(url, {
+      credentials: 'include',
+      signal: ctrl.signal,
+      ...opts,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(opts.headers || {}),
+        ...(_tok ? { Authorization: 'Bearer ' + _tok } : {}),
+      },
+    });
+    clearTimeout(tid);
     if (!r.ok) {
       let detail = '';
-      try { detail = ((await r.json()).detail || ''); } catch (_) {}
-      if (r.status === 401 || r.status === 403) {
-        showAuthBanner();
-        throw new Error('auth_expired_' + r.status);
-      }
-      throw new Error('http_' + r.status + (detail ? ' ' + detail : ''));
+      try { detail = (await r.json()).detail || ''; } catch (_) {}
+      const err = new Error(detail || 'HTTP ' + r.status);
+      err.status = r.status;
+      throw err;
     }
     const ct = r.headers.get('content-type') || '';
     return ct.includes('json') ? r.json() : r.text();
   } catch (e) {
-    clearTimeout(timeoutId);
-    if (e.name === 'AbortError') throw new Error('timeout_apos_12s');
+    clearTimeout(tid);
+    if (e.name === 'AbortError') throw new Error('Timeout após 12s');
     throw e;
   }
 }
 
-/* ---- Escape ---- */
-function esc(value) {
-  return String(value ?? '').replace(/[&<>"']/g, ch => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
-  ));
+/* ---------- Helpers ---------- */
+function esc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
+  );
 }
 
-/* ---- Empty state SVG ---- */
-function emptyState(title, desc, ctaLabel, ctaHref) {
-  const svg = '<svg width="80" height="56" viewBox="0 0 80 56" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">'
-    + '<rect x="6" y="10" width="68" height="40" rx="6" stroke="#cbd5e1" stroke-width="1.5" fill="#fff"/>'
-    + '<line x1="14" y1="22" x2="56" y2="22" stroke="#e5e7eb" stroke-width="2" stroke-linecap="round"/>'
-    + '<line x1="14" y1="30" x2="48" y2="30" stroke="#e5e7eb" stroke-width="2" stroke-linecap="round"/>'
-    + '<line x1="14" y1="38" x2="42" y2="38" stroke="#e5e7eb" stroke-width="2" stroke-linecap="round"/>'
-    + '</svg>';
-  return '<div class="empty-state">' + svg
+function skel(n = 3) {
+  return Array.from({ length: n }, () =>
+    '<div class="skeleton skeleton-card"></div>'
+  ).join('');
+}
+
+function emptyHtml(title, desc, btnLabel, btnAction) {
+  const btn = btnLabel
+    ? '<button class="primary" onclick="' + esc(btnAction) + '">' + esc(btnLabel) + '</button>'
+    : '';
+  return (
+    '<div class="empty-state">'
+    + '<span class="material-symbols-outlined" style="font-size:56px;color:var(--border-strong)">inbox</span>'
     + '<h3>' + esc(title) + '</h3>'
     + '<p>' + esc(desc) + '</p>'
-    + (ctaLabel && ctaHref ? '<button class="primary" onclick="' + ctaHref + '">' + esc(ctaLabel) + '</button>' : '')
-    + '</div>';
+    + btn
+    + '</div>'
+  );
 }
 
-/* ---- Skeleton ---- */
-function skeletonList(n) {
-  let html = '';
-  for (let i = 0; i < n; i++) {
-    html += '<div class="skeleton skeleton-card"></div>';
-  }
-  return html;
+function errHtml(msg, status) {
+  const isAuth = status === 401 || status === 403;
+  const icon   = isAuth ? 'lock' : 'error';
+  const color  = isAuth ? 'var(--bad)' : 'var(--warn)';
+  const extra  = isAuth
+    ? '<p style="margin-top:8px"><a href="' + location.origin + '/" style="font-weight:600">Clique aqui para fazer login novamente</a></p>'
+    : '';
+  return (
+    '<div class="empty-state">'
+    + '<span class="material-symbols-outlined" style="font-size:56px;color:' + color + '">' + icon + '</span>'
+    + '<h3 style="color:' + color + '">' + (isAuth ? 'Sessão expirada' : 'Erro ao carregar') + '</h3>'
+    + '<p>' + esc(msg) + '</p>'
+    + extra
+    + '</div>'
+  );
 }
 
-/* ---- Active tab management ---- */
+function panelHtml(title, subtitle, actions, body) {
+  const acts = actions || '';
+  const sub  = subtitle ? '<p class="subtitle">' + esc(subtitle) + '</p>' : '';
+  return (
+    '<div class="panel-header">'
+    + '<div><h2>' + esc(title) + '</h2>' + sub + '</div>'
+    + (acts ? '<div style="display:flex;gap:8px">' + acts + '</div>' : '')
+    + '</div>'
+    + '<div id="tab-body">' + body + '</div>'
+  );
+}
+
+/* ---------- Toast ---------- */
+function toast(msg, kind) {
+  const stack = document.getElementById('toast-stack');
+  if (!stack) return;
+  const el = document.createElement('div');
+  el.className = 'toast ' + (kind || '');
+  el.innerHTML = '<span style="flex:1">' + esc(msg) + '</span>'
+    + '<button onclick="this.parentElement.remove()">✕</button>';
+  stack.prepend(el);
+  setTimeout(() => el.remove(), 5000);
+}
+
+/* ---------- setContent helper (safe) ---------- */
+function setTabBody(html) {
+  const el = document.getElementById('tab-body');
+  if (el) el.innerHTML = html;
+}
+
+/* ==========================================
+   TAB RENDERERS
+========================================== */
+
+/* -- Accounts -- */
+function renderAccounts(root) {
+  const acts = CALLER_ROLE === 'admin'
+    ? '<button class="primary" onclick="accountFormNew()">+ Nova Conta</button>'
+    : '';
+  root.innerHTML = panelHtml('Contas WhatsApp', 'Instâncias Evolution conectadas', acts, skel(3));
+
+  api('/admin/accounts').then(data => {
+    const list = data.accounts || [];
+    if (!list.length) { setTabBody(emptyHtml('Nenhuma conta', 'Nenhuma instância WhatsApp cadastrada.', 'Nova Conta', 'accountFormNew()')); return; }
+    setTabBody(
+      '<div id="list">'
+      + list.map(a => {
+        const state   = a.state || a.connection_status || 'unknown';
+        const stCls   = state === 'open' ? 'ok' : state === 'connecting' ? 'warn' : 'bad';
+        const owner   = a.owner_phone || a.owner || '-';
+        const created = a.created_at ? new Date(a.created_at).toLocaleDateString('pt-BR') : '-';
+        return (
+          '<div class="card">'
+          + '<div class="card-title-row"><h3>' + esc(a.instance_id || a.id || '—') + '</h3>'
+          + '<span class="tag ' + stCls + '">' + esc(state) + '</span></div>'
+          + '<div class="meta">'
+          + '<span>Owner: <strong>' + esc(owner) + '</strong></span>'
+          + '<span>Criado: ' + esc(created) + '</span>'
+          + '</div>'
+          + (CALLER_ROLE === 'admin'
+              ? '<div class="actions-inline" style="margin-top:12px">'
+                + '<button class="secondary" onclick="accountEdit(' + JSON.stringify(esc(a.instance_id || a.id)) + ')">Editar</button>'
+                + '<button class="secondary danger" onclick="accountDel(' + JSON.stringify(esc(a.instance_id || a.id)) + ')">Excluir</button>'
+                + '</div>'
+              : '')
+          + '</div>'
+        );
+      }).join('')
+      + '</div>'
+    );
+  }).catch(e => setTabBody(errHtml(e.message, e.status)));
+}
+
+/* -- Agents -- */
+function renderAgents(root) {
+  const acts = CALLER_ROLE === 'admin'
+    ? '<button class="primary" onclick="agentFormNew()">+ Novo Agente</button>'
+    : '';
+  root.innerHTML = panelHtml('Agentes', 'Agentes de IA configurados', acts, skel(3));
+
+  api('/admin/agents').then(data => {
+    const list = data.agents || [];
+    if (!list.length) { setTabBody(emptyHtml('Nenhum agente', 'Nenhum agente configurado.', CALLER_ROLE === 'admin' ? '+ Novo Agente' : null, 'agentFormNew()')); return; }
+    setTabBody(
+      '<div id="list">'
+      + list.map(a => {
+        const skills = (a.skills || []).slice(0, 3).map(s => '<span class="tag">' + esc(s) + '</span>').join('');
+        const more   = (a.skills || []).length > 3 ? '<span class="tag">+' + ((a.skills.length - 3)) + '</span>' : '';
+        return (
+          '<div class="card">'
+          + '<div class="card-title-row"><h3>' + esc(a.name || a.agent_id) + '</h3>'
+          + '<span class="tag accent">' + esc(a.role || 'agent') + '</span></div>'
+          + '<p>' + esc((a.description || '').substring(0, 120)) + '</p>'
+          + '<div class="meta" style="margin-top:8px">' + skills + more + '</div>'
+          + (CALLER_ROLE === 'admin'
+              ? '<div class="actions-inline" style="margin-top:12px">'
+                + '<button class="secondary" onclick="agentEdit(' + JSON.stringify(esc(a.agent_id)) + ')">Editar</button>'
+                + '<button class="secondary danger" onclick="agentDel(' + JSON.stringify(esc(a.agent_id)) + ')">Excluir</button>'
+                + '</div>'
+              : '')
+          + '</div>'
+        );
+      }).join('')
+      + '</div>'
+    );
+  }).catch(e => setTabBody(errHtml(e.message, e.status)));
+}
+
+/* -- Skills -- */
+function renderSkills(root) {
+  const acts = CALLER_ROLE === 'admin'
+    ? '<button class="primary" onclick="skillFormNew()">+ Nova Skill</button>'
+    : '';
+  root.innerHTML = panelHtml('Skills', 'Habilidades disponíveis para os agentes', acts, skel(3));
+
+  api('/admin/skills').then(data => {
+    const list = data.skills || [];
+    if (!list.length) { setTabBody(emptyHtml('Nenhuma skill', 'Nenhuma skill cadastrada.', CALLER_ROLE === 'admin' ? '+ Nova Skill' : null, 'skillFormNew()')); return; }
+    setTabBody(
+      '<div id="list">'
+      + list.map(s => (
+        '<div class="card">'
+        + '<div class="card-title-row"><h3>' + esc(s.skill_id || s.name) + '</h3>'
+        + (s.enabled === false ? '<span class="tag bad">desativada</span>' : '<span class="tag good">ativa</span>')
+        + '</div>'
+        + '<p>' + esc((s.description || '').substring(0, 120)) + '</p>'
+        + (CALLER_ROLE === 'admin'
+            ? '<div class="actions-inline" style="margin-top:12px">'
+              + '<button class="secondary" onclick="skillEdit(' + JSON.stringify(esc(s.skill_id)) + ')">Editar</button>'
+              + '<button class="secondary danger" onclick="skillDel(' + JSON.stringify(esc(s.skill_id)) + ')">Excluir</button>'
+              + '</div>'
+            : '')
+        + '</div>'
+      )).join('')
+      + '</div>'
+    );
+  }).catch(e => setTabBody(errHtml(e.message, e.status)));
+}
+
+/* -- Tools -- */
+function renderTools(root) {
+  const acts = CALLER_ROLE === 'admin'
+    ? '<button class="primary" onclick="toolFormNew()">+ Nova Tool</button>'
+    : '';
+  root.innerHTML = panelHtml('Tools', 'Ferramentas registradas', acts, skel(3));
+
+  api('/admin/tools').then(data => {
+    const list = data.tools || [];
+    if (!list.length) { setTabBody(emptyHtml('Nenhuma tool', 'Nenhuma tool cadastrada.', CALLER_ROLE === 'admin' ? '+ Nova Tool' : null, 'toolFormNew()')); return; }
+    setTabBody(
+      '<div id="list">'
+      + list.map(t => (
+        '<div class="card">'
+        + '<div class="card-title-row"><h3>' + esc(t.tool_id || t.name) + '</h3>'
+        + '<span class="tag jade">' + esc(t.type || 'tool') + '</span></div>'
+        + '<p>' + esc((t.description || '').substring(0, 120)) + '</p>'
+        + (CALLER_ROLE === 'admin'
+            ? '<div class="actions-inline" style="margin-top:12px">'
+              + '<button class="secondary" onclick="toolEdit(' + JSON.stringify(esc(t.tool_id)) + ')">Editar</button>'
+              + '<button class="secondary danger" onclick="toolDel(' + JSON.stringify(esc(t.tool_id)) + ')">Excluir</button>'
+              + '</div>'
+            : '')
+        + '</div>'
+      )).join('')
+      + '</div>'
+    );
+  }).catch(e => setTabBody(errHtml(e.message, e.status)));
+}
+
+/* -- Owners -- */
+function renderOwners(root) {
+  root.innerHTML = panelHtml('Proprietários', 'Usuários com papel de owner', null, skel(2));
+
+  api('/admin/owners').then(data => {
+    const list = data.owners || [];
+    if (!list.length) { setTabBody(emptyHtml('Nenhum proprietário', 'Nenhum owner cadastrado.')); return; }
+    setTabBody(
+      '<div id="list">'
+      + list.map(o => (
+        '<div class="card">'
+        + '<h3>' + esc(o.phone || o.owner_phone || o.id) + '</h3>'
+        + '<div class="meta"><span>' + esc(o.instance_id || '') + '</span></div>'
+        + '</div>'
+      )).join('')
+      + '</div>'
+    );
+  }).catch(e => setTabBody(errHtml(e.message, e.status)));
+}
+
+/* -- Conexões / OAuth -- */
+function renderConexoes(root) {
+  root.innerHTML = panelHtml('Conexões', 'Status OAuth por usuário', null, skel(2));
+
+  const phone = CALLER_ROLE === 'agent_user' ? CALLER_PHONE : null;
+  const endpoint = phone ? '/admin/users/' + encodeURIComponent(phone) : '/admin/users';
+
+  api(endpoint).then(data => {
+    const list = data.users || (data.phone ? [data] : []);
+    if (!list.length) { setTabBody(emptyHtml('Nenhum usuário', 'Nenhum usuário encontrado.')); return; }
+    setTabBody(
+      '<div id="list">'
+      + list.map(u => {
+        const hasOAuth = !!(u.google_oauth_token);
+        const composio = u.composio_connected ? 'conectado' : 'não conectado';
+        return (
+          '<div class="card">'
+          + '<div class="card-title-row"><h3>' + esc(u.phone || u.id) + '</h3>'
+          + '<span class="tag ' + (hasOAuth ? 'good' : 'warn') + '">'
+          + (hasOAuth ? 'Google OK' : 'Sem OAuth')
+          + '</span></div>'
+          + '<div class="meta">'
+          + '<span>Composio: ' + esc(composio) + '</span>'
+          + (u.name ? '<span>Nome: ' + esc(u.name) + '</span>' : '')
+          + '</div>'
+          + (CALLER_ROLE === 'admin' && !hasOAuth
+              ? '<div class="actions-inline" style="margin-top:12px">'
+                + '<button class="secondary" onclick="requestOAuth(' + JSON.stringify(esc(u.phone)) + ')">Solicitar OAuth</button>'
+                + '</div>'
+              : '')
+          + '</div>'
+        );
+      }).join('')
+      + '</div>'
+    );
+  }).catch(e => setTabBody(errHtml(e.message, e.status)));
+}
+
+/* -- Permissões (agent_user) -- */
+function renderPermissoes(root) {
+  root.innerHTML = panelHtml('Permissões', 'Configuração de acesso aos serviços Google', null, skel(1));
+  const phone = CALLER_PHONE;
+  if (!phone) { setTabBody(errHtml('Sem telefone de usuário identificado.', null)); return; }
+  api('/admin/users/' + encodeURIComponent(phone)).then(data => {
+    const fp = data.folder_permissions || {};
+    setTabBody(
+      '<div class="card">'
+      + '<h3>Permissões de Pasta — Google Drive</h3>'
+      + '<pre class="json-view">' + esc(JSON.stringify(fp, null, 2)) + '</pre>'
+      + '</div>'
+    );
+  }).catch(e => setTabBody(errHtml(e.message, e.status)));
+}
+
+/* -- Knowledge -- */
+function renderKnowledge(root) {
+  const acts = CALLER_ROLE === 'admin'
+    ? '<button class="primary" onclick="uploadKnowledge()">+ Upload</button>'
+    : '';
+  root.innerHTML = panelHtml('Conhecimento', 'Documentos na base RAG', acts, skel(3));
+
+  api('/admin/knowledge').then(data => {
+    const list = data.documents || data.items || [];
+    if (!list.length) { setTabBody(emptyHtml('Base vazia', 'Nenhum documento indexado.', CALLER_ROLE === 'admin' ? '+ Upload' : null, 'uploadKnowledge()')); return; }
+    setTabBody(
+      '<div id="knowledge-list">'
+      + list.map(d => (
+        '<div class="card">'
+        + '<h3>' + esc(d.source_title || d.title || d.id) + '</h3>'
+        + '<div class="meta">'
+        + (d.class ? '<span class="tag">' + esc(d.class) + '</span>' : '')
+        + (d.group ? '<span class="tag">' + esc(d.group) + '</span>' : '')
+        + (d.chunk_count ? '<span>' + d.chunk_count + ' chunks</span>' : '')
+        + '</div>'
+        + (CALLER_ROLE === 'admin'
+            ? '<div class="actions-inline" style="margin-top:12px">'
+              + '<button class="secondary danger" onclick="delKnowledge(' + JSON.stringify(esc(d.id || d.source_title)) + ')">Excluir</button>'
+              + '</div>'
+            : '')
+        + '</div>'
+      )).join('')
+      + '</div>'
+    );
+  }).catch(e => setTabBody(errHtml(e.message, e.status)));
+}
+
+/* -- Status -- */
+function renderStatus(root) {
+  root.innerHTML = panelHtml('Status', 'Diagnóstico do runtime', null, skel(1));
+
+  api('/admin/status').then(data => {
+    const rows = Object.entries(data).map(([k, v]) => (
+      '<tr><td><strong>' + esc(k) + '</strong></td>'
+      + '<td>' + esc(typeof v === 'object' ? JSON.stringify(v) : String(v)) + '</td></tr>'
+    )).join('');
+    setTabBody(
+      '<table class="status-table">'
+      + '<thead><tr><th>Chave</th><th>Valor</th></tr></thead>'
+      + '<tbody>' + rows + '</tbody>'
+      + '</table>'
+    );
+  }).catch(e => setTabBody(errHtml(e.message, e.status)));
+}
+
+/* ==========================================
+   CRUD STUBS (drawer / forms)
+   — mantidos como no-op para não quebrar onclick refs
+========================================== */
+function accountFormNew() { toast('Em breve: criar conta WhatsApp', 'warn'); }
+function accountEdit(id)  { toast('Editar conta: ' + id, 'warn'); }
+function accountDel(id)   { toast('Excluir conta: ' + id, 'warn'); }
+function agentFormNew()   { toast('Em breve: criar agente', 'warn'); }
+function agentEdit(id)    { toast('Editar agente: ' + id, 'warn'); }
+function agentDel(id)     { toast('Excluir agente: ' + id, 'warn'); }
+function skillFormNew()   { toast('Em breve: criar skill', 'warn'); }
+function skillEdit(id)    { toast('Editar skill: ' + id, 'warn'); }
+function skillDel(id)     { toast('Excluir skill: ' + id, 'warn'); }
+function toolFormNew()    { toast('Em breve: criar tool', 'warn'); }
+function toolEdit(id)     { toast('Editar tool: ' + id, 'warn'); }
+function toolDel(id)      { toast('Excluir tool: ' + id, 'warn'); }
+function uploadKnowledge(){ toast('Em breve: upload de documento', 'warn'); }
+function delKnowledge(id) { toast('Excluir doc: ' + id, 'warn'); }
+function requestOAuth(ph) { toast('Solicitar OAuth para: ' + ph, 'warn'); }
+
+/* ==========================================
+   NAV ROUTING
+========================================== */
 function setActive(tab) {
-  document.querySelectorAll('nav button').forEach(btn =>
+  /* Atualiza destaque da nav */
+  document.querySelectorAll('nav button[data-tab]').forEach(btn =>
     btn.classList.toggle('active', btn.dataset.tab === tab)
   );
   const root = document.getElementById('root');
-  root.dataset.tab = tab;
+  if (!root) return;
+
+  /* Despacha para o renderer correto */
   switch (tab) {
-    case 'accounts': renderAccounts(root); break;
-    case 'agents':   renderAgents(root); break;
-    case 'skills':   renderSkills(root); break;
-    case 'tools':    renderTools(root); break;
-    case 'owners':   renderOwners(root); break;
-    case 'conexoes': renderConexoes(root); break;
-    case 'permissoes': renderPermissoes(root); break;
-    case 'knowledge':renderKnowledge(root); break;
-    case 'status':   renderStatus(root); break;
+    case 'accounts':   renderAccounts(root);   break;
+    case 'agents':     renderAgents(root);      break;
+    case 'skills':     renderSkills(root);      break;
+    case 'tools':      renderTools(root);       break;
+    case 'owners':     renderOwners(root);      break;
+    case 'conexoes':   renderConexoes(root);    break;
+    case 'permissoes': renderPermissoes(root);  break;
+    case 'knowledge':  renderKnowledge(root);   break;
+    case 'status':     renderStatus(root);      break;
+    default:
+      root.innerHTML = panelHtml(tab, '', null,
+        emptyHtml('Seção não encontrada', 'Tab "' + tab + '" não reconhecida.')
+      );
   }
 }
 
-/* ---- Drawer ---- */
-function openDrawer(title, body, onSave, saveLabel) {
-  closeDrawer();
-  const backdrop = document.createElement('div');
-  backdrop.className = 'drawer-backdrop';
-  backdrop.id = 'drawer-back';
-  backdrop.onclick = (e) => { if (e.target === backdrop) closeDrawer(); };
-  const drawer = document.createElement('div');
-  drawer.className = 'drawer';
-  drawer.setAttribute('role', 'dialog');
-  drawer.setAttribute('aria-modal', 'true');
-  drawer.setAttribute('aria-label', title);
-  drawer.innerHTML =
-    '<div class="drawer-head"><h3>' + esc(title) + '</h3>'
-    + '<button class="close" aria-label="Fechar">×</button></div>'
-    + '<div class="drawer-body">' + body + '</div>'
-    + '<div class="drawer-foot">'
-    + '<button class="secondary" data-action="cancel">Cancelar</button>'
-    + '<button class="primary" data-action="save">' + esc(saveLabel || 'Salvar') + '</button>'
-    + '</div>';
-  drawer.querySelector('.close').onclick = closeDrawer;
-  drawer.querySelector('[data-action="cancel"]').onclick = closeDrawer;
-  drawer.querySelector('[data-action="save"]').onclick = () => {
-    if (onSave) onSave(drawer);
-  };
-  document.body.appendChild(backdrop);
-  document.body.appendChild(drawer);
-  document.addEventListener('keydown', drawerEscHandler);
-  if (typeof onSave === 'function') {
-    drawer.querySelector('input,textarea,select')?.focus();
-  }
-}
-function drawerEscHandler(e) { if (e.key === 'Escape') closeDrawer(); }
-function closeDrawer() {
-  document.getElementById('drawer-back')?.remove();
-  document.querySelector('.drawer')?.remove();
-  document.removeEventListener('keydown', drawerEscHandler);
-}
+/* ---------- Event delegation (click na nav) ---------- */
+document.addEventListener('click', function(e) {
+  const btn = e.target.closest('nav button[data-tab]');
+  if (btn) setActive(btn.dataset.tab);
+});
 
-/* ============================================================
-   Renderers
-   ============================================================ */
-
-function renderAccounts(root) {
-  root.innerHTML =
-    '<div class="panel-header">'
-    + '<div><h2>Contas WhatsApp</h2>'
-    + '<div class="subtitle">Instâncias Evolution conectadas a este runtime</div></div>'
-    + '<button class="primary" id="new-account">Nova conta</button>'
-    + '</div><div id="list">' + skeletonList(3) + '</div>';
-  api(ENDPOINTS.accounts).then(data => {
-    const accounts = data.accounts || [];
-    const cards = accounts.length
-      ? accounts.map(a => (
-          '<div class="card">'
-          + '<div class="card-title-row">'
-          + '<div>'
-          + '<h3>' + esc(a.name || a.instance) + '</h3>'
-          + '<div class="meta">'
-          + '<span class="tag">instância ' + esc(a.instance) + '</span>'
-          + '<span class="tag">+' + esc(a.owner_phone || '-') + '</span>'
-          + '<span class="tag ' + (a.status === 'active' ? 'good' : 'warn') + '">' + esc(a.status || '-') + '</span>'
-          + '</div></div>'
-          + '<button class="ghost" data-edit="' + esc(a.id) + '">Editar</button>'
-          + '</div></div>'
-        )).join('')
-      : emptyState('Nenhuma conta cadastrada',
-          'Cadastre a primeira instância WhatsApp para começar a receber mensagens.',
-          'Nova conta', "document.getElementById('new-account')?.click()");
-    root.querySelector('#list').innerHTML = cards;
-    root.querySelectorAll('button[data-edit]').forEach(b =>
-      b.onclick = () => editAccountForm(b.dataset.edit));
-    root.querySelector('#new-account').onclick = () => editAccountForm('');
-  }).catch(e => {
-    root.querySelector('#list').innerHTML = emptyState(
-      'Falha ao carregar contas',
-      e.message + '. Use o botão "tentar de novo" abaixo.',
-      'Tentar de novo',
-      'renderAccounts(document.getElementById("root"))'
-    );
-  });
-}
-
-function editAccountForm(accountId) {
-  const card = accountId
-    ? api(ENDPOINTS.accounts + '/' + accountId).then(r => r.account || {}).catch(() => ({}))
-    : Promise.resolve({ instance: '', owner_phone: '', name: '', status: 'active' });
-  Promise.resolve(card).then(current => {
-    const body =
-      '<div class="field-row"><label>Nome</label><input id="name" value="' + esc(current.name) + '"></div>'
-      + '<div class="field-row"><label>Instância Evolution</label><input id="instance" value="' + esc(current.instance) + '"' + (accountId ? ' readonly' : '') + '><div class="hint">Identificador único da instância no Evolution</div></div>'
-      + '<div class="field-row"><label>Telefone do proprietário</label><input id="owner_phone" value="' + esc(current.owner_phone) + '"></div>'
-      + '<div class="field-row"><label>Status</label><select id="status">'
-      + ['active', 'paused', 'archived'].map(s =>
-          '<option value="' + s + '"' + (current.status === s ? ' selected' : '') + '>' + ({
-            active: 'Ativa', paused: 'Pausada', archived: 'Arquivada'
-          }[s]) + '</option>').join('')
-      + '</select></div>'
-      + '<div id="account-flash"></div>';
-    openDrawer(accountId ? 'Editar conta' : 'Nova conta WhatsApp', body, (drawer) => {
-      const payload = {
-        name: drawer.querySelector('#name').value.trim(),
-        instance: drawer.querySelector('#instance').value.trim(),
-        owner_phone: drawer.querySelector('#owner_phone').value.trim(),
-        status: drawer.querySelector('#status').value,
-      };
-      api(ENDPOINTS.accounts + (accountId ? '/' + accountId : ''), {
-        method: accountId ? 'PUT' : 'POST',
-        body: JSON.stringify(payload),
-      }).then(() => {
-        toast('Conta salva', 'good');
-        closeDrawer();
-        renderAccounts(document.getElementById('root'));
-      }).catch(e => {
-        drawer.querySelector('#account-flash').innerHTML =
-          '<div class="inline-banner">' + esc(e.message) + '</div>';
-      });
-    });
-  });
-}
-
-function renderAgents(root) {
-  root.innerHTML =
-    '<div class="panel-header">'
-    + '<div><h2>Agentes</h2>'
-    + '<div class="subtitle">Agentes do runtime LLM (jennifier + managers + specialists)</div></div>'
-    + '<button class="primary" id="new-agent">Novo agente</button>'
-    + '</div><div id="list">' + skeletonList(4) + '</div>';
-  Promise.all([
-    api(ENDPOINTS.agents).catch(() => ({ agents: [] })),
-    api(ENDPOINTS.agents + '/status').catch(() => ({ agents: [] })),
-  ]).then(([aData, sData]) => {
-    const agents = aData.agents || [];
-    const inv = {};
-    (sData.agents || []).forEach(t => { inv[t.agent_id] = t; });
-    if (!agents.length) {
-      root.querySelector('#list').innerHTML = emptyState(
-        'Sem agentes configurados',
-        'Crie seu primeiro agente. Você pode editar jennifier e todos os managers.',
-        'Novo agente', "document.getElementById('new-agent')?.click()");
-      root.querySelector('#new-agent').onclick = () => editAgentForm('');
-      return;
-    }
-    const cards = agents.map(agent => {
-      const id = agent.id || agent.name;
-      const t = inv[id] || {};
-      const status = t.status || 'unverified';
-      const dotClass = status === 'healthy' ? 'ok' : status === 'disabled' ? 'warn' : 'bad';
-      const tags = [];
-      (agent.skills || []).forEach(s => tags.push('<span class="tag accent">' + esc(s) + '</span>'));
-      (agent.tools || []).forEach(t => tags.push('<span class="tag">' + esc(t) + '</span>'));
-      return '<div class="card">'
-        + '<div class="card-title-row">'
-        + '<div>'
-        + '<h3>' + esc(agent.name || agent.id) + ' <small style="font-size:11px;color:var(--fg-muted);font-weight:400">(' + esc(id) + ')</small></h3>'
-        + '<div class="meta">'
-        + '<span><span class="status-dot ' + dotClass + '"></span>' + esc(status) + '</span>'
-        + '<span class="tag accent">' + esc(agent.role || 'specialist') + '</span>'
-        + '<span class="tag jade">' + esc(agent.model || '-') + '</span>'
-        + (agent.enabled === false ? '<span class="tag warn">disabled</span>' : '')
-        + '</div>'
-        + '<div class="meta">' + tags.join('') + '</div>'
-        + '</div>'
-        + '<div class="actions-inline">'
-        + '<button class="ghost" data-edit="' + esc(id) + '">Editar</button>'
-        + '<button class="ghost danger" data-delete="' + esc(id) + '">Excluir</button>'
-        + '</div>'
-        + '</div></div>';
-    }).join('');
-    root.querySelector('#list').innerHTML = cards;
-    root.querySelectorAll('button[data-edit]').forEach(b =>
-      b.onclick = () => editAgentForm(b.dataset.edit));
-    root.querySelectorAll('button[data-delete]').forEach(b =>
-      b.onclick = () => deleteAgent(b.dataset.delete));
-    root.querySelector('#new-agent').onclick = () => editAgentForm('');
-  }).catch(e => {
-    root.querySelector('#list').innerHTML = emptyState(
-      'Falha ao carregar agentes', e.message,
-      'Tentar de novo', 'renderAgents(document.getElementById("root"))');
-  });
-}
-
-function editAgentForm(agentId) {
-  const cur = agentId
-    ? api(ENDPOINTS.agents + '/' + agentId).then(r => Object.assign({
-        id: '', name: '', role: 'specialist', model: 'deepseek-v4-flash',
-        instances: ['jennifer'], execution_mode: 'reactive', enabled: true,
-        skills: [], tools: [], system_prompt: ''
-      }, r.agent || {})).catch(() => ({}))
-    : Promise.resolve({
-        id: '', name: '', role: 'specialist', model: 'deepseek-v4-flash',
-        instances: ['jennifer'], execution_mode: 'reactive', enabled: true,
-        skills: [], tools: [], system_prompt: ''
-      });
-  Promise.resolve(cur).then(c => {
-    const skillsCsv = Array.isArray(c.skills) ? c.skills.join(', ') : '';
-    const toolsCsv = Array.isArray(c.tools) ? c.tools.join(', ') : '';
-    const instCsv = Array.isArray(c.instances) ? c.instances.join(', ') : 'jennifer';
-    const body =
-      '<div class="field-row"><label>ID (slug)</label><input id="id" value="' + esc(c.id) + '"' + (agentId ? ' readonly' : '') + '"></div>'
-      + '<div class="field-row"><label>Nome</label><input id="name" value="' + esc(c.name) + '"></div>'
-      + '<div class="field-row"><label>Role</label><input id="role" value="' + esc(c.role) + '"></div>'
-      + '<div class="field-row"><label>Modelo</label><input id="model" value="' + esc(c.model) + '"></div>'
-      + '<div class="field-row"><label>Instâncias</label><input id="instances" value="' + esc(instCsv) + '"></div>'
-      + '<div class="field-row"><label>Modo de execução</label><select id="execution_mode">'
-      + ['reactive', 'internal', 'worker'].map(m =>
-          '<option value="' + m + '"' + (c.execution_mode === m ? ' selected' : '') + '>'
-          + { reactive: 'Reativo', internal: 'Interno', worker: 'Worker' }[m] + '</option>').join('')
-      + '</select></div>'
-      + '<div class="field-row"><label>Habilitado</label><select id="enabled">'
-      + '<option value="true"' + (c.enabled !== false ? ' selected' : '') + '>Sim</option>'
-      + '<option value="false"' + (c.enabled === false ? ' selected' : '') + '>Não</option>'
-      + '</select></div>'
-      + '<div class="field-row"><label>Skills (CSV)</label><input id="skills" value="' + esc(skillsCsv) + '"></div>'
-      + '<div class="field-row"><label>Tools (CSV)</label><input id="tools" value="' + esc(toolsCsv) + '"></div>'
-      + '<div class="field-row full"><label>System prompt</label><textarea id="system_prompt" class="mono" rows="6">' + esc(c.system_prompt || '') + '</textarea><div class="hint">Markdown permitido. Vazio = prompt default do agente.</div></div>'
-      + '<div id="agent-flash"></div>';
-    openDrawer(agentId ? 'Editar agente' : 'Novo agente', body, (drawer) => {
-      const id = drawer.querySelector('#id').value.trim();
-      if (!id) {
-        drawer.querySelector('#agent-flash').innerHTML =
-          '<div class="inline-banner">ID é obrigatório</div>';
-        return;
-      }
-      const payload = {
-        id,
-        name: drawer.querySelector('#name').value.trim(),
-        role: drawer.querySelector('#role').value.trim() || 'specialist',
-        model: drawer.querySelector('#model').value.trim() || 'deepseek-v4-flash',
-        instances: drawer.querySelector('#instances').value.split(',').map(s => s.trim()).filter(Boolean),
-        execution_mode: drawer.querySelector('#execution_mode').value,
-        enabled: drawer.querySelector('#enabled').value === 'true',
-        skills: drawer.querySelector('#skills').value.split(',').map(s => s.trim()).filter(Boolean),
-        tools: drawer.querySelector('#tools').value.split(',').map(s => s.trim()).filter(Boolean),
-        system_prompt: drawer.querySelector('#system_prompt').value,
-      };
-      api(ENDPOINTS.agents, { method: 'POST', body: JSON.stringify(payload) }).then(() => {
-        toast('Agente salvo', 'good');
-        closeDrawer();
-        renderAgents(document.getElementById('root'));
-      }).catch(e => {
-        drawer.querySelector('#agent-flash').innerHTML =
-          '<div class="inline-banner">' + esc(e.message) + '</div>';
-      });
-    }, 'Salvar agente');
-  });
-}
-
-function deleteAgent(agentId) {
-  openDrawer('Excluir agente',
-    '<p>Tem certeza que deseja excluir <strong>' + esc(agentId) + '</strong>? '
-    + 'Esta ação remove o documento da coleção <code>agents</code> no Firestore e força reload do cache.</p>'
-    + '<div class="inline-banner" style="margin-top:14px">Esta operação é irreversível.</div>',
-    () => {
-      api(ENDPOINTS.agents + '/' + agentId, { method: 'DELETE' }).then(() => {
-        toast('Agente excluído', 'good');
-        closeDrawer();
-        renderAgents(document.getElementById('root'));
-      }).catch(e => toast('Falha: ' + e.message, 'bad'));
-    }, 'Excluir definitivamente');
-}
-
-function renderSkills(root) {
-  root.innerHTML =
-    '<div class="panel-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
-    + '<div><h2>Skills</h2>'
-    + '<div class="subtitle">Instruções e comportamentos injetados nos agentes</div></div>'
-    + (CALLER_ROLE === 'admin' ? '<button class="primary" onclick="editSkillForm()">+ Nova Skill</button>' : '')
-    + '</div>'
-    + '<div class="toolbar">'
-    + '<input id="skills-search" placeholder="Filtrar por nome, ID ou instrução…">'
-    + '</div>'
-    + '<div id="list">' + skeletonList(3) + '</div>';
-
-  api(ENDPOINTS.skills).then(data => {
-    const skills = data.skills || [];
-    const renderList = (filter) => {
-      const filtered = filter
-        ? skills.filter(s => (s.name || s.id || '').toLowerCase().includes(filter.toLowerCase()) || (s.content || s.instruction || '').toLowerCase().includes(filter.toLowerCase()))
-        : skills;
-      return filtered.length
-        ? filtered.map(s => (
-            '<div class="card">'
-            + '<div>'
-            + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
-            + '<div style="display:flex;align-items:center;gap:8px">'
-            + '<span class="material-symbols-outlined" style="color:var(--accent);font-size:22px">psychology</span>'
-            + '<h3 style="margin:0;font-size:16px;font-weight:600">' + esc(s.name || s.id) + '</h3>'
-            + '</div>'
-            + '<span class="tag jade" style="font-family:\'JetBrains Mono\',monospace">' + esc(s.id) + '</span>'
-            + '</div>'
-            + '<p style="color:var(--fg-soft);font-size:13px;margin:8px 0 16px 0;line-height:1.5">'
-            + esc((s.content || s.instruction || '').slice(0, 240)) + ((s.content || s.instruction || '').length > 240 ? '…' : '')
-            + '</p>'
-            + '</div>'
-            + '<div style="display:flex;gap:8px;justify-content:flex-end;border-top:1px solid var(--border);padding-top:12px;margin-top:auto">'
-            + '<button class="ghost" onclick="viewSkill(\'' + esc(s.id) + '\')">👁️ Ver Conteúdo</button>'
-            + (CALLER_ROLE === 'admin' ? '<button class="secondary" onclick="editSkillForm(\'' + esc(s.id) + '\')">✏️ Editar</button>' : '')
-            + (CALLER_ROLE === 'admin' ? '<button class="secondary danger" onclick="deleteSkill(\'' + esc(s.id) + '\')">🗑️ Excluir</button>' : '')
-            + '</div>'
-            + '</div>'
-          )).join('')
-        : emptyState('Nenhuma skill encontrada', filter ? 'Tente mudar o termo de busca.' : 'Clique no botão acima para cadastrar a primeira.');
-    };
-    root.querySelector('#list').innerHTML = renderList('');
-    root.querySelector('#skills-search').oninput = (e) => {
-      root.querySelector('#list').innerHTML = renderList(e.target.value);
-    };
-  }).catch(e => {
-    root.querySelector('#list').innerHTML = emptyState(
-      'Falha ao carregar skills', e.message,
-      'Tentar de novo', 'renderSkills(document.getElementById("root"))');
-  });
-}
-
-function viewSkill(skillId) {
-  api(ENDPOINTS.skills).then(data => {
-    const s = (data.skills || []).find(item => item.id === skillId);
-    if (!s) { toast('Skill não encontrada', 'bad'); return; }
-    openDrawer('Skill: ' + (s.name || s.id),
-      '<div class="meta" style="margin-bottom:14px"><span class="tag jade">' + esc(s.id) + '</span></div>'
-      + '<pre style="background:var(--surface-alt);padding:14px;border-radius:8px;font-family:\'JetBrains Mono\',monospace;font-size:12px;white-space:pre-wrap">' + esc(s.content || s.instruction || '') + '</pre>',
-      null, 'Fechar');
-    const saveBtn = document.querySelector('.drawer [data-action="save"]');
-    if (saveBtn) saveBtn.style.display = 'none';
-  });
-}
-
-function editSkillForm(skillId) {
-  api(ENDPOINTS.skills).then(data => {
-    const s = (data.skills || []).find(item => item.id === skillId) || {};
-    const body =
-      '<div class="field-row"><label>ID (slug)</label><input id="skill_id" value="' + esc(s.id || '') + '" ' + (s.id ? 'disabled' : '') + ' placeholder="ex: skill-exemplo"></div>'
-      + '<div class="field-row"><label>Nome</label><input id="skill_name" value="' + esc(s.name || '') + '" placeholder="ex: Assistente Financeiro"></div>'
-      + '<div class="field-row full"><label>Conteúdo / Prompt Snippet</label><textarea id="skill_content" class="mono" rows="8" placeholder="Instruções para o agente...">' + esc(s.content || s.instruction || '') + '</textarea></div>'
-      + '<div id="skill-flash"></div>';
-    openDrawer(skillId ? 'Editar Skill' : 'Nova Skill', body, (drawer) => {
-      const id = drawer.querySelector('#skill_id').value.trim();
-      const name = drawer.querySelector('#skill_name').value.trim();
-      const content = drawer.querySelector('#skill_content').value;
-      if (!id) {
-        drawer.querySelector('#skill-flash').innerHTML = '<div class="inline-banner">ID é obrigatório</div>';
-        return;
-      }
-      api(ENDPOINTS.skills, { method: 'POST', body: JSON.stringify({ id, name, content }) }).then(() => {
-        toast('Skill salva', 'good');
-        closeDrawer();
-        renderSkills(document.getElementById('root'));
-      }).catch(e => {
-        drawer.querySelector('#skill-flash').innerHTML = '<div class="inline-banner">' + esc(e.message) + '</div>';
-      });
-    }, 'Salvar Skill');
-  });
-}
-
-function deleteSkill(skillId) {
-  openDrawer('Excluir Skill',
-    '<p>Tem certeza que deseja excluir a skill <strong>' + esc(skillId) + '</strong>?</p>',
-    () => {
-      api(ENDPOINTS.skills + '/' + skillId, { method: 'DELETE' }).then(() => {
-        toast('Skill excluída', 'good');
-        closeDrawer();
-        renderSkills(document.getElementById('root'));
-      }).catch(e => toast('Falha: ' + e.message, 'bad'));
-    }, 'Excluir definitivamente');
-}
-
-function renderTools(root) {
-  root.innerHTML =
-    '<div class="panel-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
-    + '<div><h2>Tools & Integrações</h2>'
-    + '<div class="subtitle">Catálogo de ferramentas Google Native e Composio MCP registradas</div></div>'
-    + (CALLER_ROLE === 'admin' ? '<button class="primary" onclick="editToolForm()">+ Nova Tool</button>' : '')
-    + '</div>'
-    + '<div class="toolbar">'
-    + '<input id="tools-search" placeholder="Filtrar por nome ou ID…">'
-    + '</div>'
-    + '<div id="list">' + skeletonList(3) + '</div>';
-
-  api(ENDPOINTS.tools).then(data => {
-    const tools = data.tools || [];
-    const renderList = (filter) => {
-      const filtered = filter
-        ? tools.filter(t => (t.name || t.id || '').toLowerCase().includes(filter.toLowerCase()) || (t.description || t.implementation || '').toLowerCase().includes(filter.toLowerCase()))
-        : tools;
-      return filtered.length
-        ? filtered.map(t => (
-            '<div class="card">'
-            + '<div>'
-            + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
-            + '<div style="display:flex;align-items:center;gap:8px">'
-            + '<span class="material-symbols-outlined" style="color:var(--accent);font-size:22px">build</span>'
-            + '<h3 style="margin:0;font-size:16px;font-weight:600">' + esc(t.name || t.id) + '</h3>'
-            + '</div>'
-            + '<span class="tag jade" style="font-family:\'JetBrains Mono\',monospace">' + esc(t.id) + '</span>'
-            + '</div>'
-            + '<p style="color:var(--fg-soft);font-size:13px;margin:8px 0 16px 0">'
-            + esc(t.description || t.implementation || 'Tool ativa do sistema.')
-            + '</p>'
-            + '</div>'
-            + '<div style="display:flex;gap:8px;justify-content:flex-end;border-top:1px solid var(--border);padding-top:12px;margin-top:auto">'
-            + (CALLER_ROLE === 'admin' ? '<button class="secondary" onclick="editToolForm(\'' + esc(t.id) + '\')">✏️ Editar</button>' : '')
-            + (CALLER_ROLE === 'admin' ? '<button class="secondary danger" onclick="deleteTool(\'' + esc(t.id) + '\')">🗑️ Excluir</button>' : '')
-            + '</div>'
-            + '</div>'
-          )).join('')
-        : emptyState('Nenhuma tool encontrada', filter ? 'Tente mudar o termo de busca.' : 'Tools registradas aparecem aqui.');
-    };
-    root.querySelector('#list').innerHTML = renderList('');
-    root.querySelector('#tools-search').oninput = (e) => {
-      root.querySelector('#list').innerHTML = renderList(e.target.value);
-    };
-  }).catch(e => {
-    root.querySelector('#list').innerHTML = emptyState(
-      'Falha ao carregar tools', e.message,
-      'Tentar de novo', 'renderTools(document.getElementById("root"))');
-  });
-}
-
-function editToolForm(toolId) {
-  api(ENDPOINTS.tools).then(data => {
-    const t = (data.tools || []).find(item => item.id === toolId) || {};
-    const body =
-      '<div class="field-row"><label>ID (slug)</label><input id="tool_id" value="' + esc(t.id || '') + '" ' + (t.id ? 'disabled' : '') + ' placeholder="ex: google_calendar"></div>'
-      + '<div class="field-row"><label>Nome</label><input id="tool_name" value="' + esc(t.name || '') + '" placeholder="ex: Google Calendar"></div>'
-      + '<div class="field-row full"><label>Descrição</label><textarea id="tool_desc" class="mono" rows="4">' + esc(t.description || t.implementation || '') + '</textarea></div>'
-      + '<div id="tool-flash"></div>';
-    openDrawer(toolId ? 'Editar Tool' : 'Nova Tool', body, (drawer) => {
-      const id = drawer.querySelector('#tool_id').value.trim();
-      const name = drawer.querySelector('#tool_name').value.trim();
-      const description = drawer.querySelector('#tool_desc').value;
-      if (!id) {
-        drawer.querySelector('#tool-flash').innerHTML = '<div class="inline-banner">ID é obrigatório</div>';
-        return;
-      }
-      api(ENDPOINTS.tools, { method: 'POST', body: JSON.stringify({ id, name, description }) }).then(() => {
-        toast('Tool salva', 'good');
-        closeDrawer();
-        renderTools(document.getElementById('root'));
-      }).catch(e => {
-        drawer.querySelector('#tool-flash').innerHTML = '<div class="inline-banner">' + esc(e.message) + '</div>';
-      });
-    }, 'Salvar Tool');
-  });
-}
-
-function deleteTool(toolId) {
-  openDrawer('Excluir Tool',
-    '<p>Tem certeza que deseja excluir a tool <strong>' + esc(toolId) + '</strong>?</p>',
-    () => {
-      api(ENDPOINTS.tools + '/' + toolId, { method: 'DELETE' }).then(() => {
-        toast('Tool excluída', 'good');
-        closeDrawer();
-        renderTools(document.getElementById('root'));
-      }).catch(e => toast('Falha: ' + e.message, 'bad'));
-    }, 'Excluir definitivamente');
-}
-
-function renderOwners(root) {
-  root.innerHTML =
-    '<div class="panel-header">'
-    + '<div><h2>Proprietários</h2>'
-    + '<div class="subtitle">Donos únicos por instância (whatsapp_accounts.owner_phone)</div></div>'
-    + '</div><div id="list">' + skeletonList(2) + '</div>';
-  api(ENDPOINTS.owners).then(data => {
-    const owners = data.owners || [];
-    const cards = owners.length
-      ? owners.map(o => (
-          '<div class="card"><h3>' + esc(o.display_name || o.owner_uid) + '</h3>'
-          + '<div class="meta">'
-          + '<span class="tag jade">uid ' + esc(o.owner_uid) + '</span>'
-          + '<span class="tag">+' + esc(o.owner_phone || '-') + '</span>'
-          + (o.instance ? '<span class="tag muted">' + esc(o.instance) + '</span>' : '')
-          + '</div></div>'
-        )).join('')
-      : emptyState('Sem proprietários',
-          'Cadastre uma conta WhatsApp primeiro.');
-    root.querySelector('#list').innerHTML = cards;
-  }).catch(e => {
-    root.querySelector('#list').innerHTML = emptyState(
-      'Falha ao carregar proprietários', e.message,
-      'Tentar de novo', 'renderOwners(document.getElementById("root"))');
-  });
-}
-
-function renderConexoes(root) {
-  root.innerHTML =
-    '<div class="panel-header">'
-    + '<div><h2>Conexões</h2>'
-    + '<div class="subtitle">Serviços que a Jennifer pode acessar por você — conecte sua conta para liberar cada funcionalidade</div></div>'
-    + '</div>'
-    + (CALLER_ROLE === 'agent_user'
-        ? ''
-        : '<div class="toolbar">'
-        + '<label for="conexoes-user" style="font-size:13px;color:var(--fg-soft)">Usuário:&nbsp;</label>'
-        + '<select id="conexoes-user" style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface)"></select>'
-        + '</div>')
-    + '<div id="conexoes-body">' + skeletonList(3) + '</div>';
-
-  if (CALLER_ROLE === 'agent_user') {
-    const phone = CALLER_PHONE;
-    if (!phone) {
-      root.querySelector('#conexoes-body').innerHTML = emptyState(
-        'Telefone não identificado',
-        'Não foi possível identificar seu telefone na sessão.');
-      return;
-    }
-    loadConexoes(root, phone);
-    return;
-  }
-
-  api(ENDPOINTS.users).then(data => {
-    const users = (data.users || []);
-    if (!users.length) {
-      root.querySelector('#conexoes-body').innerHTML = emptyState(
-        'Nenhum usuário cadastrado',
-        'Quando alguém conectar uma conta via WhatsApp, o usuário aparece aqui.');
-      return;
-    }
-    const sel = root.querySelector('#conexoes-user');
-    users.forEach(u => {
-      const opt = document.createElement('option');
-      const p = u.phone_canonical || u.phone || '';
-      opt.value = p;
-      opt.textContent = '+' + p;
-      sel.appendChild(opt);
-    });
-    sel.addEventListener('change', () => loadConexoes(root, sel.value));
-    loadConexoes(root, sel.value);
-  }).catch(e => {
-    root.querySelector('#conexoes-body').innerHTML = emptyState(
-      'Falha ao carregar usuários', e.message,
-      'Tentar de novo', 'renderConexoes(document.getElementById("root"))');
-  });
-}
-
-function renderPermissoes(root) {
-  root.innerHTML =
-    '<div class="panel-header">'
-    + '<div><h2>Permissões de acesso</h2>'
-    + '<div class="subtitle">Pastas e dados que a Jennifer pode acessar na sua conta (Drive, Gmail, Agenda)</div></div>'
-    + '</div>'
-    + '<div id="permissoes-body">' + skeletonList(2) + '</div>';
-
-  const phone = CALLER_PHONE;
-  if (!phone) {
-    root.querySelector('#permissoes-body').innerHTML = emptyState(
-      'Telefone não identificado',
-      'Não foi possível identificar seu telefone na sessão.');
-    return;
-  }
-
-  api(ENDPOINTS.user + '/' + encodeURIComponent(phone) + '/folder-permissions').then(data => {
-    const perms = (data.permissions || data.folder_permissions || []);
-    const tools = [
-      { key: 'drive', name: 'Google Drive', desc: 'Pastas/arquivos' },
-      { key: 'gmail', name: 'Gmail', desc: 'Padrões de email' },
-      { key: 'calendar', name: 'Agenda', desc: 'Agendas/eventos' },
-    ];
-    const cards = perms.length
-      ? perms.map(p => (
-          '<div class="card" style="display:flex;align-items:center;justify-content:space-between">'
-          + '<div style="display:flex;align-items:center;gap:10px">'
-          + '<span style="font-size:18px">' + (p.tool === 'drive' ? '📁' : p.tool === 'gmail' ? '📧' : '📅') + '</span>'
-          + '<div><h3 style="margin:0">' + esc(p.tool) + '</h3>'
-          + '<div class="meta" style="margin:2px 0 0">' + esc(p.pattern) + ' · ' + esc(p.scope) + '</div></div></div>'
-          + '<button class="secondary" data-revoke="' + esc(p.permission_id) + '">Revogar</button>'
-          + '</div>'
-        )).join('')
-      : emptyState('Sem permissões concedidas',
-          'A Jennifer acessa seus dados com o escopo padrão do OAuth. Conceda permissões específicas de pasta quando quiser restringir.');
-
-    const form =
-      '<div class="card" style="margin-top:16px">'
-      + '<h3>Conceder permissão</h3>'
-      + '<div class="field-row" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">'
-      + '<select id="perm-tool" style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface)">'
-      + tools.map(t => '<option value="' + t.key + '">' + esc(t.name) + '</option>').join('')
-      + '</select>'
-      + '<input id="perm-pattern" placeholder="pattern (pasta id, email, *)" style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);flex:1;min-width:180px">'
-      + '<select id="perm-scope" style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface)">'
-      + '<option value="whitelist">whitelist</option><option value="blacklist">blacklist</option>'
-      + '</select>'
-      + '<button class="primary" id="perm-grant">Conceder</button>'
-      + '</div></div>';
-
-    root.querySelector('#permissoes-body').innerHTML = cards + form;
-
-    const grantBtn = root.querySelector('#perm-grant');
-    if (grantBtn) {
-      grantBtn.addEventListener('click', () => {
-        const tool = root.querySelector('#perm-tool').value;
-        const pattern = root.querySelector('#perm-pattern').value.trim();
-        const scope = root.querySelector('#perm-scope').value;
-        if (!pattern) { toast('Informe um pattern', 'error'); return; }
-        api(ENDPOINTS.user + '/' + encodeURIComponent(phone) + '/folder-permissions', {
-          method: 'POST',
-          body: JSON.stringify({ tool: tool, pattern: pattern, scope: scope, created_by: phone }),
-        }).then(() => { toast('Permissão concedida'); renderPermissoes(root); })
-          .catch(e => toast('Erro: ' + e.message, 'error'));
-      });
-    }
-    root.querySelectorAll('[data-revoke]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const pid = btn.dataset.revoke;
-        api(ENDPOINTS.user + '/' + encodeURIComponent(phone) + '/folder-permissions/' + encodeURIComponent(pid), {
-          method: 'DELETE',
-        }).then(() => { toast('Permissão revogada'); renderPermissoes(root); })
-          .catch(e => toast('Erro: ' + e.message, 'error'));
-      });
-    });
-  }).catch(e => {
-    root.querySelector('#permissoes-body').innerHTML = emptyState(
-      'Falha ao carregar permissões', e.message,
-      'Tentar de novo', 'renderPermissoes(document.getElementById("root"))');
-  });
-}
-
-function loadConexoes(root, phone) {
-  if (!phone) {
-    root.querySelector('#conexoes-body').innerHTML = emptyState(
-      'Selecione um usuário', 'Escolha um usuário no menu acima para ver as conexões.');
-    return;
-  }
-  const body = root.querySelector('#conexoes-body');
-  body.innerHTML = skeletonList(2);
-  Promise.all([
-    api(ENDPOINTS.user(phone)).catch(() => null),
-    api(ENDPOINTS.composioStatus(phone)).catch(() => null),
-  ]).then(([userData, composioData]) => {
-    const google = (userData && ((userData.user || userData).google_oauth_token)) || null;
-    const hasGoogle = !!(google && google.token);
-    const compApps = (composioData && composioData.apps) || {};
-
-    const googleServices = [
-      { key: 'gmail',  icon: '📧', name: 'Email (Gmail)', desc: 'Ler e enviar emails' },
-      { key: 'calendar', icon: '📅', name: 'Agenda (Google Calendar)', desc: 'Ver e criar compromissos' },
-      { key: 'drive',  icon: '📁', name: 'Arquivos (Google Drive)', desc: 'Buscar e ler seus documentos' },
-    ];
-    const compServices = [
-      { key: 'linkedin',     icon: '💼', name: 'LinkedIn', desc: 'Postar e ler seu perfil' },
-      { key: 'youtube',      icon: '▶️', name: 'YouTube', desc: 'Buscar vídeos' },
-      { key: 'googledocs',   icon: '📝', name: 'Documentos (Google Docs)', desc: 'Criar e ler documentos' },
-      { key: 'googlesheets', icon: '📊', name: 'Planilhas (Google Sheets)', desc: 'Criar e ler planilhas' },
-      { key: 'github',       icon: '🐙', name: 'GitHub', desc: 'Repositórios e código' },
-      { key: 'notion',       icon: '📓', name: 'Notion', desc: 'Notas e bases de dados' },
-      { key: 'google_maps',  icon: '🗺️', name: 'Google Maps', desc: 'Rotas e lugares' },
-      { key: 'one_drive',    icon: '☁️', name: 'OneDrive', desc: 'Arquivos na nuvem' },
-    ];
-
-    const googleCards = googleServices.map(s => {
-      const on = hasGoogle;
-      return '<div class="card" style="display:flex;align-items:center;justify-content:space-between">'
-        + '<div style="display:flex;align-items:center;gap:10px">'
-        + '<span style="font-size:20px">' + s.icon + '</span>'
-        + '<div><h3 style="margin:0">' + s.name + '</h3>'
-        + '<div class="meta" style="margin:2px 0 0">' + s.desc + '</div></div></div>'
-        + (on
-            ? '<span class="tag jade">● OK</span>'
-            : '<button class="primary" onclick="window.open(\\\'/oauth/google?phone=' + encodeURIComponent(phone) + '\\\',\\\'_blank\\\')">🔗 Conectar</button>')
-        + '</div>';
-    }).join('');
-
-    const compCards = compServices.map(s => {
-      const app = compApps[s.key] || {};
-      const on = app.connected;
-      const statusLabel = on ? '● OK' : '○ Pendente';
-      return '<div class="card" style="display:flex;align-items:center;justify-content:space-between">'
-        + '<div style="display:flex;align-items:center;gap:10px">'
-        + '<span style="font-size:20px">' + s.icon + '</span>'
-        + '<div><h3 style="margin:0">' + s.name + '</h3>'
-        + '<div class="meta" style="margin:2px 0 0">' + s.desc + '</div></div></div>'
-        + (on
-            ? '<span class="tag jade">● OK</span>'
-            : '<button class="primary" data-comp-key="' + s.key + '">🔗 Conectar</button>')
-        + '</div>';
-    }).join('');
-
-    body.innerHTML =
-      '<div class="subtitle" style="margin:4px 0 8px;font-weight:600">Conta Google</div>'
-      + googleCards
-      + (hasGoogle
-          ? ''
-          : '<div class="inline-banner" style="margin-top:8px">Conecte sua conta Google para liberar Email, Agenda e Arquivos de uma vez.</div>')
-      + '<div class="subtitle" style="margin:20px 0 8px;font-weight:600">Outros serviços</div>'
-      + compCards
-      + '<div id="conexoes-comp-result"></div>';
-
-    body.querySelectorAll('[data-comp-key]').forEach(btn => {
-      btn.addEventListener('click', () => connectComposioApp(root, phone, btn.dataset.compKey, btn));
-    });
-  }).catch(e => {
-    body.innerHTML = emptyState('Falha ao carregar conexões', e.message,
-      'Tentar de novo', 'loadConexoes(document.getElementById("root"), ' + JSON.stringify(phone) + ')');
-  });
-}
-
-function connectComposioApp(root, phone, appKey, btn) {
-  btn.disabled = true;
-  btn.textContent = 'Gerando link…';
-  api(ENDPOINTS.composioAuthorize, {
-    method: 'POST',
-    body: JSON.stringify({ phone: phone, toolkit: appKey }),
-  }).then(data => {
-    const links = data.links || [];
-    const match = links.find(l => l.toolkit === appKey);
-    const resultBox = root.querySelector('#conexoes-comp-result');
-    if (match && match.connect_url) {
-      resultBox.innerHTML = '<div class="card">'
-        + '<h3>Autorize o app</h3>'
-        + '<p style="font-size:13px;color:var(--fg-soft)">Clique no link abaixo para autorizar. O link expira em 10 minutos.</p>'
-        + '<a class="primary" href="' + esc(match.connect_url) + '" target="_blank" rel="noopener" style="display:inline-block;padding:10px 14px;border-radius:8px;text-decoration:none">🔗 Abrir autorização</a>'
-        + '<div class="meta" style="margin-top:8px">Depois de autorizar, volte aqui e recarregue para ver o status atualizado.</div>'
-        + '</div>';
-    } else {
-      resultBox.innerHTML = '<div class="inline-banner" style="margin-top:8px">' + (match && match.error ? esc(match.error) : 'Link não gerado.') + '</div>';
-    }
-    btn.disabled = false;
-    btn.textContent = '🔗 Conectar';
-  }).catch(e => {
-    btn.disabled = false;
-    btn.textContent = '🔗 Conectar';
-    toast('Erro ao gerar link: ' + e.message, 'error');
-  });
-}
-
-function renderKnowledge(root) {
-  root.innerHTML =
-    '<div class="panel-header">'
-    + '<div><h2>Conhecimento</h2>'
-    + '<div class="subtitle">Documentos indexados no Firestore Vector (Fase F4d)</div></div>'
-    + '</div>'
-    + '<div class="toolbar">'
-    + '<input id="knowledge-search" placeholder="Filtrar por título…">'
-    + '</div>'
-    + '<div id="knowledge-list">' + skeletonList(3) + '</div>';
-  api(ENDPOINTS.knowledge + '?limit=50').then(data => {
-    const docs = data.documents || [];
-    const renderList = (filter) => {
-      const filtered = filter
-        ? docs.filter(d => (d.title || d.doc_id || '').toLowerCase().includes(filter.toLowerCase()))
-        : docs;
-      return filtered.length
-        ? filtered.map(d => (
-            '<div class="card clickable" data-doc="' + esc(d.doc_id) + '" data-collection="' + esc(d.collection) + '">'
-            + '<div class="card-title-row">'
-            + '<div>'
-            + '<h3>' + esc(d.title || d.doc_id) + '</h3>'
-            + '<div class="meta">'
-            + '<span class="tag accent">' + esc(d.collection) + '</span>'
-            + (d.klass ? '<span class="tag">' + esc(d.klass) + '</span>' : '')
-            + (d.group ? '<span class="tag">' + esc(d.group) + '</span>' : '')
-            + '<span class="tag jade">' + (d.chunk_count || 0) + ' chunks</span>'
-            + '</div>'
-            + '<p style="margin-top:8px">' + esc((d.text || '').slice(0, 240)) + ((d.text || '').length > 240 ? '…' : '') + '</p>'
-            + '</div></div></div>'
-          )).join('')
-        : emptyState('Nenhum documento', 'Nenhum documento indexado ainda.');
-    };
-    root.querySelector('#knowledge-list').innerHTML = renderList('');
-    root.querySelector('#knowledge-search').oninput = (e) => {
-      root.querySelector('#knowledge-list').innerHTML = renderList(e.target.value);
-      attachKnowledgeHandlers();
-    };
-    attachKnowledgeHandlers();
-  }).catch(e => {
-    root.querySelector('#knowledge-list').innerHTML = emptyState(
-      'Falha ao carregar conhecimento', e.message,
-      'Tentar de novo', 'renderKnowledge(document.getElementById("root"))');
-  });
-}
-
-function attachKnowledgeHandlers() {
-  document.querySelectorAll('div[data-doc]').forEach(card => {
-    card.onclick = () => viewKnowledgeDoc(card.dataset.doc, card.dataset.collection);
-  });
-}
-
-function viewKnowledgeDoc(docId, collection) {
-  api(ENDPOINTS.knowledgeDoc(docId) + '?collection=' + encodeURIComponent(collection || ''))
-    .then(resp => {
-      const doc = resp.document || {};
-      const chunks = doc.chunks || [];
-      const tags = [];
-      if (doc.collection) tags.push('<span class="tag accent">' + esc(doc.collection) + '</span>');
-      if (doc.klass) tags.push('<span class="tag">' + esc(doc.klass) + '</span>');
-      if (doc.group) tags.push('<span class="tag">' + esc(doc.group) + '</span>');
-      if (doc.theme) tags.push('<span class="tag jade">' + esc(doc.theme) + '</span>');
-      if (typeof doc.chunk_count === 'number') tags.push('<span class="tag muted">' + doc.chunk_count + ' chunks</span>');
-      const chunksHtml = chunks.length
-        ? chunks.map((c, i) => (
-            '<div class="chunk">'
-            + '<div class="chunk-head">chunk ' + (i + 1) + ' / ' + chunks.length + '</div>'
-            + '<pre>' + esc(typeof c === 'string' ? c : (c.text || c.content || '')) + '</pre>'
-            + '</div>'
-          )).join('')
-        : emptyState('Sem conteúdo', 'Documento cadastrado sem texto.');
-      openDrawer(doc.title || docId,
-        '<div class="meta" style="margin-bottom:16px">' + tags.join(' ') + '</div>'
-        + chunksHtml, null, 'Fechar');
-      const saveBtn = document.querySelector('.drawer [data-action="save"]');
-      if (saveBtn) saveBtn.style.display = 'none';
-    }).catch(e => {
-      openDrawer('Erro',
-        '<div class="inline-banner">' + esc(e.message) + '</div>',
-        null, 'Fechar');
-      const saveBtn = document.querySelector('.drawer [data-action="save"]');
-      if (saveBtn) saveBtn.style.display = 'none';
-    });
-}
-
-function renderStatus(root) {
-  root.innerHTML =
-    '<div class="panel-header">'
-    + '<div><h2>Status operacional</h2>'
-    + '<div class="subtitle">Monitoramento do runtime, usuarios e conexoes</div></div>'
-    + '</div>'
-    + '<div id="kpi-grid" class="kpi-grid">' + skeletonList(6) + '</div>'
-    + '<div id="sections"></div>';
-  api(ENDPOINTS.status).then(data => {
-    const kpis = (data.kpis || []).map(k =>
-      '<div class="kpi">'
-      + '<div class="kpi-value">' + esc(k.value) + '</div>'
-      + '<div class="kpi-label">' + esc(k.label) + '</div>'
-      + (k.sub ? '<div class="kpi-sub">' + esc(k.sub) + '</div>' : '')
-      + '</div>'
-    ).join('');
-    root.querySelector('#kpi-grid').innerHTML = kpis || '<p>Nenhum KPI disponível</p>';
-    const sections = [];
-
-    if (data.users_summary) {
-      const rows = (data.users_summary.users || []);
-      const table = rows.length
-        ? '<table class="status-table"><thead><tr>'
-          + '<th>Telefone</th><th>Email</th><th>Role</th><th>Google</th><th>LinkedAt</th>'
-          + '</tr></thead><tbody>'
-          + rows.map(u => '<tr>'
-              + '<td>' + esc(u.phone) + '</td>'
-              + '<td>' + esc(u.email || '-') + '</td>'
-              + '<td>' + esc(u.role) + '</td>'
-              + '<td>' + (u.has_google ? '<span class="tag jade">ok</span>' : '<span class="tag">—</span>') + '</td>'
-              + '<td>' + esc((u.google_linked_at || '').slice(0, 19).replace('T', ' ')) + '</td>'
-              + '</tr>').join('')
-          + '</tbody></table>'
-        : '<p style="color:var(--fg-soft)">Nenhum usuario cadastrado.</p>';
-      sections.push('<h3 class="sec-title">Usuarios (' + (data.users_summary.total || 0) + ' · ' + (data.users_summary.with_google || 0) + ' com Google)</h3>' + table);
-    }
-
-    if (data.my_connections) {
-      const c = data.my_connections;
-      const googleCard = '<div class="card" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
-        + '<div><h3 style="margin:0">Conta Google</h3><div class="meta">' + esc(c.email || c.phone) + '</div></div>'
-        + (c.google ? '<span class="tag jade">conectada</span>' : '<span class="tag">nao conectada</span>')
-        + '</div>';
-      const compApps = Object.keys(c.composio || {});
-      const compCards = compApps.map(slug =>
-        '<div class="card" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
-        + '<div><h3 style="margin:0">' + esc(slug) + '</h3></div>'
-        + (c.composio[slug] ? '<span class="tag jade">ok</span>' : '<span class="tag">—</span>')
-        + '</div>'
-      ).join('');
-      sections.push('<h3 class="sec-title">Minhas conexoes</h3>' + googleCard + (compCards || '<p style="color:var(--fg-soft)">Nenhum app Composio conectado.</p>'));
-    }
-
-    if (data.agents_summary) {
-      const counts = data.agents_summary.counts || {};
-      sections.push('<h3 class="sec-title">Agentes</h3>'
-        + '<div class="card">'
-        + '<div class="meta">configurados: ' + esc(counts.configured || 0)
-        + ' · roteaveis: ' + esc(counts.routable || 0)
-        + ' · saudaveis: ' + esc(counts.healthy || 0)
-        + ' · degradados: ' + esc(counts.degraded || 0)
-        + '</div></div>');
-    }
-
-    if (data.stt && data.stt.daily_limit) {
-      sections.push('<h3 class="sec-title">STT (fallback Gemini)</h3>'
-        + '<div class="card"><div class="meta">chamadas hoje: ' + esc(data.stt.calls_today || 0)
-        + ' / ' + esc(data.stt.daily_limit || 20) + '</div></div>');
-    }
-
-    root.querySelector('#sections').innerHTML = sections.join('') || '<p>Sem dados adicionais.</p>';
-  }).catch(e => {
-    root.querySelector('#kpi-grid').innerHTML = emptyState(
-      'Falha ao carregar status', e.message,
-      'Tentar de novo', 'renderStatus(document.getElementById("root"))');
-  });
-}
-
-/* ---- boot ---- */
-(async () => {
+/* ---------- Runtime badge ---------- */
+(async function checkRuntime() {
+  const badge = document.getElementById('runtime-badge');
   try {
-    const s = await api(ENDPOINTS.status);
-    const badge = document.getElementById('runtime-badge');
+    const s = await api('/admin/status');
     if (badge) {
-      if (s && s.runtime_ok) {
-        badge.textContent = 'runtime ok';
-      } else {
-        badge.textContent = 'runtime off';
-        badge.classList.add('off');
-      }
+      badge.textContent = s && s.runtime_ok ? 'runtime ok' : 'runtime off';
+      if (!(s && s.runtime_ok)) badge.classList.add('off');
     }
-  } catch (e) {
-    const badge = document.getElementById('runtime-badge');
-    if (badge) {
-      badge.textContent = 'runtime off';
-      badge.classList.add('off');
-    }
+  } catch (_) {
+    if (badge) { badge.textContent = 'runtime off'; badge.classList.add('off'); }
   }
 })();
 
-document.querySelectorAll('nav button').forEach(btn =>
-  btn.addEventListener('click', (e) => {
-    const b = e.target.closest('button[data-tab]');
-    if (b && b.dataset.tab) setActive(b.dataset.tab);
-  })
-);
-const urlTab = new URLSearchParams(window.location.search).get('tab');
-if (urlTab && document.querySelector('nav button[data-tab="' + urlTab + '"]')) {
-  setActive(urlTab);
-} else {
-  setActive(CALLER_ROLE === 'agent_user' ? 'conexoes' : 'accounts');
-}
+/* ---------- Boot: abre tab inicial ---------- */
+const _urlTab = new URLSearchParams(location.search).get('tab');
+const _initTab = (_urlTab && document.querySelector('nav button[data-tab="' + _urlTab + '"]'))
+  ? _urlTab
+  : (CALLER_ROLE === 'agent_user' ? 'conexoes' : 'accounts');
+setActive(_initTab);
 </script>
 </body>
 </html>
 """
-
 
 def render_dashboard(commit: str, deployed_at: str, role: str = "admin", caller_phone: str = "") -> str:
     role = role if role in ("admin", "agent_user") else "admin"
