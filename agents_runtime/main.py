@@ -28,6 +28,7 @@ from core.masker import mask_pii
 from core.timezone import now_brt
 from core import metrics
 from agent_loader import start_loader, stop_loader, list_agents, list_skills, list_tools, get_agent
+from agent_loader import get_skill, get_tool_meta
 from agent_loader import upsert_agent, delete_agent, upsert_skill, delete_skill, upsert_tool, delete_tool
 from agent_loader import get_user, save_user, list_users
 from orchestrator import orchestrate, get_recent_interactions, drain_indexing_tasks, index_audio_failure_for_audit
@@ -1263,6 +1264,15 @@ async def admin_skills_list():
     return JSONResponse(content={"skills": list_skills()})
 
 
+@app.get("/admin/skills/{skill_id}")
+async def admin_skills_get(skill_id: str):
+    """Get a specific skill (Portal proxy)."""
+    skill = get_skill(skill_id)
+    if not skill:
+        raise HTTPException(status_code=404, detail="skill_not_found")
+    return JSONResponse(content={"skill": skill})
+
+
 @app.delete("/admin/skills/{skill_id}")
 async def admin_skills_delete(skill_id: str):
     """Delete a skill (Portal proxy)."""
@@ -1292,6 +1302,15 @@ async def admin_tools_post(request: Request):
 async def admin_tools_list():
     """List all tools (Portal proxy)."""
     return JSONResponse(content={"tools": list_tools()})
+
+
+@app.get("/admin/tools/{tool_id}")
+async def admin_tools_get(tool_id: str):
+    """Get a specific tool (Portal proxy)."""
+    tool = get_tool_meta(tool_id)
+    if not tool:
+        raise HTTPException(status_code=404, detail="tool_not_found")
+    return JSONResponse(content={"tool": tool})
 
 
 @app.delete("/admin/tools/{tool_id}")

@@ -1232,15 +1232,191 @@ function _statusToKpis(data) {
 function accountFormNew() { toast('Em breve: criar conta WhatsApp', 'warn'); }
 function accountEdit(id)  { toast('Editar conta: ' + id, 'warn'); }
 function accountDel(id)   { toast('Excluir conta: ' + id, 'warn'); }
-function agentFormNew()   { toast('Em breve: criar agente', 'warn'); }
-function agentEdit(id)    { toast('Editar agente: ' + id, 'warn'); }
-function agentDel(id)     { toast('Excluir agente: ' + id, 'warn'); }
-function skillFormNew()   { toast('Em breve: criar skill', 'warn'); }
-function skillEdit(id)    { toast('Editar skill: ' + id, 'warn'); }
-function skillDel(id)     { toast('Excluir skill: ' + id, 'warn'); }
-function toolFormNew()    { toast('Em breve: criar tool', 'warn'); }
-function toolEdit(id)     { toast('Editar tool: ' + id, 'warn'); }
-function toolDel(id)      { toast('Excluir tool: ' + id, 'warn'); }
+
+/* ==========================================
+   DRAWER GENÉRICO — edição de agents/skills/tools
+   ========================================== */
+function openDrawer(title, fields, saveCb) {
+  closeDrawer();
+  const bd = document.createElement('div');
+  bd.className = 'drawer-backdrop';
+  bd.id = 'drawer-backdrop';
+  bd.onclick = function(e) { if (e.target === bd) closeDrawer(); };
+
+  const dw = document.createElement('div');
+  dw.className = 'drawer';
+  dw.id = 'drawer';
+  dw.innerHTML =
+    '<div class="drawer-head"><h3>' + esc(title) + '</h3>'
+    + '<button class="close" onclick="closeDrawer()">✕</button></div>'
+    + '<div class="drawer-body" id="drawer-body"></div>'
+    + '<div class="drawer-foot">'
+    + '<button class="secondary" onclick="closeDrawer()">Cancelar</button>'
+    + '<button class="primary" id="drawer-save">Salvar</button>'
+    + '</div>';
+
+  document.body.appendChild(bd);
+  document.body.appendChild(dw);
+
+  const body = dw.querySelector('#drawer-body');
+  body.innerHTML = fields.map(f => {
+    if (f.type === 'textarea') {
+      return '<div class="field-row"><label>' + esc(f.label) + '</label>'
+        + '<textarea id="fld-' + f.name + '" rows="' + (f.rows || 8) + '" style="width:100%;font-family:monospace">'
+        + esc(f.value || '') + '</textarea></div>';
+    }
+    return '<div class="field-row"><label>' + esc(f.label) + '</label>'
+      + '<input id="fld-' + f.name + '" type="' + (f.type || 'text') + '" value="' + esc(f.value ?? '') + '" style="width:100%"></div>';
+  }).join('');
+
+  dw.querySelector('#drawer-save').onclick = function() {
+    const data = {};
+    fields.forEach(f => {
+      const el = document.getElementById('fld-' + f.name);
+      if (el) data[f.name] = el.value;
+    });
+    dw.querySelector('#drawer-save').disabled = true;
+    saveCb(data).then(ok => {
+      if (ok) { closeDrawer(); toast('Salvo com sucesso', 'good'); }
+      else { dw.querySelector('#drawer-save').disabled = false; }
+    });
+  };
+}
+
+function closeDrawer() {
+  const bd = document.getElementById('drawer-backdrop');
+  const dw = document.getElementById('drawer');
+  if (bd) bd.remove();
+  if (dw) dw.remove();
+}
+
+async function _saveGeneric(type, payload) {
+  try {
+    const res = await api('/admin/' + type, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    return res && (res.status === 'ok' || res.upserted !== false);
+  } catch (e) {
+    toast('Erro ao salvar: ' + e.message, 'warn');
+    return false;
+  }
+}
+
+function _reloadCurrentTab() {
+  const active = document.querySelector('nav button[data-tab].active');
+  if (active) setActive(active.dataset.tab);
+}
+
+function agentEdit(id) {
+  api('/admin/agents/' + encodeURIComponent(id)).then(data => {
+    const a = data.agent || {};
+    openDrawer('Editar Agente — ' + id, [
+      { name: 'id', label: 'ID (agent_id)', value: a.agent_id || id },
+      { name: 'name', label: 'Nome', value: a.name },
+      { name: 'role', label: 'Role', value: a.role },
+      { name: 'model', label: 'Modelo', value: a.model },
+      { name: 'system_prompt', label: 'System Prompt', type: 'textarea', rows: 16, value: a.system_prompt },
+      { name: 'description', label: 'Descrição', type: 'textarea', rows: 3, value: a.description },
+    ], async payload => {
+      payload.skills = a.skills || [];
+      const ok = await _saveGeneric('agents', payload);
+      if (ok) _reloadCurrentTab();
+      return ok;
+    });
+  }).catch(e => toast('Erro ao carregar agente: ' + e.message, 'warn'));
+}
+function agentFormNew() {
+  openDrawer('Novo Agente', [
+    { name: 'id', label: 'ID (agent_id)', value: '' },
+    { name: 'name', label: 'Nome', value: '' },
+    { name: 'role', label: 'Role', value: 'agent' },
+    { name: 'model', label: 'Modelo', value: 'deepseek-v4-flash' },
+    { name: 'system_prompt', label: 'System Prompt', type: 'textarea', rows: 16, value: '' },
+    { name: 'description', label: 'Descrição', type: 'textarea', rows: 3, value: '' },
+  ], async payload => {
+    if (!payload.id) { toast('ID obrigatório', 'warn'); return false; }
+    payload.agent_id = payload.id;
+    const ok = await _saveGeneric('agents', payload);
+    if (ok) _reloadCurrentTab();
+    return ok;
+  });
+}
+function agentDel(id) {
+  api('/admin/agents/' + encodeURIComponent(id), { method: 'DELETE' })
+    .then(() => { toast('Agente excluído', 'good'); _reloadCurrentTab(); })
+    .catch(e => toast('Erro ao excluir: ' + e.message, 'warn'));
+}
+
+function skillEdit(id) {
+  api('/admin/skills/' + encodeURIComponent(id)).then(data => {
+    const s = data.skill || {};
+    openDrawer('Editar Skill — ' + id, [
+      { name: 'id', label: 'ID (skill_id)', value: s.skill_id || id },
+      { name: 'name', label: 'Nome', value: s.name },
+      { name: 'description', label: 'Descrição', type: 'textarea', rows: 3, value: s.description },
+      { name: 'system_prompt', label: 'System Prompt', type: 'textarea', rows: 16, value: s.system_prompt },
+    ], async payload => {
+      const ok = await _saveGeneric('skills', payload);
+      if (ok) _reloadCurrentTab();
+      return ok;
+    });
+  }).catch(e => toast('Erro ao carregar skill: ' + e.message, 'warn'));
+}
+function skillFormNew() {
+  openDrawer('Nova Skill', [
+    { name: 'id', label: 'ID (skill_id)', value: '' },
+    { name: 'name', label: 'Nome', value: '' },
+    { name: 'description', label: 'Descrição', type: 'textarea', rows: 3, value: '' },
+    { name: 'system_prompt', label: 'System Prompt', type: 'textarea', rows: 16, value: '' },
+  ], async payload => {
+    if (!payload.id) { toast('ID obrigatório', 'warn'); return false; }
+    payload.skill_id = payload.id;
+    const ok = await _saveGeneric('skills', payload);
+    if (ok) _reloadCurrentTab();
+    return ok;
+  });
+}
+function skillDel(id) {
+  api('/admin/skills/' + encodeURIComponent(id), { method: 'DELETE' })
+    .then(() => { toast('Skill excluída', 'good'); _reloadCurrentTab(); })
+    .catch(e => toast('Erro ao excluir: ' + e.message, 'warn'));
+}
+
+function toolEdit(id) {
+  api('/admin/tools/' + encodeURIComponent(id)).then(data => {
+    const t = data.tool || {};
+    openDrawer('Editar Tool — ' + id, [
+      { name: 'id', label: 'ID (tool_id)', value: t.tool_id || id },
+      { name: 'name', label: 'Nome', value: t.name },
+      { name: 'description', label: 'Descrição', type: 'textarea', rows: 3, value: t.description },
+      { name: 'system_prompt', label: 'System Prompt', type: 'textarea', rows: 16, value: t.system_prompt },
+    ], async payload => {
+      const ok = await _saveGeneric('tools', payload);
+      if (ok) _reloadCurrentTab();
+      return ok;
+    });
+  }).catch(e => toast('Erro ao carregar tool: ' + e.message, 'warn'));
+}
+function toolFormNew() {
+  openDrawer('Nova Tool', [
+    { name: 'id', label: 'ID (tool_id)', value: '' },
+    { name: 'name', label: 'Nome', value: '' },
+    { name: 'description', label: 'Descrição', type: 'textarea', rows: 3, value: '' },
+    { name: 'system_prompt', label: 'System Prompt', type: 'textarea', rows: 16, value: '' },
+  ], async payload => {
+    if (!payload.id) { toast('ID obrigatório', 'warn'); return false; }
+    payload.tool_id = payload.id;
+    const ok = await _saveGeneric('tools', payload);
+    if (ok) _reloadCurrentTab();
+    return ok;
+  });
+}
+function toolDel(id) {
+  api('/admin/tools/' + encodeURIComponent(id), { method: 'DELETE' })
+    .then(() => { toast('Tool excluída', 'good'); _reloadCurrentTab(); })
+    .catch(e => toast('Erro ao excluir: ' + e.message, 'warn'));
+}
 function uploadKnowledge(){ toast('Em breve: upload de documento', 'warn'); }
 function delKnowledge(id) { toast('Excluir doc: ' + id, 'warn'); }
 function requestOAuth(ph) {
