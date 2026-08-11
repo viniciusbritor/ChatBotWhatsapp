@@ -1,5 +1,64 @@
 # Diario de Bordo — ChatBotWhatsapp
 
+## 10/08/2026 (21:30 BRT) — calendar.move_event + memory per-user no grupo (FASE 1+2 do plano geral)
+
+### Contexto
+Usuario reportou dois problemas em paralelo:
+1. **Calendar**: "vc não moveu, vc copiou" — ao pedir para mover evento, a LLM
+   criava um NOVO evento em vez de atualizar o existente. Google Calendar
+   acabou mostrando o mesmo compromisso em DUAS datas.
+2. **Memory em grupo**: quando o owner (Vinicius) perguntava no grupo
+   "qual o endereço do rafa?", a Jennifer respondia "Ainda não tenho
+   salvo na minha memória" — o endereço ESTAVA salvo (Rafa mora na
+   Rua Macaia Mirim, 89), mas o memory.search_facts não estava
+   achando no caminho do grupo.
+
+### Causa Raiz
+1. `calendar.update_event` (`tools/google_calendar.py`) faz GET + merge de
+   kwargs, o que pode regredir outros campos. A LLM estava usando
+   `create_event` por cima de um existente, criando duplicação.
+2. O caminho de memory no grupo JÁ estava correto (`extract_envelope`
+   extrai do `key.participant` desde o patch 01/08/2026), mas a LLM
+   tinha path crítico: precisava de testes de regressão para garantir
+   que o contracto de phone-do-owner-em-grupo continuaria válido.
+
+### Solucao
+1. **`calendar.move_event`** (nova tool, commit `28eed0b`): PATCH in-place
+   de start/end com `sendUpdates='all'` (notifica participantes). Preserva
+   id, participantes, link Meet e descrição. NUNCA duplica.
+2. **Testes de memory group owner** (commit `806d931`): 6 testes em
+   `tests/test_memory_group_owner.py` validam que:
+   - Owner fala em grupo → phone extraido é o do owner → memory.search_facts
+     encontra fatos do owner (`usuarios/{owner_phone}/facts`)
+   - Outro membro fala → memory.search_facts encontra APENAS fatos
+     do próprio membro (sem vazar dados do owner)
+   - Member save_fact grava em `usuarios/{member}/facts` (escopo por phone)
+
+### Validacao
+- `tests/test_google_calendar.py` (16 passed, +6 de `TestMoveEvent`):
+  - move_event preserva id (mesmo id antes e depois)
+  - move_event chama patch (NAO insert)
+  - move_event envia sendUpdates='all' por padrao
+  - move_event pode suprimir notificacoes (sendUpdates='none')
+  - move_event inclui eventId corretamente
+  - move_event inclui timezone no body
+- `tests/test_memory_group_owner.py` (6 passed):
+  - test_extract_envelope_group_owner (phone do participant)
+  - test_member_phone_in_group (phone do membro)
+  - test_owner_search_finds_owner_facts_in_group
+  - test_owner_search_finds_endereco_chat_history_compat
+  - test_member_search_finds_only_member_facts_no_leak
+  - test_save_to_sender_phone_not_admin
+
+### Impacto
+- Calendar: usuario pode pedir "move o evento de amanha para sexta" e
+  recebe atualizacao com notificacao aos participantes (no-op event id).
+- Memory: garantia de regressao no caminho de grupo. Bug futuro que
+  desviar phone de grupo sera pego pelos testes.
+- Gate de CI: `cloudbuild-test.yaml` step 1 (linha 10) roda
+  `pytest -q tests/` automaticamente — qualquer quebra destes contratos
+  bloqueia o build.
+
 ## 10/08/2026 (21:20 BRT) — Integracao Design System Google Stitch no Portal UI (module_ui.py)
 
 ### Escopo
