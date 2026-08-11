@@ -92,3 +92,55 @@ class TestToolRegistry:
             if tool not in registered
         }
         assert missing == set()
+
+    def test_memory_tools_are_user_scoped(self):
+        """memory.* deve ser user-scoped (phone injetado em grupo/individual).
+
+        Regresso: antes memory.* NAO estava em USER_SCOPED_TOOL_PREFIXES,
+        entao o phone do owner nao era injetado em memory.search_facts em
+        grupo, e a LLM respondia "ainda nao tenho" mesmo com fatos salvos
+        em usuarios/{phone_do_owner}/facts/. Este teste protege o contracto.
+        """
+        from tool_registry import USER_SCOPED_TOOL_PREFIXES, is_user_scoped_tool
+
+        # memory.* deve estar em USER_SCOPED_TOOL_PREFIXES
+        assert any(p.startswith("memory.") for p in USER_SCOPED_TOOL_PREFIXES), (
+            f"memory.* NAO esta em USER_SCOPED_TOOL_PREFIXES: {USER_SCOPED_TOOL_PREFIXES}. "
+            f"Se faltar, _bind_tool_args nao injeta phone em memory.search_facts "
+            f"no grupo, e a LLM retorna 'ainda nao tenho' mesmo com fatos salvos."
+        )
+
+        # is_user_scoped_tool deve retornar True para memory.*
+        for t in ("memory.search_facts", "memory.save_fact", "memory.list_facts", "memory.delete_fact"):
+            assert is_user_scoped_tool(t) is True, (
+                f"is_user_scoped_tool({t!r}) deve ser True"
+            )
+
+    def test_memory_tools_registered(self):
+        """memory.* tools devem estar registrados no TOOL_REGISTRY."""
+        from tool_registry import TOOL_REGISTRY
+
+        for tool_id in ("memory.save_fact", "memory.search_facts", "memory.list_facts", "memory.delete_fact"):
+            assert tool_id in TOOL_REGISTRY, (
+                f"{tool_id} NAO esta no TOOL_REGISTRY. memory.* deve ser exposto "
+                f"ao jennifier/manager-jennifier para que a LLM possa ler/salvar fatos."
+            )
+
+    def test_bind_tool_args_injects_phone_for_memory(self):
+        """_bind_tool_args (orchestrator) injeta phone em memory.* (user-scoped)."""
+        from orchestrator import _bind_tool_args
+
+        args = _bind_tool_args(
+            "memory.search_facts",
+            {"query": "rafa"},
+            phone="5511966830020",
+            instance="jennifer",
+        )
+        # phone SEMPRE injetado para user-scoped tools
+        assert args["phone"] == "5511966830020", (
+            f"_bind_tool_args NAO injetou phone em memory.search_facts. "
+            f"args={args}. Sem phone, memory.search_facts retorna missing_phone."
+        )
+        # argumentos originais preservados
+        assert args["query"] == "rafa"
+        assert args["instance"] == "jennifer"

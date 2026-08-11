@@ -17,7 +17,10 @@ from tools import memory
 logger = logging.getLogger(__name__)
 
 ToolFn = Callable[..., Awaitable[Dict[str, Any]]]
-USER_SCOPED_TOOL_PREFIXES = ("calendar.", "drive.", "gmail.", "youtube.", "linkedin.", "googledocs.", "notion.", "github.", "onedrive.")
+USER_SCOPED_TOOL_PREFIXES = (
+    "calendar.", "drive.", "gmail.", "youtube.", "linkedin.", "googledocs.",
+    "notion.", "github.", "onedrive.", "memory.",
+)
 
 
 def is_user_scoped_tool(tool_id: str) -> bool:
