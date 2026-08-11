@@ -775,6 +775,8 @@ pre.json-view {
 </main>
 <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
 <script>
+const CALLER_ROLE = '__ROLE__';
+const CALLER_PHONE = '__CALLER_PHONE__';
 const ENDPOINTS = {
   accounts: '/admin/accounts',
   agents: '/admin/agents',
