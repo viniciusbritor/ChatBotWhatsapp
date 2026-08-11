@@ -1052,6 +1052,20 @@ async def admin_accounts_update(account_id: str, request: Request):
     return JSONResponse(content={"status": "ok" if ok else "error", "account_id": account_id, "upserted": ok})
 
 
+@app.delete("/admin/accounts/{account_id}")
+async def admin_accounts_delete(account_id: str):
+    from agent_loader import _get_firestore_client
+
+    db = _get_firestore_client()
+    if db is None:
+        raise HTTPException(status_code=503, detail="firestore_unavailable")
+    doc = db.collection("whatsapp_accounts").document(account_id).get()
+    if not doc.exists:
+        raise HTTPException(status_code=404, detail="account_not_found")
+    db.collection("whatsapp_accounts").document(account_id).delete()
+    return JSONResponse(content={"status": "ok", "account_id": account_id, "deleted": True})
+
+
 @app.get("/admin/owners")
 async def admin_owners_list():
     from agent_loader import _get_firestore_client
@@ -1194,6 +1208,30 @@ async def admin_knowledge_document_detail(source_title: str, request: Request):
     else:
         raise HTTPException(status_code=503, detail="firestore_unavailable")
     return JSONResponse(content={"document": {**metadata, "chunks": chunks}})
+
+
+@app.delete("/admin/knowledge/{source_title:path}")
+async def admin_knowledge_document_delete(source_title: str, request: Request):
+    """Delete all chunks of a document from the knowledge collections."""
+    from agent_loader import _get_firestore_client
+    from core.rag import KNOWLEDGE_DATABASE
+
+    db = _get_firestore_client()
+    if db is None:
+        raise HTTPException(status_code=503, detail="firestore_unavailable")
+    deleted = 0
+    for coll in (KNOWLEDGE_DATABASE,):
+        try:
+            query = db.collection(coll).where("source_title", "==", source_title)
+            for doc in query.stream():
+                db.collection(coll).document(doc.id).delete()
+                deleted += 1
+        except Exception as exc:
+            logger.warning("admin_knowledge_delete failed coll=%s source=%s: %s", coll, source_title, exc)
+            raise HTTPException(status_code=500, detail="rag_delete_failed") from exc
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail="document_not_found")
+    return JSONResponse(content={"status": "ok", "source_title": source_title, "deleted": deleted})
 
 
 @app.get("/admin/agents")

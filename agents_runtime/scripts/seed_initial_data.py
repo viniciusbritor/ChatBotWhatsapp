@@ -43,7 +43,14 @@ DEFAULT_AGENTS = [
             "- 'tudo/qualquer coisa' + termo -> knowledge.search_all\n"
             "- Pergunta especifica 'o que diz/qual/quem' -> knowledge.retrieve\n"
             "- 'remova/apague/delete' + arquivo -> knowledge.delete\n"
-            "- Cite sempre o source_title antes de qualquer trecho."
+            "- Cite sempre o source_title antes de qualquer trecho.\n\n"
+            "## PT10 — Locais, rotas e clima (Google Maps + Open-Meteo)\n"
+            "- Pergunta sobre ESTABELECIMENTO/negocio por nome ('fale sobre X', 'o que e X', 'endereco de X') -> locomotion.find_place\n"
+            "- 'onde fica X' / endereco -> locomotion.geocode\n"
+            "- 'rota/ate/como chegar de A ate B' -> locomotion.calc_route\n"
+            "- 'lugares/restaurantes/farmacias perto de X' -> locomotion.search_places\n"
+            "- 'clima/tempo/previsao em X' -> weather.current ou weather.forecast\n"
+            "- NAO diga 'nao tenho busca integrada ao Google' — voce TEM o Google Maps via locomotion.*"
         ),
         "skills": [
             "skill-motivacao-pre-reuniao",
@@ -67,6 +74,13 @@ DEFAULT_AGENTS = [
             "knowledge.stats",
             "knowledge.sections",
             "knowledge.search_all",
+            "locomotion.find_place",
+            "locomotion.geocode",
+            "locomotion.calc_route",
+            "locomotion.search_places",
+            "weather.current",
+            "weather.forecast",
+            "youtube.search_videos",
         ],
         "instances": ["jennifer", "Jennifer"],
         "enabled": True,
@@ -466,6 +480,137 @@ DEFAULT_TOOLS = [
         },
         "implementation": "rag",
         "config": {"embedding_model": "text-embedding-3-small", "embedding_dim": 1536},
+        "enabled": True,
+        "updated_at": _now_iso(),
+    },
+    {
+        "id": "locomotion.calc_route",
+        "name": "Calcular rota",
+        "description": "Calcula rota entre dois enderecos. Retorna distancia, duracao, preco estimado Uber e 99.",
+        "function_schema": {
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "origem": {"type": "string"},
+                    "destino": {"type": "string"},
+                },
+                "required": ["origem", "destino"],
+            }
+        },
+        "implementation": "locomotion",
+        "config": {},
+        "enabled": True,
+        "updated_at": _now_iso(),
+    },
+    {
+        "id": "locomotion.geocode",
+        "name": "Geocodificar endereco",
+        "description": "Converte endereco em coordenadas e endereco formatado.",
+        "function_schema": {
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "endereco": {"type": "string"},
+                },
+                "required": ["endereco"],
+            }
+        },
+        "implementation": "locomotion",
+        "config": {},
+        "enabled": True,
+        "updated_at": _now_iso(),
+    },
+    {
+        "id": "locomotion.search_places",
+        "name": "Buscar lugares proximos",
+        "description": "Busca lugares proximos (restaurantes, farmacias, postos) por tipo.",
+        "function_schema": {
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "local": {"type": "string"},
+                    "tipo": {"type": "string"},
+                },
+                "required": ["local"],
+            }
+        },
+        "implementation": "locomotion",
+        "config": {},
+        "enabled": True,
+        "updated_at": _now_iso(),
+    },
+    {
+        "id": "locomotion.find_place",
+        "name": "Buscar estabelecimento por nome",
+        "description": "Busca um estabelecimento pelo NOME (ex: 'Emporio Alto Pinheiro'). Retorna nome, endereco, avaliacao e se esta aberto.",
+        "function_schema": {
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "localizacao": {"type": "string"},
+                },
+                "required": ["query"],
+            }
+        },
+        "implementation": "locomotion",
+        "config": {},
+        "enabled": True,
+        "updated_at": _now_iso(),
+    },
+    {
+        "id": "weather.current",
+        "name": "Clima atual",
+        "description": "Condicao atual do tempo de uma cidade: temperatura, sensacao, umidade, vento e condicao.",
+        "function_schema": {
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "cidade": {"type": "string"},
+                },
+                "required": ["cidade"],
+            }
+        },
+        "implementation": "weather",
+        "config": {},
+        "enabled": True,
+        "updated_at": _now_iso(),
+    },
+    {
+        "id": "weather.forecast",
+        "name": "Previsao do tempo",
+        "description": "Previsao do tempo para os proximos dias (1-7) de uma cidade.",
+        "function_schema": {
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "cidade": {"type": "string"},
+                    "dias": {"type": "integer"},
+                },
+                "required": ["cidade"],
+            }
+        },
+        "implementation": "weather",
+        "config": {},
+        "enabled": True,
+        "updated_at": _now_iso(),
+    },
+    {
+        "id": "youtube.search_videos",
+        "name": "Buscar videos no YouTube",
+        "description": "Busca videos no YouTube e retorna titulo, canal e link.",
+        "function_schema": {
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "max_results": {"type": "integer"},
+                },
+                "required": ["query"],
+            }
+        },
+        "implementation": "youtube",
+        "config": {},
         "enabled": True,
         "updated_at": _now_iso(),
     },

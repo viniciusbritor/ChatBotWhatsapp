@@ -1229,9 +1229,50 @@ function _statusToKpis(data) {
    CRUD STUBS (drawer / forms)
    — mantidos como no-op para não quebrar onclick refs
 ========================================== */
-function accountFormNew() { toast('Em breve: criar conta WhatsApp', 'warn'); }
-function accountEdit(id)  { toast('Editar conta: ' + id, 'warn'); }
-function accountDel(id)   { toast('Excluir conta: ' + id, 'warn'); }
+function accountFormNew() {
+  openDrawer('Nova Conta WhatsApp', [
+    { name: 'id', label: 'ID da conta', value: '' },
+    { name: 'name', label: 'Nome', value: '' },
+    { name: 'instance', label: 'Instância (ex: Jennifer)', value: '' },
+    { name: 'owner_phone', label: 'Owner Phone (DIGITOS, ex: 5511966830020)', value: '' },
+    { name: 'owner_uid', label: 'Owner UID', value: '' },
+    { name: 'status', label: 'Status', value: 'active' },
+  ], async payload => {
+    if (!payload.id || !payload.instance || !payload.owner_phone) {
+      toast('Preencha ID, instância e owner_phone.', 'warn');
+      return false;
+    }
+    const ok = await _saveGeneric('accounts', payload);
+    if (ok) _reloadCurrentTab();
+    return ok;
+  });
+}
+function accountEdit(id) {
+  api('/admin/accounts/' + encodeURIComponent(id)).then(data => {
+    const a = data.account || {};
+    openDrawer('Editar Conta — ' + id, [
+      { name: 'id', label: 'ID', value: a.id || id },
+      { name: 'name', label: 'Nome', value: a.name },
+      { name: 'instance', label: 'Instância', value: a.instance },
+      { name: 'owner_phone', label: 'Owner Phone (DIGITOS)', value: a.owner_phone },
+      { name: 'owner_uid', label: 'Owner UID', value: a.owner_uid },
+      { name: 'status', label: 'Status', value: a.status || 'active' },
+    ], async payload => {
+      const ok = await api('/admin/accounts/' + encodeURIComponent(payload.id), {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }).then(r => r && r.status === 'ok').catch(e => { toast('Erro ao salvar: ' + e.message, 'warn'); return false; });
+      if (ok) _reloadCurrentTab();
+      return ok;
+    });
+  }).catch(e => toast('Erro ao carregar conta: ' + e.message, 'warn'));
+}
+function accountDel(id) {
+  if (!confirm('Excluir conta ' + id + '?')) return;
+  api('/admin/accounts/' + encodeURIComponent(id), { method: 'DELETE' })
+    .then(() => { toast('Conta excluída', 'good'); _reloadCurrentTab(); })
+    .catch(e => toast('Erro ao excluir conta: ' + e.message, 'warn'));
+}
 
 /* ==========================================
    DRAWER GENÉRICO — edição de agents/skills/tools
@@ -1290,10 +1331,10 @@ function closeDrawer() {
   if (dw) dw.remove();
 }
 
-async function _saveGeneric(type, payload) {
+async function _saveGeneric(type, payload, method) {
   try {
     const res = await api('/admin/' + type, {
-      method: 'POST',
+      method: method || 'POST',
       body: JSON.stringify(payload),
     });
     return res && (res.status === 'ok' || res.upserted !== false);
@@ -1316,10 +1357,21 @@ function agentEdit(id) {
       { name: 'name', label: 'Nome', value: a.name },
       { name: 'role', label: 'Role', value: a.role },
       { name: 'model', label: 'Modelo', value: a.model },
+      { name: 'enabled', label: 'Enabled (true/false)', value: a.enabled === false ? 'false' : 'true' },
+      { name: 'thinking', label: 'Thinking (enabled/disabled)', value: a.thinking || 'disabled' },
+      { name: 'parent_id', label: 'Parent ID', value: a.parent_id },
+      { name: 'tools', label: 'Tools (separados por vírgula)', type: 'textarea', rows: 4, value: (a.tools || []).join(', ') },
+      { name: 'skills', label: 'Skills (separadas por vírgula)', type: 'textarea', rows: 3, value: (a.skills || []).join(', ') },
+      { name: 'delegates_to', label: 'Delegates To (separados por vírgula)', type: 'textarea', rows: 3, value: (a.delegates_to || []).join(', ') },
       { name: 'system_prompt', label: 'System Prompt', type: 'textarea', rows: 16, value: a.system_prompt },
       { name: 'description', label: 'Descrição', type: 'textarea', rows: 3, value: a.description },
     ], async payload => {
-      payload.skills = a.skills || [];
+      payload.agent_id = payload.id;
+      payload.enabled = String(payload.enabled).toLowerCase() === 'true';
+      const listify = (v) => String(v || '').split(',').map(s => s.trim()).filter(Boolean);
+      payload.tools = listify(payload.tools);
+      payload.skills = listify(payload.skills);
+      payload.delegates_to = listify(payload.delegates_to);
       const ok = await _saveGeneric('agents', payload);
       if (ok) _reloadCurrentTab();
       return ok;
@@ -1332,11 +1384,22 @@ function agentFormNew() {
     { name: 'name', label: 'Nome', value: '' },
     { name: 'role', label: 'Role', value: 'agent' },
     { name: 'model', label: 'Modelo', value: 'deepseek-v4-flash' },
+    { name: 'enabled', label: 'Enabled (true/false)', value: 'true' },
+    { name: 'thinking', label: 'Thinking (enabled/disabled)', value: 'disabled' },
+    { name: 'parent_id', label: 'Parent ID', value: '' },
+    { name: 'tools', label: 'Tools (separados por vírgula)', type: 'textarea', rows: 4, value: '' },
+    { name: 'skills', label: 'Skills (separadas por vírgula)', type: 'textarea', rows: 3, value: '' },
+    { name: 'delegates_to', label: 'Delegates To (separados por vírgula)', type: 'textarea', rows: 3, value: '' },
     { name: 'system_prompt', label: 'System Prompt', type: 'textarea', rows: 16, value: '' },
     { name: 'description', label: 'Descrição', type: 'textarea', rows: 3, value: '' },
   ], async payload => {
     if (!payload.id) { toast('ID obrigatório', 'warn'); return false; }
     payload.agent_id = payload.id;
+    payload.enabled = String(payload.enabled).toLowerCase() === 'true';
+    const listify = (v) => String(v || '').split(',').map(s => s.trim()).filter(Boolean);
+    payload.tools = listify(payload.tools);
+    payload.skills = listify(payload.skills);
+    payload.delegates_to = listify(payload.delegates_to);
     const ok = await _saveGeneric('agents', payload);
     if (ok) _reloadCurrentTab();
     return ok;
@@ -1355,7 +1418,7 @@ function skillEdit(id) {
       { name: 'id', label: 'ID (skill_id)', value: s.skill_id || id },
       { name: 'name', label: 'Nome', value: s.name },
       { name: 'description', label: 'Descrição', type: 'textarea', rows: 3, value: s.description },
-      { name: 'system_prompt', label: 'System Prompt', type: 'textarea', rows: 16, value: s.system_prompt },
+      { name: 'content', label: 'Conteúdo da Skill (system_prompt/content)', type: 'textarea', rows: 16, value: s.content || s.system_prompt },
     ], async payload => {
       const ok = await _saveGeneric('skills', payload);
       if (ok) _reloadCurrentTab();
@@ -1368,7 +1431,7 @@ function skillFormNew() {
     { name: 'id', label: 'ID (skill_id)', value: '' },
     { name: 'name', label: 'Nome', value: '' },
     { name: 'description', label: 'Descrição', type: 'textarea', rows: 3, value: '' },
-    { name: 'system_prompt', label: 'System Prompt', type: 'textarea', rows: 16, value: '' },
+    { name: 'content', label: 'Conteúdo da Skill (system_prompt/content)', type: 'textarea', rows: 16, value: '' },
   ], async payload => {
     if (!payload.id) { toast('ID obrigatório', 'warn'); return false; }
     payload.skill_id = payload.id;
@@ -1390,8 +1453,19 @@ function toolEdit(id) {
       { name: 'id', label: 'ID (tool_id)', value: t.tool_id || id },
       { name: 'name', label: 'Nome', value: t.name },
       { name: 'description', label: 'Descrição', type: 'textarea', rows: 3, value: t.description },
-      { name: 'system_prompt', label: 'System Prompt', type: 'textarea', rows: 16, value: t.system_prompt },
+      { name: 'implementation', label: 'Implementação (módulo)', value: t.implementation },
+      { name: 'function_schema', label: 'Function Schema (JSON)', type: 'textarea', rows: 10, value: JSON.stringify(t.function_schema || t.function_schema || {}, null, 2) },
+      { name: 'config', label: 'Config (JSON)', type: 'textarea', rows: 6, value: JSON.stringify(t.config || {}, null, 2) },
     ], async payload => {
+      try {
+        if (payload.function_schema && String(payload.function_schema).trim()) payload.function_schema = JSON.parse(payload.function_schema);
+        else delete payload.function_schema;
+        if (payload.config && String(payload.config).trim()) payload.config = JSON.parse(payload.config);
+        else delete payload.config;
+      } catch (e) {
+        toast('JSON inválido em schema/config: ' + e.message, 'warn');
+        return false;
+      }
       const ok = await _saveGeneric('tools', payload);
       if (ok) _reloadCurrentTab();
       return ok;
@@ -1403,10 +1477,21 @@ function toolFormNew() {
     { name: 'id', label: 'ID (tool_id)', value: '' },
     { name: 'name', label: 'Nome', value: '' },
     { name: 'description', label: 'Descrição', type: 'textarea', rows: 3, value: '' },
-    { name: 'system_prompt', label: 'System Prompt', type: 'textarea', rows: 16, value: '' },
+    { name: 'implementation', label: 'Implementação (módulo)', value: '' },
+    { name: 'function_schema', label: 'Function Schema (JSON)', type: 'textarea', rows: 10, value: '' },
+    { name: 'config', label: 'Config (JSON)', type: 'textarea', rows: 6, value: '' },
   ], async payload => {
     if (!payload.id) { toast('ID obrigatório', 'warn'); return false; }
     payload.tool_id = payload.id;
+    try {
+      if (payload.function_schema && String(payload.function_schema).trim()) payload.function_schema = JSON.parse(payload.function_schema);
+      else delete payload.function_schema;
+      if (payload.config && String(payload.config).trim()) payload.config = JSON.parse(payload.config);
+      else delete payload.config;
+    } catch (e) {
+      toast('JSON inválido em schema/config: ' + e.message, 'warn');
+      return false;
+    }
     const ok = await _saveGeneric('tools', payload);
     if (ok) _reloadCurrentTab();
     return ok;
@@ -1441,7 +1526,13 @@ function uploadKnowledge() {
     }
   });
 }
-function delKnowledge(id) { toast('Excluir doc: ' + id, 'warn'); }
+function delKnowledge(id) {
+  if (!id) return;
+  if (!confirm('Excluir documento "' + id + '" da base de conhecimento?')) return;
+  api('/admin/knowledge/' + encodeURIComponent(id), { method: 'DELETE' })
+    .then(() => { toast('Documento excluído', 'good'); _reloadCurrentTab(); })
+    .catch(e => toast('Erro ao excluir doc: ' + e.message, 'warn'));
+}
 function requestOAuth(ph) {
   if (!ph) { toast('Telefone inválido para OAuth.', 'warn'); return; }
   const target = '/oauth/google?phone=' + encodeURIComponent(ph) + (_tok ? '&token=' + encodeURIComponent(_tok) : '');
