@@ -813,7 +813,12 @@ async function api(path, options) {
   const timeoutId = setTimeout(() => ctrl.abort(), 12000);
   try {
     const urlParams = new URLSearchParams(window.location.search);
-    const token = urlParams.get('token');
+    let token = urlParams.get('token');
+    if (token) {
+      try { sessionStorage.setItem('portal_token', token); } catch (_) {}
+    } else {
+      try { token = sessionStorage.getItem('portal_token') || ''; } catch (_) {}
+    }
     let targetUrl = path;
     if (token && !targetUrl.includes('token=')) {
       const sep = targetUrl.includes('?') ? '&' : '?';
