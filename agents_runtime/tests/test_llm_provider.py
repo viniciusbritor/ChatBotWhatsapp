@@ -38,6 +38,15 @@ def _mock_response(content: str = "ok", tool_calls=None, status_code: int = 200)
     return response
 
 
+def _mock_response_from(payload: dict):
+    """Build a fake httpx.Response from a raw payload dict."""
+    response = MagicMock()
+    response.status_code = 200
+    response.json.return_value = payload
+    response.raise_for_status = MagicMock()
+    return response
+
+
 class TestIsAvailable:
     def test_available_with_deepseek(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
@@ -189,6 +198,100 @@ class TestChatWithTools:
             assert result["content"] == "Resposta direta sem tool."
             assert result["tool_rounds"] == 0
             assert result["provider"] == "deepseek-v4-flash"
+
+    @pytest.mark.asyncio
+    async def test_chat_tracks_cache_hit_tokens(self, monkeypatch):
+        """chat() captura prompt_cache_hit_tokens do usage da API."""
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        with patch("core.secrets.get_secret", return_value="sk-test"):
+            provider = LLMProvider()
+            payload = {
+                "id": "x",
+                "model": "deepseek-v4-flash",
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}}],
+                "usage": {
+                    "prompt_tokens": 1000,
+                    "completion_tokens": 50,
+                    "total_tokens": 1050,
+                    "prompt_cache_hit_tokens": 800,
+                },
+            }
+            response = MagicMock()
+            response.status_code = 200
+            response.json.return_value = payload
+            response.raise_for_status = MagicMock()
+            mock_client = MagicMock()
+            mock_client.post = AsyncMock(return_value=response)
+            with patch("core.llm_provider.httpx.AsyncClient", return_value=_AsyncContextManagerMock(mock_client)):
+                result = await provider.chat(system_prompt="sys", user_prompt="oi")
+            assert result["usage"]["cache_hit_tokens"] == 800
+            assert result["usage"]["prompt_tokens"] == 1000
+            sent = mock_client.post.await_args.kwargs["json"]
+            assert sent.get("cache_mode") == "default"
+
+    @pytest.mark.asyncio
+    async def test_chat_tracks_cache_hit_from_details(self, monkeypatch):
+        """Fallback: prompt_tokens_details.cached_tokens quando API usa esse formato."""
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        with patch("core.secrets.get_secret", return_value="sk-test"):
+            provider = LLMProvider()
+            payload = {
+                "id": "x",
+                "model": "deepseek-v4-flash",
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}}],
+                "usage": {
+                    "prompt_tokens": 1000,
+                    "completion_tokens": 50,
+                    "total_tokens": 1050,
+                    "prompt_tokens_details": {"cached_tokens": 600},
+                },
+            }
+            response = MagicMock()
+            response.status_code = 200
+            response.json.return_value = payload
+            response.raise_for_status = MagicMock()
+            mock_client = MagicMock()
+            mock_client.post = AsyncMock(return_value=response)
+            with patch("core.llm_provider.httpx.AsyncClient", return_value=_AsyncContextManagerMock(mock_client)):
+                result = await provider.chat(system_prompt="sys", user_prompt="oi")
+            assert result["usage"]["cache_hit_tokens"] == 600
+
+    @pytest.mark.asyncio
+    async def test_chat_with_tools_sends_cache_mode_and_tracks_hits(self, monkeypatch):
+        """chat_with_tools envia cache_mode na raiz e soma cache hits entre rounds."""
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        with patch("core.secrets.get_secret", return_value="sk-test"):
+            provider = LLMProvider()
+            first = {
+                "id": "x",
+                "model": "deepseek-v4-flash",
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": "", "tool_calls": [
+                    {"id": "c1", "type": "function", "function": {"name": "x", "arguments": "{}"}}
+                ]}}],
+                "usage": {"prompt_tokens": 1000, "completion_tokens": 10, "total_tokens": 1010,
+                          "prompt_cache_hit_tokens": 900},
+            }
+            second = {
+                "id": "y",
+                "model": "deepseek-v4-flash",
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": "feito"}}],
+                "usage": {"prompt_tokens": 1100, "completion_tokens": 20, "total_tokens": 1120,
+                          "prompt_cache_hit_tokens": 950},
+            }
+            mock_client = MagicMock()
+            mock_client.post = AsyncMock(side_effect=[
+                _mock_response_from(first), _mock_response_from(second),
+            ])
+            with patch("core.llm_provider.httpx.AsyncClient", return_value=_AsyncContextManagerMock(mock_client)):
+                result = await provider.chat_with_tools(
+                    system_prompt="sys",
+                    user_prompt="oi",
+                    tools=[{"type": "function", "function": {"name": "x"}}],
+                    tool_executor=lambda name, args: "{}",
+                )
+            assert result["usage"]["cache_hit_tokens"] == 1850  # 900 + 950
+            for call in mock_client.post.await_args_list:
+                assert call.kwargs["json"].get("cache_mode") == "default"
 
 
 class TestParseToolCalls:

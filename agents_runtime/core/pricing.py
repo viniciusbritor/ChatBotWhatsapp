@@ -13,6 +13,10 @@ Modelo principal: deepseek-v4-flash
 - Input normal:   $0.14/1M
 - Output:         $0.28/1M
 
+deepseek-v4-pro (NAO usado em producao desde 11/08/2026 — removido do
+doc_pipeline). Mantido aqui como referencia de custo caso seja avaliado
+no futuro. Precos sao aproximados e variam com a oferta do fornecedor.
+
 Embeddings: text-embedding-3-small
 - Input: $0.02/1M
 """
@@ -28,6 +32,13 @@ DEEPSEEK_V4_FLASH = {
 }
 
 
+DEEPSEEK_V4_PRO = {
+    "input_per_1m": 0.55,
+    "output_per_1m": 2.19,
+    "cache_hit_per_1m": 0.055,
+}
+
+
 OPENAI_EMBEDDING_SMALL = {
     "input_per_1m": 0.02,
 }
@@ -35,6 +46,7 @@ OPENAI_EMBEDDING_SMALL = {
 
 PROVIDERS: Dict[str, Dict[str, float]] = {
     "deepseek_v4_flash": DEEPSEEK_V4_FLASH,
+    "deepseek_v4_pro": DEEPSEEK_V4_PRO,
     "openai_embedding_small": OPENAI_EMBEDDING_SMALL,
 }
 

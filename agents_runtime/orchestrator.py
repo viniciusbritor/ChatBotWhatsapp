@@ -2582,6 +2582,7 @@ async def _execute_agent(
             current_tracker().add_costs(
                 deepseek_input_tokens=usage.get("prompt_tokens", 0),
                 deepseek_output_tokens=usage.get("completion_tokens", 0),
+                deepseek_cache_hit_tokens=usage.get("cache_hit_tokens", 0),
             )
 
         reply_text = result["content"]

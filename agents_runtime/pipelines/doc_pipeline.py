@@ -238,7 +238,7 @@ async def _disambiguate_rag_vs_drive(
         ).strip()
 
         model = ChatOpenAI(
-            model="deepseek-v4-pro",
+            model="deepseek-v4-flash",
             api_key=api_key,
             base_url=base_url,
             temperature=0,
@@ -625,7 +625,7 @@ def _prioritize_content_chunks(query: str, chunks: list) -> list:
 
 async def _synthesize_rag_answer(query: str, chunks: list) -> str:
     """Sintetiza resposta a partir dos chunks.
-    Flash (primary) → Pro (fallback) → raw chunks (last resort).
+    Flash (primary) → Flash retry (timeout maior) → raw chunks (last resort).
     """
     if not chunks:
         return "Nao encontrei nada sobre isso na base de conhecimento."
@@ -645,10 +645,10 @@ async def _synthesize_rag_answer(query: str, chunks: list) -> str:
     except Exception as exc:
         logger.warning("RAG synthesis Flash failed: %s", exc)
 
-    # --- Tentativa 2: V4 Pro ---
+    # --- Tentativa 2: mesmo modelo, retry com timeout maior ---
     try:
         answer = await _call_llm_synthesis(
-            model="deepseek-v4-pro",
+            model="deepseek-v4-flash",
             query=query, chunks=chunks,
             max_tokens=600, timeout=20,
             extra_kwargs={},
@@ -656,7 +656,7 @@ async def _synthesize_rag_answer(query: str, chunks: list) -> str:
         if answer and len(answer.strip()) >= 20:
             return answer
     except Exception as exc:
-        logger.warning("RAG synthesis Pro fallback failed: %s", exc)
+        logger.warning("RAG synthesis retry failed: %s", exc)
 
     # --- Fallback 3: dump cru de chunks ---
     return _fallback_raw_chunks(chunks)

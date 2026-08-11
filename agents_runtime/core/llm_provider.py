@@ -85,6 +85,7 @@ class LLMProvider:
                 {"role": "system", "content": sys_content},
                 {"role": "user", "content": user_prompt},
             ],
+            "cache_mode": "default",
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
@@ -102,6 +103,11 @@ class LLMProvider:
             raise LLMError("deepseek_empty_response")
         content = data["choices"][0]["message"].get("content", "") or ""
         usage = data.get("usage") or {}
+        cache_hit = int(
+            usage.get("prompt_cache_hit_tokens", 0)
+            or (usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0)
+            or 0
+        )
         return {
             "content": content,
             "model_used": data.get("model", self.deepseek_model),
@@ -111,6 +117,7 @@ class LLMProvider:
                 "prompt_tokens": int(usage.get("prompt_tokens", 0) or 0),
                 "completion_tokens": int(usage.get("completion_tokens", 0) or 0),
                 "total_tokens": int(usage.get("total_tokens", 0) or 0),
+                "cache_hit_tokens": cache_hit,
             },
         }
 
@@ -199,6 +206,7 @@ class LLMProvider:
                 "temperature": temperature,
                 "max_tokens": max_tokens,
                 "messages": messages,
+                "cache_mode": "default",
             }
             if json_mode:
                 payload["response_format"] = {"type": "json_object"}
@@ -217,6 +225,13 @@ class LLMProvider:
             total_usage["prompt_tokens"] += int(round_usage.get("prompt_tokens", 0) or 0)
             total_usage["completion_tokens"] += int(round_usage.get("completion_tokens", 0) or 0)
             total_usage["total_tokens"] += int(round_usage.get("total_tokens", 0) or 0)
+            cache_hit = int(
+                round_usage.get("prompt_cache_hit_tokens", 0)
+                or (round_usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0)
+                or 0
+            )
+            if cache_hit:
+                total_usage["cache_hit_tokens"] = total_usage.get("cache_hit_tokens", 0) + cache_hit
             if not choices:
                 return {
                     "content": "Resposta vazia do LLM.",
