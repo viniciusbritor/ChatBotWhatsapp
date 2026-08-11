@@ -325,8 +325,9 @@ def get_user_role(identifier: str) -> str:
     Ordem de resolucao:
     1. Owner de instancia (whatsapp_accounts.owner_phone) -> admin.
     2. Email/UID na whitelist config/admins -> admin.
-    3. Role explicito em usuarios/{identifier}.role.
-    4. Default seguro: agent_user.
+    3. Email do usuario vinculado na whitelist -> admin.
+    4. Role explicito em usuarios/{identifier}.role == 'admin'.
+    5. Default seguro: agent_user.
     """
     if _is_instance_owner(identifier):
         return "admin"
@@ -337,7 +338,9 @@ def get_user_role(identifier: str) -> str:
     user = get_user(identifier)
     if not user:
         return "agent_user"
-    return "agent_user" if user.get("role") not in ("admin", "agent_user") else user["role"]
+    if user.get("email") and _is_admin_email(user["email"]):
+        return "admin"
+    return "admin" if user.get("role") == "admin" else "agent_user"
 
 
 def _is_admin_email(identifier: str) -> bool:

@@ -1784,7 +1784,10 @@ const CALLER_PHONE = '__CALLER_PHONE__';
 })();
 
 document.querySelectorAll('nav button').forEach(btn =>
-  btn.addEventListener('click', () => setActive(btn.dataset.tab))
+  btn.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-tab]');
+    if (b && b.dataset.tab) setActive(b.dataset.tab);
+  })
 );
 const urlTab = new URLSearchParams(window.location.search).get('tab');
 if (urlTab && document.querySelector('nav button[data-tab="' + urlTab + '"]')) {

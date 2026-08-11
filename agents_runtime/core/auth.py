@@ -118,6 +118,11 @@ def resolve_caller(request) -> tuple:
             role = get_user_role(phone)
         except Exception:
             role = "agent_user"
+        if role == "agent_user":
+            if email and (get_user_role(email) == "admin" or _is_admin_email(email)):
+                role = "admin"
+            elif uid and (get_user_role(uid) == "admin" or _is_admin_uid(uid)):
+                role = "admin"
         return role, phone
 
     if email and get_user_role(email) == "admin":
