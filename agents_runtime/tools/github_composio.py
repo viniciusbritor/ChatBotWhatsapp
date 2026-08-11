@@ -39,11 +39,40 @@ async def _composio_call(tool_slug: str, arguments: Dict[str, Any], user_id: str
         return {"error": str(exc)[:200]}
 
 
-async def list_repos(page: int = 1, per_page: int = 30, **kwargs) -> Dict[str, Any]:
+async def list_repos(
+    type_: str = "all",
+    sort: str = "full_name",
+    direction: str = "",
+    page: int = 1,
+    per_page: int = 30,
+    **kwargs,
+) -> Dict[str, Any]:
+    """Lista repositorios do usuario autenticado.
+
+    Args:
+        type_: 'all' | 'owner' | 'public' | 'private' | 'member'
+            (use 'private' para listar apenas repositorios privados).
+        sort: 'created' | 'updated' | 'pushed' | 'full_name'.
+        direction: 'asc' | 'desc' (default conforme sort).
+        page: pagina (default 1).
+        per_page: itens por pagina (1-100, default 30).
+    """
     user_id = str(kwargs.get("phone", "") or kwargs.get("user_id", ""))
+    if type_ not in ("all", "owner", "public", "private", "member"):
+        type_ = "all"
+    if sort not in ("created", "updated", "pushed", "full_name"):
+        sort = "full_name"
+    arguments: Dict[str, Any] = {
+        "type": type_,
+        "sort": sort,
+        "page": max(1, page),
+        "per_page": max(1, min(100, per_page)),
+    }
+    if direction in ("asc", "desc"):
+        arguments["direction"] = direction
     return await _composio_call(
         "GITHUB_LIST_REPOSITORIES_FOR_THE_AUTHENTICATED_USER",
-        {"page": max(1, page), "per_page": max(1, min(100, per_page))},
+        arguments,
         user_id=user_id,
     )
 

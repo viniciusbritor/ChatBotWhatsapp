@@ -89,7 +89,7 @@ class TestJennifierSystemPrompt:
         assert "nunca ironizar o usuario" in sp
 
     def test_version_incremented(self, jennifier_yaml):
-        assert jennifier_yaml.get("system_prompt_version") == 8
+        assert jennifier_yaml.get("system_prompt_version") == 9
 
     def test_includes_introspection_guidance(self, jennifier_yaml):
         sp = jennifier_yaml.get("system_prompt", "").lower()
