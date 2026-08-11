@@ -4279,3 +4279,18 @@ amanha as 19h") e enviar WhatsApp na hora exata.
 - POST /reminders (criar) + GET /reminders/check (Cloud Scheduler 1min)
 - Reutilizar proactive_gate (anti-spam) e evolution_client.send_text
 - Tool proactive.schedule_reminder + update do manager prompt
+
+## 11/08/2026 (19:00 BRT) - Places Text Search (find_place)
+
+Jennifer nao achava estabelecimentos por NOME (ex: "Emporio Alto
+Pinheiro"). Causa: locomotion.search_places usava nearbysearch (busca por
+TIPO) e geocodificava o nome do negocio (falha). 
+
+Fix: nova tool locomotion.find_place(query, localizacao) usa
+/place/textsearch/json (Google Places Text Search). Validado com chave
+real: retornou EAP Emporio Alto dos Pinheiros (4.6 estrelas, 5619
+avaliacoes, aberto). Commit c72abdc.
+
+Tambem corrigido teste flaky test_no_hints_when_unrelated
+(knowledge_retriever): mockava _llm_enrich_query (LLM real) sem mock.
+Commit 9c3935a.
