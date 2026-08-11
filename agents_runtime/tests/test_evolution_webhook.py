@@ -683,3 +683,30 @@ def test_private_message_ignores_mention_filter():
         envelope = extract_envelope(payload)
     assert envelope is not None
     assert envelope["extra"]["was_mentioned"] is False
+
+
+def test_mention_at_message_root_level():
+    """contextInfo.mentionedJid no nivel raiz do message (formato alternativo da Evolution)."""
+    payload = {
+        "event": "MESSAGES_UPSERT",
+        "instance": "jennifer",
+        "data": {
+            "key": {
+                "remoteJid": GROUP_JID,
+                "participant": "5511777777777@s.whatsapp.net",
+                "fromMe": False,
+                "id": "GRP_ROOT_007",
+            },
+            "pushName": "Ana",
+            "message": {
+                "extendedTextMessage": {"text": "@Jennifer oi"},
+                "contextInfo": {"mentionedJid": [BOT_JID]},  # nivel raiz!
+            },
+            "messageType": "extendedTextMessage",
+        },
+    }
+    with _patch_bot_jid():
+        envelope = extract_envelope(payload)
+    assert envelope is not None
+    assert envelope["extra"]["was_mentioned"] is True
+    assert envelope["phone"] == "5511777777777"

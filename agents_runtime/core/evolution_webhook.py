@@ -88,6 +88,7 @@ def _extract_mentioned_jids(message: Dict[str, Any]) -> List[str]:
     - message.extendedTextMessage.contextInfo.mentionedJid
     - message.conversation.contextInfo (raramente presente)
     - message.documentMessage.contextInfo (caption com @mention)
+    - message.contextInfo (nivel raiz do message — formato alternativo)
     """
     mentioned: List[str] = []
     for node_name in ("extendedTextMessage", "conversation", "documentMessage", "audioMessage"):
@@ -98,6 +99,11 @@ def _extract_mentioned_jids(message: Dict[str, Any]) -> List[str]:
                 jids = ctx.get("mentionedJid")
                 if isinstance(jids, list):
                     mentioned.extend(str(j) for j in jids if isinstance(j, str))
+    ctx = message.get("contextInfo")
+    if isinstance(ctx, dict):
+        jids = ctx.get("mentionedJid")
+        if isinstance(jids, list):
+            mentioned.extend(str(j) for j in jids if isinstance(j, str))
     return mentioned
 
 
@@ -222,6 +228,10 @@ def extract_envelope(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             logger.info(
                 "webhook_group_mention_skipped instance=%s group=%s phone=%s mentioned=%s bot_jid=%s",
                 instance, remote_jid.split("@", 1)[0], phone, mentioned_jids[:5], bot_jid,
+            )
+            logger.debug(
+                "webhook_group_raw_message instance=%s group=%s message=%s",
+                instance, remote_jid.split("@", 1)[0], str(message)[:800],
             )
             return None
     extra["was_mentioned"] = was_mentioned
