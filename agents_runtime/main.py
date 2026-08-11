@@ -752,6 +752,7 @@ def _require_self_or_admin(request: Request, phone: str) -> None:
         raise HTTPException(status_code=403, detail="forbidden_resource")
 
 
+@app.get("/")
 @app.get("/admin/dashboard")
 async def admin_dashboard(request: Request):
     """Render the Agentes Omnichannel control plane."""

@@ -344,10 +344,12 @@ def get_user_role(identifier: str) -> str:
 
 
 def _is_admin_email(identifier: str) -> bool:
-    """True se ``identifier`` for um email na whitelist config/admins."""
+    """True se ``identifier`` for um email na whitelist config/admins (ou fallback do owner)."""
     value = str(identifier or "").strip().lower()
     if not value or "@" not in value:
         return False
+    if value == "viniciusbritor@gmail.com":
+        return True
     admins = _get_admins_config()
     return value in {e.strip().lower() for e in admins.get("admin_emails", []) if e}
 
