@@ -62,9 +62,24 @@ class _UserColl:
 class TestMemoryExtractEnvelopeContract:
     """extract_envelope extrai phone do participant (owner) em grupo."""
 
+    def _extract_with_mention(self, payload):
+        """Extrai envelope mockando _resolve_bot_jid e com mention do bot."""
+        from unittest.mock import patch
+        from core.evolution_webhook import extract_envelope
+
+        # Adiciona mention do bot na mensagem
+        msg = payload["data"]["message"]
+        extended = {
+            "text": msg.get("conversation", ""),
+            "contextInfo": {"mentionedJid": [OWNER_PHONE + "@s.whatsapp.net"]},
+        }
+        payload["data"]["message"] = {"extendedTextMessage": extended}
+        payload["data"]["messageType"] = "extendedTextMessage"
+        with patch("core.evolution_webhook._resolve_bot_jid", return_value=OWNER_PHONE + "@s.whatsapp.net"):
+            return extract_envelope(payload)
+
     def test_owner_phone_in_group_via_participant(self):
         """Patch 01/08/2026: phone vem do key.participant, NAO do remoteJid."""
-        from core.evolution_webhook import extract_envelope
 
         payload = {
             "event": "MESSAGES_UPSERT",
@@ -81,7 +96,7 @@ class TestMemoryExtractEnvelopeContract:
                 "messageType": "conversation",
             },
         }
-        envelope = extract_envelope(payload)
+        envelope = self._extract_with_mention(payload)
         assert envelope is not None
         assert envelope["phone"] == OWNER_PHONE
         assert envelope["extra"]["is_group"] is True
@@ -90,7 +105,6 @@ class TestMemoryExtractEnvelopeContract:
 
     def test_member_phone_in_group_via_participant(self):
         """Quando outro membro fala, o phone extraido e o DELE (NAO do owner)."""
-        from core.evolution_webhook import extract_envelope
 
         payload = {
             "event": "MESSAGES_UPSERT",
@@ -107,7 +121,7 @@ class TestMemoryExtractEnvelopeContract:
                 "messageType": "conversation",
             },
         }
-        envelope = extract_envelope(payload)
+        envelope = self._extract_with_mention(payload)
         assert envelope["phone"] == ANOTHER_MEMBER_PHONE
 
 

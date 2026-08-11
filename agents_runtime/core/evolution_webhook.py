@@ -87,9 +87,10 @@ def _extract_mentioned_jids(message: Dict[str, Any]) -> List[str]:
     Baileys/Evolution coloca a lista em:
     - message.extendedTextMessage.contextInfo.mentionedJid
     - message.conversation.contextInfo (raramente presente)
+    - message.documentMessage.contextInfo (caption com @mention)
     """
     mentioned: List[str] = []
-    for node_name in ("extendedTextMessage", "conversation"):
+    for node_name in ("extendedTextMessage", "conversation", "documentMessage", "audioMessage"):
         node = message.get(node_name)
         if isinstance(node, dict):
             ctx = node.get("contextInfo")
@@ -207,23 +208,22 @@ def extract_envelope(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return None
 
     # ========================
-    # FILTRO DE MENCAO EM GRUPO (10/08/2026)
+    # FILTRO DE MENCAO EM GRUPO (11/08/2026 — agressivo)
     # Jennifer so responde em grupo quando @mencionada explicitamente.
-    # Se mentionedJid vier vazio/ausente (clientes sem suporte), processa
-    # normalmente — nunca quebra o fluxo existente.
+    # Se mentionedJid vier vazio OU nao contiver o bot, a mensagem e
+    # IGNORADA. Conversa 1:1 nao e afetada.
     # ========================
     was_mentioned = False
     if is_group:
         bot_jid = _resolve_bot_jid(instance)
         mentioned_jids = _extract_mentioned_jids(message)
-        if bot_jid and mentioned_jids:
-            was_mentioned = bot_jid in mentioned_jids
-            if not was_mentioned:
-                logger.info(
-                    "webhook_group_mention_skipped instance=%s group=%s phone=%s mentioned=%s",
-                    instance, remote_jid.split("@", 1)[0], phone, mentioned_jids[:5],
-                )
-                return None
+        was_mentioned = bool(bot_jid) and bot_jid in mentioned_jids
+        if not was_mentioned:
+            logger.info(
+                "webhook_group_mention_skipped instance=%s group=%s phone=%s mentioned=%s bot_jid=%s",
+                instance, remote_jid.split("@", 1)[0], phone, mentioned_jids[:5], bot_jid,
+            )
+            return None
     extra["was_mentioned"] = was_mentioned
 
     from core.message_ledger import deterministic_request_id

@@ -111,7 +111,8 @@ class TestPipelinesPassGroupContext:
             "instance": "jennifer",
             "phone": "5511777777777",
             "text": "minha agenda hoje",
-            "extra": {"remote_jid": "120363@g.us"},
+            "remote_jid": "120363@g.us",
+            "extra": {"is_group": True},
         }
         with patch(
             "pipelines._guard.check_google_access",
@@ -133,7 +134,8 @@ class TestPipelinesPassGroupContext:
             "instance": "jennifer",
             "phone": "5511777777777",
             "text": "quais meus emails",
-            "extra": {"remote_jid": "120363@g.us"},
+            "remote_jid": "120363@g.us",
+            "extra": {"is_group": True},
         }
         with patch(
             "pipelines._guard.check_google_access",

@@ -2435,13 +2435,6 @@ async def _execute_agent(
         except Exception:
             pass
 
-    try:
-        deep_result = await _execute_deep_agent(agent, text, payload, extra)
-        if deep_result is not None:
-            return deep_result
-    except Exception as exc:
-        logger.warning("deepagent_attempt_failed agent_id=%s exc=%s", agent_id, type(exc).__name__)
-
     history = ""
     try:
         history = await _get_context_for_prompt(phone, limit=10) or ""
@@ -2485,6 +2478,13 @@ async def _execute_agent(
             f"\n\n[CONTEXTO DA CONVERSA]\n{ctx}\n"
             "Voce JA conhece este usuario. Use a memoria para personalizar a resposta."
         )
+
+    try:
+        deep_result = await _execute_deep_agent(agent, text, payload, extra)
+        if deep_result is not None:
+            return deep_result
+    except Exception as exc:
+        logger.warning("deepagent_attempt_failed agent_id=%s exc=%s", agent_id, type(exc).__name__)
 
     brt = timezone(timedelta(hours=-3))
     hoje = datetime.now(brt)

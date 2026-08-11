@@ -58,8 +58,9 @@ async def run(payload: Dict[str, Any]) -> Dict[str, Any]:
     from pipelines._guard import check_google_access, blocked_response
 
     extra = payload.get("extra", {}) or {}
-    is_group = "@g.us" in str(extra.get("remote_jid", ""))
-    group_jid = str(extra.get("remote_jid", "")) if is_group else ""
+    is_group = bool(extra.get("is_group", False))
+    remote_jid = str(payload.get("remote_jid", "") or "")
+    group_jid = remote_jid if is_group else ""
     guard = await check_google_access(
         instance, phone, "calendar",
         is_group=is_group, group_jid=group_jid, original_text=text,

@@ -80,8 +80,13 @@ SAMPLE_GROUP_PAYLOAD = {
             "participant": "5511966830020@s.whatsapp.net",
         },
         "pushName": "Vini",
-        "message": {"conversation": "Bom dia grupo"},
-        "messageType": "conversation",
+        "message": {
+            "extendedTextMessage": {
+                "text": "Bom dia grupo",
+                "contextInfo": {"mentionedJid": ["5511966830020@s.whatsapp.net"]},
+            }
+        },
+        "messageType": "extendedTextMessage",
     },
 }
 
@@ -119,7 +124,8 @@ def test_extract_audio_message():
 
 
 def test_extract_group_message():
-    envelope = extract_envelope(SAMPLE_GROUP_PAYLOAD)
+    with _patch_bot_jid():
+        envelope = extract_envelope(SAMPLE_GROUP_PAYLOAD)
     assert envelope is not None
     assert envelope["extra"]["is_group"] is True
     # Patch 01/08/2026: phone em grupo vem do key.participant, nao do remoteJid.
@@ -137,7 +143,8 @@ def test_extract_group_phone_uses_participant_not_remotejid():
     Consequencia: _owner_hash ficava errado, RAG pessoal nunca encontrava,
     e _is_user_member retornava False para todos.
     """
-    envelope = extract_envelope(SAMPLE_GROUP_PAYLOAD)
+    with _patch_bot_jid():
+        envelope = extract_envelope(SAMPLE_GROUP_PAYLOAD)
     assert envelope is not None
     # phone do user, NAO do grupo
     assert envelope["phone"] == "5511966830020"
@@ -161,11 +168,17 @@ def test_extract_group_falls_back_to_remotejid_when_participant_missing():
                 # sem participant
             },
             "pushName": "Vini",
-            "message": {"conversation": "sem participant"},
-            "messageType": "conversation",
+            "message": {
+                "extendedTextMessage": {
+                    "text": "sem participant",
+                    "contextInfo": {"mentionedJid": [BOT_JID]},
+                }
+            },
+            "messageType": "extendedTextMessage",
         },
     }
-    envelope = extract_envelope(payload)
+    with _patch_bot_jid():
+        envelope = extract_envelope(payload)
     assert envelope is not None
     # Fallback: usa remoteJid (group_id) em vez de quebrar.
     assert envelope["phone"] == "120363"
@@ -353,7 +366,8 @@ SAMPLE_GROUP_DOCUMENT_PAYLOAD = {
                 "mimetype": "application/pdf",
                 "fileName": "ata_reuniao.pdf",
                 "fileLength": 5000,
-                "caption": "",
+                "caption": "@Jennifer salva essa ata",
+                "contextInfo": {"mentionedJid": ["5511966830020@s.whatsapp.net"]},
                 "base64": "JVBERi0xLjQK",
             }
         },
@@ -387,9 +401,10 @@ def test_extract_document_without_base64_fallback():
 
 
 def test_extract_document_group_with_caption_fallback():
-    envelope = extract_envelope(SAMPLE_GROUP_DOCUMENT_PAYLOAD)
+    with _patch_bot_jid():
+        envelope = extract_envelope(SAMPLE_GROUP_DOCUMENT_PAYLOAD)
     assert envelope is not None
-    assert envelope["text"] == "ata_reuniao.pdf"
+    assert envelope["text"] == "@Jennifer salva essa ata"
     assert envelope["extra"]["has_document"] is True
     assert envelope["extra"]["doc_file_name"] == "ata_reuniao.pdf"
     assert envelope["extra"]["is_group"] is True
@@ -627,21 +642,29 @@ def test_group_message_not_mentioning_bot_is_skipped():
     assert envelope is None
 
 
-def test_group_message_no_mentions_passes_backward_compat():
-    """Grupo sem contextInfo.mentionedJid -> processa (compatibilidade)."""
+def test_group_message_no_mentions_is_skipped_aggressive():
+    """Grupo sem contextInfo.mentionedJid -> None (agressivo desde 11/08/2026).
+
+    O comportamento antigo era "backward compat" (mensagem sem @mention
+    passava). Agora Jennifer so responde quando @mencionada. Isso evita
+    responder a todas as mensagens do grupo (ex: "Bom dia senhores!").
+    """
     payload = _group_payload({"text": "oi pessoal"})
     with _patch_bot_jid():
         envelope = extract_envelope(payload)
-    assert envelope is not None
-    assert envelope["extra"]["was_mentioned"] is False
+    assert envelope is None
 
 
-def test_group_message_bot_jid_unknown_passes():
-    """Bot JID nao resolvido -> sem filtro (nao quebra fluxo)."""
+def test_group_message_bot_jid_unknown_blocked():
+    """Bot JID nao resolvido -> mensagem de grupo bloqueada (fail-safe).
+
+    Se nao conseguimos resolver o JID do bot, NAO respondemos no grupo
+    (evita false positives). Conversa privada nao e afetada.
+    """
     payload = _group_payload({"text": "oi pessoal"}, mention_jids=["5511888888888@s.whatsapp.net"])
     with _patch_bot_jid(""):
         envelope = extract_envelope(payload)
-    assert envelope is not None
+    assert envelope is None
 
 
 def test_private_message_ignores_mention_filter():
