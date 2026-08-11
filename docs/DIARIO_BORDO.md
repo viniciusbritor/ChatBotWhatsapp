@@ -922,6 +922,20 @@ Foi aberto loop disciplinado `Analise -> Identificacao -> Plano -> Branch -> 4 f
 >
 > **Nota (29/07/2026):** referencias antigas a `PLAN_OMNICHANNEL_AGENTES.md` e `docs/fases/fase_*/` nao existem mais no repo (removidos em cleanup de 22/07/2026). Entradas mais novas (F4d.6+) continuam completas. Entradas antigas que listam paths inexistentes sao preservadas como historico.
 
+## 30/07/2026 — Auditoria e Esclarecimento sobre GCP Secret Manager, Injeção em Containers & Obsoletude de Pastas Locais de Chaves
+
+### Contexto
+Realizada auditoria técnica da documentação (`ARQUITETURA.md`, `HARNESS.md`, `GUARDRAILS.md`, `DIARIO_BORDO.md`) referente ao funcionamento do cofre de senhas e injeção de segredos nos containers Cloud Run, esclarecendo o motivo de diretórios locais (como `C:\Users\vinic\workspace_antigravity\Keys`) não funcionarem para os serviços da aplicação.
+
+### Resumo do Mapeamento e Validação
+1. **Armazenamento:** Centralizado no GCP Secret Manager no projeto `coherence-ominichannel-fs`.
+2. **Injeção em Containers (Cloud Run):** Configurado no `cloudbuild-test.yaml` via flag `--set-secrets`. O Cloud Run realiza o bind dos segredos no start do container e os expõe como variáveis de ambiente nativas (`os.environ`).
+3. **Resolução no Código:** O módulo `agents_runtime/core/secrets.py` consulta primeiro `os.getenv(key)` (injetado via Cloud Run), depois tenta o SDK do GCP Secret Manager se `GCP_PROJECT` estiver definido, e por fim recorre ao fallback.
+4. **Obsoletude de Pastas Locais:** Foi confirmado que pastas de chaves locais (como `C:\Users\vinic\workspace_antigravity\Keys`) são ineficazes pois os containers Cloud Run na nuvem não possuem acesso ao disco rígido da máquina local, além de violar os guardrails de isolamento por workspace (Regra Global 3) e da skill `secrets_manager`.
+5. **Atualizações na Documentação:** Atualizado `HARNESS.md` com aviso explícito sobre a injeção via `--set-secrets` e a obsolescência de pastas locais fora do GCP Secret Manager.
+
+---
+
 ## 22/07/2026 — Fase 1: Liberar API de Custos e Mapear Arquitetura
 
 ### Contexto
@@ -4227,3 +4241,41 @@ retrieval funcional.
 2. `embed_documents` default timeout 60s e insuficiente para >50 chunks
    com concurrency 4. Para ingestao em massa, usar timeout 600 + concurrency 8.
 3. Batch de delete no Firestore: lotes de 100 (max 500 ops por batch).
+
+## 11/08/2026 (18:00 BRT) - LID mention fix + weather + portal admin (FASES 5a/5b)
+
+### Contexto
+Dois problemas em paralelo: (1) Jennifer nao respondia a @mencao no grupo
+"testes jen"; (2) portal admin (modulo agents gemini) com 8 bugs de UI.
+
+### Fase 5a - Grupo WhatsApp (commit 953e27c)
+- **LID mode**: WhatsApp migrou para Linked ID. mentionedJid chega como
+  ''75793925419076@lid'' mas o bot_jid resolvia para o owner_phone
+  (5511966830020 = Vinicius). O bot real e 5511917389901 (ownerJid da
+  Evolution). Fix: _resolve_bot_jid consulta /instance/fetchInstances,
+  _resolve_bot_lid resolve LID no grupo via /group/findGroupInfos, match
+  por digits puros (agnostico a @lid/@s.whatsapp.net).
+- **contextInfo fora do message**: LID mode coloca mentionedJid em
+  data.contextInfo; _extract_mentioned_jids nao lia. Fix: ler data também.
+- **Acks no grupo**: extra nao tinha remote_jid; acks ("So um instante...")
+  iam para chat PRIVADO. Fix: extra['remote_jid'] = remote_jid (1 linha).
+- **Weather**: tools weather.current/forecast via Open-Meteo (gratis).
+
+### Fase 5b - Portal Admin (commit 4513af7)
+1. Contas WhatsApp: 'unknown' resolvido (backend agora enriquece com estado
+   real da Evolution; UI cai de a.status).
+2. Conexoes: requestOAuth agora redireciona para /oauth/google; novo botao
+   Conectar Apps (Composio) chama /connect-all; status Composio ao vivo.
+3. Agents/Skills/Tools: drawers de edicao com system_prompt (antes stub).
+4. Conhecimento: POST /admin/knowledge/user indexa no RAG privado do user
+   (agent-knowledge-v2) via index_private_document - mesmo pipeline da Jennifer.
+5. Status: KPI cards (.kpi-grid) em vez de JSON puro.
+6. Aba Proprietarios removida (redundante com Contas WhatsApp).
+
+### Backlog - FASE 6: "Cutucar" (scheduled reminders)
+Jennifer deve criar lembretes sob demanda ("me lembra de lavar roupa
+amanha as 19h") e enviar WhatsApp na hora exata.
+- Nova collection scheduled_reminders: {phone, message, trigger_at, status}
+- POST /reminders (criar) + GET /reminders/check (Cloud Scheduler 1min)
+- Reutilizar proactive_gate (anti-spam) e evolution_client.send_text
+- Tool proactive.schedule_reminder + update do manager prompt
