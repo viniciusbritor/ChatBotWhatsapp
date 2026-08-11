@@ -198,6 +198,53 @@ async def update_event(
         return {"event": None, "error": str(e)}
 
 
+@_owner_guard("calendar.move")
+async def move_event(
+    phone: str,
+    event_id: str,
+    new_start: str,
+    new_end: str,
+    calendar_id: str = DEFAULT_CALENDAR_ID,
+    instance: str = "",
+    timezone: str = "America/Sao_Paulo",
+    notify_attendees: bool = True,
+) -> Dict[str, Any]:
+    """Move (patch in-place) um evento existente para nova data/horario.
+
+    Diferenca de `update_event`: esta tool so altera start/end (e dispara
+    notificacao aos participantes). Nao mistura campos arbitrarios no body
+    do GET, o que torna o patch deterministico e impede duplicacao.
+
+    Notifica os participantes via ``sendUpdates="all"`` (padrao Google Calendar)
+    para que recebam o convite atualizado; suprimir com ``notify_attendees=False``.
+
+    Args:
+        phone: telefone do usuario (per-user OAuth).
+        event_id: ID do evento no Google Calendar (obrigatorio).
+        new_start: ISO 8601 inicio (ex: "2026-08-11T20:30:00-03:00").
+        new_end: ISO 8601 fim.
+        timezone: fuso horario (default America/Sao_Paulo).
+        notify_attendees: se True, dispara e-mail de update aos convidados.
+        calendar_id: ID do calendario (default "primary").
+    """
+    try:
+        service = _get_service(phone)
+        body = {
+            "start": {"dateTime": new_start, "timeZone": timezone},
+            "end": {"dateTime": new_end, "timeZone": timezone},
+        }
+        send_updates = "all" if notify_attendees else "none"
+        updated = (
+            service.events()
+            .patch(calendarId=calendar_id, eventId=event_id, body=body, sendUpdates=send_updates)
+            .execute()
+        )
+        return {"event": _format_event(updated), "moved": True, "event_id": event_id}
+    except HttpError as e:
+        logger.error(f"Calendar move_event error: {e}")
+        return {"event": None, "moved": False, "error": str(e)}
+
+
 @_owner_guard("calendar.delete")
 async def delete_event(
     phone: str,

@@ -408,7 +408,14 @@ async def _notion_retrieve_page(**kwargs):
 
 async def _github_list_repos(**kwargs):
     from tools.github_composio import list_repos
-    return await list_repos(page=kwargs.get("page", 1), per_page=kwargs.get("per_page", 30), phone=kwargs.get("phone", ""))
+    return await list_repos(
+        type_=kwargs.get("type", "all"),
+        sort=kwargs.get("sort", "full_name"),
+        direction=kwargs.get("direction", ""),
+        page=kwargs.get("page", 1),
+        per_page=kwargs.get("per_page", 30),
+        phone=kwargs.get("phone", ""),
+    )
 
 
 async def _github_my_profile(**kwargs):
@@ -500,6 +507,32 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
                 "phone": {"type": "string", "description": "Telefone do usuario para token OAuth"},
             },
             "required": ["event_id"],
+        },
+    },
+    "calendar.move_event": {
+        "function": google_calendar.move_event,
+        "implementation": "google_calendar",
+        "description": (
+            "Move (patch in-place) um evento existente para nova data/horario. "
+            "Diferente de update_event: esta tool altera APENAS start/end com "
+            "PATCH deterministico e dispara notificacao aos participantes via "
+            "sendUpdates='all'. SEMPRE usar esta tool quando o usuario pedir "
+            "para mover, reagendar, adiantar, atrasar ou trocar o horario de "
+            "um evento existente. NUNCA criar um novo e deletar o antigo: "
+            "use move_event para preservar o id e os participantes."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "event_id": {"type": "string", "description": "ID do evento no Google Calendar (obrigatorio)"},
+                "new_start": {"type": "string", "description": "ISO 8601 inicio (ex: '2026-08-11T20:30:00-03:00')"},
+                "new_end": {"type": "string", "description": "ISO 8601 fim"},
+                "timezone": {"type": "string", "description": "Fuso horario (default America/Sao_Paulo)"},
+                "notify_attendees": {"type": "boolean", "description": "Se True, dispara e-mail de update aos convidados (default True)"},
+                "calendar_id": {"type": "string"},
+                "phone": {"type": "string", "description": "Telefone do usuario para token OAuth"},
+            },
+            "required": ["event_id", "new_start", "new_end"],
         },
     },
     "calendar.delete_event": {
@@ -1479,12 +1512,17 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
         "implementation": "github_composio",
         "description": (
             "Lista repositorios do GitHub do usuario autenticado. "
+            "Use type='private' para listar APENAS os privados, type='public' "
+            "para os publicos, ou type='all' para todos. "
             "Use quando o usuario perguntar por projetos, repositorios ou codigo no GitHub."
         ),
         "parameters_schema": {
             "type": "object",
             "properties": {
-                "per_page": {"type": "integer", "description": "Maximo de resultados (default 30)"},
+                "type": {"type": "string", "description": "Filtro de visibilidade: 'all'|'owner'|'public'|'private'|'member' (default 'all')"},
+                "sort": {"type": "string", "description": "Ordenacao: 'created'|'updated'|'pushed'|'full_name' (default 'full_name')"},
+                "direction": {"type": "string", "description": "Direcao: 'asc'|'desc' (opcional)"},
+                "per_page": {"type": "integer", "description": "Maximo de resultados por pagina (default 30, max 100)"},
             },
             "required": [],
         },

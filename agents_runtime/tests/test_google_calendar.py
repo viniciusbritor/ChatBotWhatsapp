@@ -120,6 +120,137 @@ class TestUpdateEvent:
         assert "event" in result
 
 
+class TestMoveEvent:
+    """move_event: PATCH in-place de start/end preserva o id (nao duplica)."""
+
+    @pytest.mark.asyncio
+    async def test_move_event_preserves_id(self, mock_calendar_service):
+        """Move retorna o mesmo id - email de update vai para os participantes."""
+        from tools.google_calendar import move_event
+
+        mock_calendar_service.events().patch().execute.return_value = {
+            "id": "evt1",
+            "summary": "OmniChannel - Startup",
+            "start": {"dateTime": "2026-08-11T20:30:00-03:00"},
+            "end": {"dateTime": "2026-08-11T21:30:00-03:00"},
+            "attendees": [{"email": "rafael@example.com"}],
+        }
+        result = await move_event(
+            PHONE, "evt1",
+            new_start="2026-08-11T20:30:00-03:00",
+            new_end="2026-08-11T21:30:00-03:00",
+            instance="jennifer",
+        )
+        assert result["moved"] is True
+        assert result["event_id"] == "evt1"
+        assert result["event"]["id"] == "evt1"
+        assert result["event"]["summary"] == "OmniChannel - Startup"
+
+    @pytest.mark.asyncio
+    async def test_move_event_uses_patch_not_insert(self, mock_calendar_service):
+        """Verifica que o service chama patch() (nao insert) - chave para nao duplicar."""
+        from tools.google_calendar import move_event
+
+        mock_calendar_service.events().patch().execute.return_value = {
+            "id": "evt1", "summary": "Reuniao",
+            "start": {"dateTime": "2026-08-11T20:30:00-03:00"},
+            "end": {"dateTime": "2026-08-11T21:30:00-03:00"},
+        }
+        # Capturar calls ANTES (evita cross-test contamination de insert de outros testes)
+        patch_calls_before = mock_calendar_service.events().patch.call_count
+        insert_calls_before = mock_calendar_service.events().insert.call_count
+        await move_event(
+            PHONE, "evt1",
+            new_start="2026-08-11T20:30:00-03:00",
+            new_end="2026-08-11T21:30:00-03:00",
+            instance="jennifer",
+        )
+        # patch() deve ter sido chamado uma vez
+        assert mock_calendar_service.events().patch.call_count == patch_calls_before + 1
+        # insert() NAO deve ter sido chamado durante o move_event
+        assert mock_calendar_service.events().insert.call_count == insert_calls_before
+
+    @pytest.mark.asyncio
+    async def test_move_event_sends_update_notification_by_default(self, mock_calendar_service):
+        """sendUpdates='all' envia e-mail de atualizacao aos participantes."""
+        from tools.google_calendar import move_event
+
+        mock_calendar_service.events().patch().execute.return_value = {
+            "id": "evt1", "summary": "X",
+            "start": {"dateTime": "2026-08-11T20:30:00-03:00"},
+            "end": {"dateTime": "2026-08-11T21:30:00-03:00"},
+        }
+        await move_event(
+            PHONE, "evt1",
+            new_start="2026-08-11T20:30:00-03:00",
+            new_end="2026-08-11T21:30:00-03:00",
+            instance="jennifer",
+        )
+        call_kwargs = mock_calendar_service.events().patch.call_args.kwargs
+        assert call_kwargs.get("sendUpdates") == "all"
+
+    @pytest.mark.asyncio
+    async def test_move_event_no_notification_when_disabled(self, mock_calendar_service):
+        """notify_attendees=False suprime o e-mail."""
+        from tools.google_calendar import move_event
+
+        mock_calendar_service.events().patch().execute.return_value = {
+            "id": "evt1", "summary": "X",
+            "start": {"dateTime": "2026-08-11T20:30:00-03:00"},
+            "end": {"dateTime": "2026-08-11T21:30:00-03:00"},
+        }
+        await move_event(
+            PHONE, "evt1",
+            new_start="2026-08-11T20:30:00-03:00",
+            new_end="2026-08-11T21:30:00-03:00",
+            notify_attendees=False,
+            instance="jennifer",
+        )
+        call_kwargs = mock_calendar_service.events().patch.call_args.kwargs
+        assert call_kwargs.get("sendUpdates") == "none"
+
+    @pytest.mark.asyncio
+    async def test_move_event_includes_event_id(self, mock_calendar_service):
+        """O event_id do evento original deve ser passado ao patch."""
+        from tools.google_calendar import move_event
+
+        mock_calendar_service.events().patch().execute.return_value = {
+            "id": "abc123", "summary": "X",
+            "start": {"dateTime": "2026-08-11T20:30:00-03:00"},
+            "end": {"dateTime": "2026-08-11T21:30:00-03:00"},
+        }
+        await move_event(
+            PHONE, "abc123",
+            new_start="2026-08-11T20:30:00-03:00",
+            new_end="2026-08-11T21:30:00-03:00",
+            instance="jennifer",
+        )
+        call_kwargs = mock_calendar_service.events().patch.call_args.kwargs
+        assert call_kwargs.get("eventId") == "abc123"
+
+    @pytest.mark.asyncio
+    async def test_move_event_includes_timezone(self, mock_calendar_service):
+        """Timezone e incluida no body do patch."""
+        from tools.google_calendar import move_event
+
+        mock_calendar_service.events().patch().execute.return_value = {
+            "id": "evt1", "summary": "X",
+            "start": {"dateTime": "2026-08-11T20:30:00-03:00"},
+            "end": {"dateTime": "2026-08-11T21:30:00-03:00"},
+        }
+        await move_event(
+            PHONE, "evt1",
+            new_start="2026-08-11T20:30:00-03:00",
+            new_end="2026-08-11T21:30:00-03:00",
+            timezone="America/Sao_Paulo",
+            instance="jennifer",
+        )
+        call_kwargs = mock_calendar_service.events().patch.call_args.kwargs
+        body = call_kwargs.get("body", {})
+        assert body["start"]["timeZone"] == "America/Sao_Paulo"
+        assert body["end"]["timeZone"] == "America/Sao_Paulo"
+
+
 class TestDeleteEvent:
     @pytest.mark.asyncio
     async def test_delete_event(self, mock_calendar_service):
