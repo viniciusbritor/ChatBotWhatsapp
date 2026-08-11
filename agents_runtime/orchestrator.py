@@ -1985,6 +1985,10 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
             action_payload = pending_action.get("payload", {})
             group_jid = action_payload.get("group_jid", "")
             requested_intent = action_payload.get("intent", "calendar")
+            original_text = action_payload.get("original_text", "")
+            if original_text:
+                payload["text"] = original_text
+                masked_text = mask_pii(original_text)
             try:
                 from tools.group import set_member_confirmation
                 await set_member_confirmation(group_jid, phone, True)

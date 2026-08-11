@@ -671,7 +671,12 @@ async def _run_drive(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     from pipelines._guard import check_google_access, blocked_response
 
-    guard = await check_google_access(instance, phone, "drive")
+    is_group = "@g.us" in str(extra.get("remote_jid", ""))
+    group_jid = str(extra.get("remote_jid", "")) if is_group else ""
+    guard = await check_google_access(
+        instance, phone, "drive",
+        is_group=is_group, group_jid=group_jid, original_text=text,
+    )
     if guard.get("verdict") != "allow":
         return blocked_response(guard)
 
