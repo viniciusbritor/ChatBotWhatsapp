@@ -283,6 +283,7 @@ def extract_envelope(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     text = ""
     extra: Dict[str, Any] = {
         "is_group": is_group,
+        "remote_jid": remote_jid,
         "raw_message_type": str(data.get("messageType") or ""),
         "phone_source": phone_source,
     }

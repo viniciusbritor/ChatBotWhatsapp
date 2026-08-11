@@ -133,6 +133,7 @@ def test_extract_group_message():
     assert envelope["remote_jid"] == "120363@g.us"
     assert envelope["text"] == "Bom dia grupo"
     assert envelope["extra"]["phone_source"] == "participant"
+    assert envelope["extra"]["remote_jid"] == "120363@g.us"
 
 
 def test_extract_group_phone_uses_participant_not_remotejid():
