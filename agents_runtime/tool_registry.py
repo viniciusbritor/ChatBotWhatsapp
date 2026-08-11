@@ -12,7 +12,7 @@ from typing import Dict, Any, Callable, Awaitable
 
 from tools import google_calendar, google_drive, google_gmail, web_search, nickname
 from tools import locomotion, youtube, group, correction, chat_history
-from tools import memory
+from tools import memory, weather
 
 logger = logging.getLogger(__name__)
 
@@ -1121,6 +1121,31 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
                 "tipo": {"type": "string", "description": "Tipo: restaurant, pharmacy, gas_station"},
             },
             "required": ["local"],
+        },
+    },
+    "weather.current": {
+        "function": weather.current,
+        "implementation": "weather",
+        "description": "Condicao atual do tempo de uma cidade: temperatura, sensacao, umidade, vento e condicao (pt-BR).",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "cidade": {"type": "string", "description": "Nome da cidade (ex: Sao Paulo, Rio de Janeiro)"},
+            },
+            "required": ["cidade"],
+        },
+    },
+    "weather.forecast": {
+        "function": weather.forecast,
+        "implementation": "weather",
+        "description": "Previsao do tempo para os proximos dias (1-7) de uma cidade: max, min, probabilidade de chuva, vento.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "cidade": {"type": "string", "description": "Nome da cidade"},
+                "dias": {"type": "integer", "description": "Quantidade de dias (1-7, default 3)"},
+            },
+            "required": ["cidade"],
         },
     },
     "youtube.search_videos": {
