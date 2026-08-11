@@ -4294,3 +4294,23 @@ avaliacoes, aberto). Commit c72abdc.
 Tambem corrigido teste flaky test_no_hints_when_unrelated
 (knowledge_retriever): mockava _llm_enrich_query (LLM real) sem mock.
 Commit 9c3935a.
+
+## 11/08/2026 (20:30 BRT) - Reconstrucao do modulo agents (admin portal)
+
+Usuario reportou que o modulo agents precisa ser reconstruido: edit
+buttons nao funcionavam (skills/tools gravavam system_prompt inutil) e
+faltava painel de conexoes.
+
+Correcoes (commit 958cb31):
+1. Skill drawer: campo 'content' (schema real) em vez de system_prompt.
+2. Tool drawer: function_schema (JSON) + implementation + config.
+3. Agent drawer: tools/skills/delegates_to/enabled/thinking/parent_id.
+4. DELETE /admin/knowledge/{title} + delKnowledge() funcional.
+5. Account CRUD completo (POST/PUT/DELETE).
+6. Seed DEFAULT_TOOLS com locomotion.*/weather.*/youtube.search_videos.
+7. jennifier: tools ampliadas + system_prompt v4 (bloco PT10 locais/clima).
+8. Backfill script aplicado no Firestore real (3 tools criadas, jennifier
+   atualizado, cache invalidado via POST /admin/cache/invalidate).
+
+Resolve o caso 'Emporio Alto Pinheiro': agora a Jennifer tem a tool
+locomotion.find_place disponivel e o prompt a instrui a usala.
