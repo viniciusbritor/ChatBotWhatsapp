@@ -727,8 +727,18 @@ class TestRetrieveWithHints:
     @pytest.mark.asyncio
     async def test_no_hints_when_unrelated(self):
         from agent_orchestration.knowledge_retriever import _extract_query_hints
+        from unittest.mock import AsyncMock, patch
 
-        hints = await _extract_query_hints("5511999", "oi, tudo bem?")
+        with patch(
+            "agent_orchestration.knowledge_retriever._llm_enrich_query",
+            AsyncMock(return_value={
+                "enriched_query": "oi, tudo bem?", "source_hint": "", "class_hint": "",
+            }),
+        ), patch(
+            "agent_orchestration.knowledge_retriever._match_source_title_dynamic",
+            AsyncMock(return_value=None),
+        ):
+            hints = await _extract_query_hints("5511999", "oi, tudo bem?")
         assert "source_title" not in hints
         assert "class" not in hints
 
