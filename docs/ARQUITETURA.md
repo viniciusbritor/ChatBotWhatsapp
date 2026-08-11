@@ -1,9 +1,10 @@
 # Arquitetura — ChatBotWhatsapp (Agentes Omnichannel)
 
-> Última revisão: **2026-08-05** — unificação de vector stores em `knowledge-database`.
+> Última revisão: **2026-08-10** — integração do Google Stitch Design System no `module_ui.py`.
 > Chunking com hierarquia jurídica brasileira (Art., §, Capítulo, Seção, Lei).
 > Retrieval com expansão de contexto vizinho (`search_with_context`).
 > 2 collections core: `knowledge-database` (vector user+grupo) + `message-history` (chat).
+> UI Control Plane: Design Coherence Clean Light (Google Stitch) no `module_ui.py`.
 > Regra unificada de acesso a conhecimento (RAG vs Drive vs Chat memory)
 > documentada em §0.0.4.
 > Ver `docs/DIARIO_BORDO.md` para o histórico completo do dia.

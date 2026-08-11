@@ -1,6 +1,24 @@
 # Diario de Bordo — ChatBotWhatsapp
 
-## 10/08/2026 (04:30 BRT) — F2: Evolution Admin Client
+## 10/08/2026 (21:20 BRT) — Integracao Design System Google Stitch no Portal UI (module_ui.py)
+
+### Escopo
+Integracao do Design System Coherence Clean Light derivado do projeto prototipado no Google Stitch (`projects/4035974569192704318`) no modulo `agents_runtime/core/module_ui.py`.
+
+### Mudancas Realizadas
+- **Design System Stitch em `:root`**: `--bg: #f9f9ff`, `--primary: #0058be`, `--secondary: #196b52`, `--surface: #ffffff`, `--border: #e2e8f0`, fontes `Inter` e `JetBrains Mono`.
+- **Preservacao de Javascript Duto**: `api()` com `AbortController` 12s, `toast-stack`, `openDrawer()`, `setActive()` e renderizadores de todas as 8 abas intactos.
+- **Protótipos de Alta Fidelidade no Stitch**: Atualizacao via StitchMCP com dados reais de producao (Agentes, Tools, Skills, Contas WhatsApp, Proprietarios, Conexoes, Conhecimento, Status).
+
+### Avaliacao de Riscos de Producao (Analise Estrutural)
+1. **Risco de Sintaxe JS Inline (NULO/MITIGADO)**: Preservada a sintaxe JS original sem alteracao de logica de execucao. Validada por 48 testes unitarios.
+2. **Risco de Quebra de Contratos REST (NULO)**: Todas as chamadas `/admin/*` e `/api/v1/*` e rotas de auth permanecem idênticas.
+3. **Risco de Regressao CI/CD (NULO)**: Commit `4a7f1bc` na branch `test` disparou trigger `deploy-agents-runtime-test`.
+
+### Validacao
+- Pytest suite: `tests/test_portal_loading.py`, `tests/test_module_ui_admin.py`, `tests/test_portal_roles.py` — **48 passed in 17.05s**.
+
+---
 
 ### Entregue (branch feat/evolution-admin)
 - `core/evolution_admin.py` (novo): fetch_instances, get_connection_state,
