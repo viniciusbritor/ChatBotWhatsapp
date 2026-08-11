@@ -114,6 +114,7 @@ def resolve_caller(request) -> tuple:
         phone = lookup_phone_by_uid(uid)
 
     if phone:
+        role = "agent_user"
         try:
             role = get_user_role(phone)
         except Exception:

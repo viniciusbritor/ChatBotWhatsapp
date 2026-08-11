@@ -1781,8 +1781,6 @@ function renderStatus(root) {
 }
 
 /* ---- boot ---- */
-const CALLER_ROLE = '__ROLE__';
-const CALLER_PHONE = '__CALLER_PHONE__';
 (async () => {
   try {
     const s = await api(ENDPOINTS.status);
