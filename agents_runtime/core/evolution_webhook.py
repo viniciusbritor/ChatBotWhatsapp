@@ -15,18 +15,23 @@ Extracts:
 - message_id (Evolution key.id)
 - instance
 - is_group (@g.us suffix)
+- was_mentioned (grupo: @Jennifer no contextInfo.mentionedJid)
 
 Filters out:
 - fromMe echoes
 - @broadcast lists
 - empty phone/instance
 - events other than messages.upsert
+- mensagens de GRUPO sem @Jennifer quando o JID do bot e conhecido
+  (mencao explicita); se mentionedJid vier vazio/ausente, processa
+  normalmente (compatibilidade com clientes sem suporte a mencao).
 """
 from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, Optional
+import time
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +39,65 @@ EVOLUTION_BASE_URL = os.getenv("EVO_BASE_URL", "https://evolution.coherenceai.co
 
 VALID_EVENTS = {"MESSAGES_UPSERT", "messages.upsert", "messages.update"}
 
+_BOT_JID_CACHE: Dict[str, tuple] = {}
+_BOT_JID_TTL_SEC = 300
+
 
 class EvolutionWebhookError(Exception):
     """Raised when the webhook payload cannot be processed."""
+
+
+def _resolve_bot_jid(instance: str) -> str:
+    """Resolve o JID do bot (Jennifer) para a instancia.
+
+    O numero do bot e o owner_phone da conta Evolution (whatsapp_accounts).
+    Cache in-process de 300s para evitar round-trip Firestore por mensagem.
+    Retorna "" se nao resolver (nesse caso, nenhum filtro de mencao e aplicado).
+    """
+    if not instance:
+        return ""
+    cached = _BOT_JID_CACHE.get(instance)
+    if cached and cached[1] > time.time() - _BOT_JID_TTL_SEC:
+        return cached[0]
+    bot_jid = ""
+    try:
+        from google.cloud import firestore
+
+        project = os.getenv("GCP_PROJECT") or os.getenv("GCLOUD_PROJECT")
+        if not project or os.getenv("FIRESTORE_EMULATOR_HOST"):
+            return ""
+        db = firestore.Client(project=project)
+        for doc in db.collection("whatsapp_accounts").stream():
+            data = doc.to_dict() or {}
+            if (data.get("instance") or "").lower() == str(instance).lower():
+                owner = str(data.get("owner_phone") or "")
+                digits = "".join(c for c in owner if c.isdigit())
+                if digits:
+                    bot_jid = f"{digits}@s.whatsapp.net"
+                break
+    except Exception as exc:
+        logger.debug("resolve_bot_jid_failed instance=%s exc=%s", instance, exc)
+    _BOT_JID_CACHE[instance] = (bot_jid, time.time())
+    return bot_jid
+
+
+def _extract_mentioned_jids(message: Dict[str, Any]) -> List[str]:
+    """Extrai JIDs mencionados de uma mensagem (contextInfo.mentionedJid).
+
+    Baileys/Evolution coloca a lista em:
+    - message.extendedTextMessage.contextInfo.mentionedJid
+    - message.conversation.contextInfo (raramente presente)
+    """
+    mentioned: List[str] = []
+    for node_name in ("extendedTextMessage", "conversation"):
+        node = message.get(node_name)
+        if isinstance(node, dict):
+            ctx = node.get("contextInfo")
+            if isinstance(ctx, dict):
+                jids = ctx.get("mentionedJid")
+                if isinstance(jids, list):
+                    mentioned.extend(str(j) for j in jids if isinstance(j, str))
+    return mentioned
 
 
 def extract_envelope(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -144,6 +205,26 @@ def extract_envelope(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
     if not instance:
         return None
+
+    # ========================
+    # FILTRO DE MENCAO EM GRUPO (10/08/2026)
+    # Jennifer so responde em grupo quando @mencionada explicitamente.
+    # Se mentionedJid vier vazio/ausente (clientes sem suporte), processa
+    # normalmente — nunca quebra o fluxo existente.
+    # ========================
+    was_mentioned = False
+    if is_group:
+        bot_jid = _resolve_bot_jid(instance)
+        mentioned_jids = _extract_mentioned_jids(message)
+        if bot_jid and mentioned_jids:
+            was_mentioned = bot_jid in mentioned_jids
+            if not was_mentioned:
+                logger.info(
+                    "webhook_group_mention_skipped instance=%s group=%s phone=%s mentioned=%s",
+                    instance, remote_jid.split("@", 1)[0], phone, mentioned_jids[:5],
+                )
+                return None
+    extra["was_mentioned"] = was_mentioned
 
     from core.message_ledger import deterministic_request_id
 

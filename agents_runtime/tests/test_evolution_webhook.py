@@ -571,3 +571,92 @@ def test_extract_document_file_length_missing():
     envelope = extract_envelope(payload)
     assert envelope is not None
     assert envelope["extra"]["doc_file_length"] == 0
+
+
+# ============================================================================
+# Filtro de mencao @Jennifer em grupo (10/08/2026)
+# ============================================================================
+
+BOT_JID = "5511966830020@s.whatsapp.net"
+GROUP_JID = "12036312345678@g.us"
+
+
+def _group_payload(message, mention_jids=None):
+    """Monta payload de grupo. mention_jids insere contextInfo.mentionedJid."""
+    extended = {"text": "@Jennifer oi pessoal"}
+    if mention_jids is not None:
+        extended["contextInfo"] = {"mentionedJid": mention_jids}
+    return {
+        "event": "MESSAGES_UPSERT",
+        "instance": "jennifer",
+        "data": {
+            "key": {
+                "remoteJid": GROUP_JID,
+                "participant": "5511777777777@s.whatsapp.net",
+                "fromMe": False,
+                "id": "GRP_MSG_001",
+            },
+            "pushName": "Ana",
+            "message": {"extendedTextMessage": extended},
+            "messageType": "extendedTextMessage",
+        },
+    }
+
+
+def _patch_bot_jid(jid=BOT_JID):
+    from unittest.mock import patch
+
+    return patch("core.evolution_webhook._resolve_bot_jid", return_value=jid)
+
+
+def test_group_message_mentioning_bot_passes():
+    """Mencao explicita @Jennifer -> processa normalmente."""
+    payload = _group_payload({"text": "@Jennifer oi"}, mention_jids=[BOT_JID])
+    with _patch_bot_jid():
+        envelope = extract_envelope(payload)
+    assert envelope is not None
+    assert envelope["extra"]["was_mentioned"] is True
+    assert envelope["phone"] == "5511777777777"
+
+
+def test_group_message_not_mentioning_bot_is_skipped():
+    """Grupo sem @Jennifer (menciona outro user) -> None (ignorado)."""
+    payload = _group_payload({"text": "@Carlos oi"}, mention_jids=["5511888888888@s.whatsapp.net"])
+    with _patch_bot_jid():
+        envelope = extract_envelope(payload)
+    assert envelope is None
+
+
+def test_group_message_no_mentions_passes_backward_compat():
+    """Grupo sem contextInfo.mentionedJid -> processa (compatibilidade)."""
+    payload = _group_payload({"text": "oi pessoal"})
+    with _patch_bot_jid():
+        envelope = extract_envelope(payload)
+    assert envelope is not None
+    assert envelope["extra"]["was_mentioned"] is False
+
+
+def test_group_message_bot_jid_unknown_passes():
+    """Bot JID nao resolvido -> sem filtro (nao quebra fluxo)."""
+    payload = _group_payload({"text": "oi pessoal"}, mention_jids=["5511888888888@s.whatsapp.net"])
+    with _patch_bot_jid(""):
+        envelope = extract_envelope(payload)
+    assert envelope is not None
+
+
+def test_private_message_ignores_mention_filter():
+    """Mensagem privada nunca passa pelo filtro de mencao."""
+    payload = {
+        "event": "MESSAGES_UPSERT",
+        "instance": "jennifer",
+        "data": {
+            "key": {"remoteJid": BOT_JID, "fromMe": False, "id": "PVT_MSG_001"},
+            "pushName": "Ana",
+            "message": {"conversation": "oi jennifer"},
+            "messageType": "conversation",
+        },
+    }
+    with _patch_bot_jid():
+        envelope = extract_envelope(payload)
+    assert envelope is not None
+    assert envelope["extra"]["was_mentioned"] is False
