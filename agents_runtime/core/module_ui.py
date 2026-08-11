@@ -793,6 +793,26 @@ const ENDPOINTS = {
   composioAuthorize: '/api/v1/composio/authorize',
 };
 const TOAST_TIMEOUT_MS = 5000;
+let _authFailed = false;
+function showAuthBanner() {
+  if (_authFailed) return;
+  _authFailed = true;
+  const loginUrl = window.location.origin + '/?login=1';
+  const root = document.getElementById('root');
+  if (root) {
+    root.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:300px;gap:20px;padding:40px">'
+      + '<span class="material-symbols-outlined" style="font-size:64px;color:#ef4444">lock</span>'
+      + '<h2 style="margin:0;color:#ef4444">Sessão expirada</h2>'
+      + '<p style="color:#6b7280;text-align:center;max-width:400px">Seu token de acesso expirou (validade de 1h). Faça login novamente para continuar.</p>'
+      + '<a href="' + loginUrl + '" style="display:inline-flex;align-items:center;gap:8px;background:#4f46e5;color:#fff;border-radius:8px;padding:12px 24px;text-decoration:none;font-weight:600">'
+      + '<span class="material-symbols-outlined">login</span> Fazer Login novamente</a>'
+      + '</div>';
+  }
+  const banner = document.createElement('div');
+  banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#ef4444;color:#fff;text-align:center;padding:12px;font-weight:600;z-index:9999;font-size:14px;cursor:pointer';
+  banner.innerHTML = '\uD83D\uDD12 Sessão expirada — <a href="' + loginUrl + '" style="color:#fff;text-decoration:underline">clique aqui para fazer Login novamente</a>.';
+  document.body.prepend(banner);
+}
 
 /* ---- Toasts ---- */
 function toast(message, kind) {
@@ -834,6 +854,10 @@ async function api(path, options) {
     if (!r.ok) {
       let detail = '';
       try { detail = ((await r.json()).detail || ''); } catch (_) {}
+      if (r.status === 401 || r.status === 403) {
+        showAuthBanner();
+        throw new Error('auth_expired_' + r.status);
+      }
       throw new Error('http_' + r.status + (detail ? ' ' + detail : ''));
     }
     const ct = r.headers.get('content-type') || '';
