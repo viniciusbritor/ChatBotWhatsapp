@@ -202,7 +202,16 @@ nav button {
   transition: background .12s, color .12s, transform .12s;
   font-weight: 500;
 }
-nav button .nav-icon { font-size: 15px; width: 18px; text-align: center; flex-shrink: 0; }
+nav button .nav-icon {
+  font-size: 20px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  flex-shrink: 0;
+  margin-right: 6px;
+}
 nav button:hover { background: var(--surface-alt); color: var(--fg); }
 nav button.active {
   background: var(--accent-soft);
@@ -795,15 +804,25 @@ function toast(message, kind) {
   setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 200); }, TOAST_TIMEOUT_MS);
 }
 
-/* ---- API helper com timeout ---- */
+/* ---- API helper com timeout e autorizacao resiliente ---- */
 async function api(path, options) {
   options = options || {};
   const ctrl = new AbortController();
   const timeoutId = setTimeout(() => ctrl.abort(), 12000);
   try {
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    let targetUrl = path;
+    if (token && !targetUrl.includes('token=')) {
+      const sep = targetUrl.includes('?') ? '&' : '?';
+      targetUrl = targetUrl + sep + 'token=' + encodeURIComponent(token);
+    }
     const opts = { credentials: 'include', signal: ctrl.signal, ...options };
     opts.headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
-    const r = await fetch(path, opts);
+    if (token && !opts.headers['Authorization']) {
+      opts.headers['Authorization'] = 'Bearer ' + token;
+    }
+    const r = await fetch(targetUrl, opts);
     clearTimeout(timeoutId);
     if (!r.ok) {
       let detail = '';
@@ -1825,20 +1844,20 @@ def render_dashboard(commit: str, deployed_at: str, role: str = "admin", caller_
 
 
 _NAV_ADMIN = (
-    '<button data-tab="accounts" class="active"><span class="nav-icon">📱</span>Contas WhatsApp</button>\n'
-    '    <button data-tab="agents"><span class="nav-icon">🤖</span>Agentes</button>\n'
-    '    <button data-tab="skills"><span class="nav-icon">🧩</span>Skills</button>\n'
-    '    <button data-tab="tools"><span class="nav-icon">🔧</span>Tools</button>\n'
-    '    <button data-tab="owners"><span class="nav-icon">👤</span>Proprietários</button>\n'
-    '    <button data-tab="conexoes"><span class="nav-icon">🔗</span>Conexões</button>\n'
-    '    <button data-tab="knowledge"><span class="nav-icon">📚</span>Conhecimento</button>\n'
-    '    <button data-tab="status"><span class="nav-icon">📊</span>Status</button>'
+    '<button data-tab="accounts" class="active"><span class="material-symbols-outlined nav-icon">chat</span>Contas WhatsApp</button>\n'
+    '    <button data-tab="agents"><span class="material-symbols-outlined nav-icon">smart_toy</span>Agentes</button>\n'
+    '    <button data-tab="skills"><span class="material-symbols-outlined nav-icon">psychology</span>Skills</button>\n'
+    '    <button data-tab="tools"><span class="material-symbols-outlined nav-icon">build</span>Tools</button>\n'
+    '    <button data-tab="owners"><span class="material-symbols-outlined nav-icon">group</span>Proprietários</button>\n'
+    '    <button data-tab="conexoes"><span class="material-symbols-outlined nav-icon">hub</span>Conexões</button>\n'
+    '    <button data-tab="knowledge"><span class="material-symbols-outlined nav-icon">menu_book</span>Conhecimento</button>\n'
+    '    <button data-tab="status"><span class="material-symbols-outlined nav-icon">analytics</span>Status</button>'
 )
 
 _NAV_AGENT_USER = (
-    '<button data-tab="conexoes" class="active"><span class="nav-icon">🔗</span>Conexões</button>\n'
-    '    <button data-tab="permissoes"><span class="nav-icon">🔑</span>Permissões</button>\n'
-    '    <button data-tab="status"><span class="nav-icon">📊</span>Status</button>'
+    '<button data-tab="conexoes" class="active"><span class="material-symbols-outlined nav-icon">hub</span>Conexões</button>\n'
+    '    <button data-tab="permissoes"><span class="material-symbols-outlined nav-icon">key</span>Permissões</button>\n'
+    '    <button data-tab="status"><span class="material-symbols-outlined nav-icon">analytics</span>Status</button>'
 )
 
 
