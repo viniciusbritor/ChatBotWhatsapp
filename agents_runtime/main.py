@@ -1499,6 +1499,55 @@ async def admin_knowledge_post(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/admin/knowledge/user")
+async def admin_knowledge_user_post(request: Request):
+    """Index a document into the USER's private Firestore Vector (agent-knowledge-v2).
+
+    Mesmo pipeline que a Jennifer usa para conhecimento individual: chunking
+    semantico + embedding OpenAI + armazenamento em agent-knowledge-v2.
+    Body: {"phone": "...", "titulo": "...", "conteudo": "...", "categoria": "..."}
+    """
+    body = await request.json()
+    phone = str(body.get("phone", "") or "").strip()
+    titulo = str(body.get("titulo", "") or "").strip()
+    conteudo = str(body.get("conteudo", "") or "")
+    categoria = str(body.get("categoria", "") or "geral").strip()
+    if not phone:
+        raise HTTPException(status_code=422, detail="phone required")
+    if not titulo or not conteudo:
+        raise HTTPException(status_code=422, detail="titulo and conteudo required")
+
+    try:
+        from core.rag import EMBEDDING_DIM, SCHEMA_VERSION, index_private_document
+        result = await index_private_document(
+            phone=phone,
+            text_content=conteudo,
+            source_title=titulo,
+            category=categoria,
+            class_=categoria,
+            group=None,
+            theme=None,
+        )
+        if result.get("error"):
+            raise HTTPException(status_code=500, detail=result["error"])
+        return JSONResponse(content={
+            "status": "ok",
+            "doc_ids": result.get("doc_ids", []),
+            "chunks_indexed": result.get("chunks_indexed", 0),
+            "chunks": result.get("chunks", 0),
+            "embedding_dim": EMBEDDING_DIM,
+            "schema_version": SCHEMA_VERSION,
+            "truncated": result.get("truncated", False),
+            "collection": result.get("collection", "agent-knowledge-v2"),
+        })
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/admin/knowledge/search")
 async def admin_knowledge_search(request: Request):
     """Semantic search in shared knowledge base."""

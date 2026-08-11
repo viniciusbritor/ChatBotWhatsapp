@@ -135,6 +135,60 @@ class TestAdminAgentsEndpoints(_AuthFixture):
         assert resp.status_code == 200
         assert resp.json()["deleted"] is True
 
+    def test_admin_skills_get_returns_skill(self):
+        fake_skill = {"skill_id": "skill-x", "name": "Skill X", "system_prompt": "prompt da skill"}
+        with patch("main.get_skill", return_value=fake_skill):
+            resp = self.client.get("/admin/skills/skill-x", headers=self.headers)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["skill"]["system_prompt"] == "prompt da skill"
+
+    def test_admin_skills_get_404_when_missing(self):
+        with patch("main.get_skill", return_value=None):
+            resp = self.client.get("/admin/skills/skill-nao-existe", headers=self.headers)
+        assert resp.status_code == 404
+
+    def test_admin_tools_get_returns_tool(self):
+        fake_tool = {"tool_id": "tool-y", "name": "Tool Y", "system_prompt": "prompt da tool"}
+        with patch("main.get_tool_meta", return_value=fake_tool):
+            resp = self.client.get("/admin/tools/tool-y", headers=self.headers)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["tool"]["system_prompt"] == "prompt da tool"
+
+    def test_admin_tools_get_404_when_missing(self):
+        with patch("main.get_tool_meta", return_value=None):
+            resp = self.client.get("/admin/tools/tool-nao-existe", headers=self.headers)
+        assert resp.status_code == 404
+
+    def test_admin_knowledge_user_post_indexes_private(self):
+        from unittest.mock import AsyncMock
+
+        fake_result = {
+            "doc_ids": ["sha-abc"], "chunks": 2, "chunks_indexed": 2,
+            "truncated": False, "collection": "agent-knowledge-v2",
+        }
+        with patch("core.rag.index_private_document", AsyncMock(return_value=fake_result)) as mock_index:
+            resp = self.client.post(
+                "/admin/knowledge/user",
+                json={"phone": "5511966830020", "titulo": "meu-doc", "conteudo": "texto longo para indexar"},
+                headers=self.headers,
+            )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["status"] == "ok"
+        assert body["chunks_indexed"] == 2
+        assert mock_index.call_count == 1
+        call_kwargs = mock_index.call_args.kwargs
+        assert call_kwargs["phone"] == "5511966830020"
+        assert call_kwargs["source_title"] == "meu-doc"
+
+    def test_admin_knowledge_user_post_requires_phone_and_fields(self):
+        resp = self.client.post(
+            "/admin/knowledge/user",
+            json={"titulo": "sem phone", "conteudo": "x"},
+            headers=self.headers,
+        )
+        assert resp.status_code == 422
+
 
 class TestAdminKnowledgeGrouping(_AuthFixture):
     def setup_method(self):

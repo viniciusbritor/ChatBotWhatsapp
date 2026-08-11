@@ -1417,7 +1417,30 @@ function toolDel(id) {
     .then(() => { toast('Tool excluída', 'good'); _reloadCurrentTab(); })
     .catch(e => toast('Erro ao excluir: ' + e.message, 'warn'));
 }
-function uploadKnowledge(){ toast('Em breve: upload de documento', 'warn'); }
+function uploadKnowledge() {
+  const defaultPhone = (CALLER_ROLE === 'agent_user') ? (CALLER_PHONE || '') : '';
+  openDrawer('Upload de Conhecimento (RAG privado)', [
+    { name: 'phone', label: 'Telefone do usuário (dono do conhecimento)', value: defaultPhone },
+    { name: 'titulo', label: 'Título do documento', value: '' },
+    { name: 'conteudo', label: 'Conteúdo (texto a indexar no Firestore Vector)', type: 'textarea', rows: 14, value: '' },
+  ], async payload => {
+    if (!payload.phone || !payload.titulo || !payload.conteudo) {
+      toast('Preencha telefone, título e conteúdo.', 'warn');
+      return false;
+    }
+    try {
+      const res = await api('/admin/knowledge/user', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      toast('Indexado: ' + (res.chunks_indexed || 0) + ' chunk(s) no RAG privado', 'good');
+      return true;
+    } catch (e) {
+      toast('Erro ao indexar: ' + e.message, 'warn');
+      return false;
+    }
+  });
+}
 function delKnowledge(id) { toast('Excluir doc: ' + id, 'warn'); }
 function requestOAuth(ph) {
   if (!ph) { toast('Telefone inválido para OAuth.', 'warn'); return; }
