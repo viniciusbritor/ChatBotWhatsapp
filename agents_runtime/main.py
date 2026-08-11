@@ -354,6 +354,14 @@ async def evolution_webhook(request: Request):
         )
         if event and event not in {"MESSAGES_UPSERT", "messages.upsert"}:
             return JSONResponse(content={"status": "ignored", "event": event})
+        data = body.get("data") or {}
+        logger.info(
+            "webhook_ignored_body_preview event=%s body_keys=%s data_keys=%s data_preview=%s",
+            event,
+            list(body.keys()) if isinstance(body, dict) else "NOT_DICT",
+            list(data.keys()) if isinstance(data, dict) else "NOT_DICT",
+            str(data)[:1200],
+        )
         return JSONResponse(content={"status": "ignored", "reason": "filtered"})
 
     resolve_message_id(envelope)
