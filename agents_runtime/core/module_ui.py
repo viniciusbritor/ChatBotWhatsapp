@@ -922,7 +922,7 @@ function renderAccounts(root) {
     setTabBody(
       '<div id="list">'
       + list.map(a => {
-        const state   = a.state || a.connection_status || 'unknown';
+        const state   = a.state || a.connection_status || a.status || 'unknown';
         const stCls   = state === 'open' ? 'ok' : state === 'connecting' ? 'warn' : 'bad';
         const owner   = a.owner_phone || a.owner || '-';
         const created = a.created_at ? new Date(a.created_at).toLocaleDateString('pt-BR') : '-';
@@ -1037,26 +1037,6 @@ function renderTools(root) {
               + '<button class="secondary danger" onclick="toolDel(' + JSON.stringify(esc(t.tool_id)) + ')">Excluir</button>'
               + '</div>'
             : '')
-        + '</div>'
-      )).join('')
-      + '</div>'
-    );
-  }).catch(e => setTabBody(errHtml(e.message, e.status)));
-}
-
-/* -- Owners -- */
-function renderOwners(root) {
-  root.innerHTML = panelHtml('Proprietários', 'Usuários com papel de owner', null, skel(2));
-
-  api('/admin/owners').then(data => {
-    const list = data.owners || [];
-    if (!list.length) { setTabBody(emptyHtml('Nenhum proprietário', 'Nenhum owner cadastrado.')); return; }
-    setTabBody(
-      '<div id="list">'
-      + list.map(o => (
-        '<div class="card">'
-        + '<h3>' + esc(o.phone || o.owner_phone || o.id) + '</h3>'
-        + '<div class="meta"><span>' + esc(o.instance_id || '') + '</span></div>'
         + '</div>'
       )).join('')
       + '</div>'
@@ -1205,7 +1185,6 @@ function setActive(tab) {
     case 'agents':     renderAgents(root);      break;
     case 'skills':     renderSkills(root);      break;
     case 'tools':      renderTools(root);       break;
-    case 'owners':     renderOwners(root);      break;
     case 'conexoes':   renderConexoes(root);    break;
     case 'permissoes': renderPermissoes(root);  break;
     case 'knowledge':  renderKnowledge(root);   break;
@@ -1276,7 +1255,6 @@ _NAV_ADMIN = (
     '    <button data-tab="agents"><span class="material-symbols-outlined nav-icon">smart_toy</span>Agentes</button>\n'
     '    <button data-tab="skills"><span class="material-symbols-outlined nav-icon">psychology</span>Skills</button>\n'
     '    <button data-tab="tools"><span class="material-symbols-outlined nav-icon">build</span>Tools</button>\n'
-    '    <button data-tab="owners"><span class="material-symbols-outlined nav-icon">group</span>Proprietários</button>\n'
     '    <button data-tab="conexoes"><span class="material-symbols-outlined nav-icon">hub</span>Conexões</button>\n'
     '    <button data-tab="knowledge"><span class="material-symbols-outlined nav-icon">menu_book</span>Conhecimento</button>\n'
     '    <button data-tab="status"><span class="material-symbols-outlined nav-icon">analytics</span>Status</button>'

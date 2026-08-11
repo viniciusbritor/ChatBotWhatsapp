@@ -972,10 +972,31 @@ async def admin_accounts_list(request: Request):
             data = doc.to_dict() or {}
             data["id"] = doc.id
             rows.append(data)
+        await _enrich_accounts_with_evolution_state(rows)
         return JSONResponse(content={"accounts": rows})
     except Exception as exc:
         logger.warning("admin_accounts_list failed: %s", exc)
         return JSONResponse(content={"accounts": []})
+
+
+async def _enrich_accounts_with_evolution_state(rows: list) -> None:
+    """Preenche connection_status ao vivo consultando a Evolution API.
+
+    O campo `status` gravado em whatsapp_accounts e administrativo
+    ("active"); o estado real de conexao vem da Evolution
+    (open/connecting/close). Isso resolve o "unknown" na aba Contas.
+    """
+    from core.evolution_admin import get_connection_state
+
+    for row in rows:
+        instance = str(row.get("instance") or "").strip()
+        if not instance:
+            continue
+        state = await get_connection_state(instance)
+        conn = (state or {}).get("state") or ""
+        if conn:
+            row["connection_status"] = conn
+            row["state"] = conn
 
 
 @app.get("/admin/accounts/{account_id}")
