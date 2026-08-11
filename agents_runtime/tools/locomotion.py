@@ -1,4 +1,4 @@
-"""Google Maps tools: calc_route, geocode, search_places."""
+"""Google Maps tools: calc_route, geocode, search_places, find_place."""
 import os
 import logging
 import asyncio
@@ -103,4 +103,41 @@ async def search_places(local: str, tipo: str = "restaurant") -> list:
         return results
     except Exception as e:
         logger.error(f"search_places failed: {e}")
+        return [{"error": str(e)}]
+
+
+async def find_place(query: str, localizacao: str = "") -> list:
+    """Busca um estabelecimento pelo NOME (Google Places Text Search).
+
+    Resolve o caso 'busque o Emporio Alto Pinheiro': em vez de geocodificar
+    o nome (que falha), usa /place/textsearch/json que busca diretamente por
+    nome em toda a base do Google Maps. Opcionalmente refina por cidade.
+    Retorna ate 5 resultados com nome, endereco, avaliacao e status.
+    """
+    key = _get_key()
+    if not key:
+        return [{"error": "GOOGLE_MAPS_API_KEY not configured"}]
+    try:
+        query_text = query.strip()
+        if localizacao and localizacao.strip():
+            query_text = f"{query_text} {localizacao.strip()}"
+        places = await _fetch("https://maps.googleapis.com/maps/api/place/textsearch/json", {
+            "query": query_text, "key": key, "language": "pt-BR",
+        })
+        data = places.json()
+        if data.get("status") not in ("OK", "ZERO_RESULTS"):
+            return [{"error": data.get("status", "unknown")}]
+        results = []
+        for r in data.get("results", [])[:5]:
+            results.append({
+                "nome": r.get("name", ""),
+                "endereco": r.get("formatted_address", ""),
+                "avaliacao": r.get("rating", 0),
+                "total_avaliacoes": r.get("user_ratings_total", 0),
+                "aberto_agora": "opening_hours" in r and r["opening_hours"].get("open_now", False),
+                "place_id": r.get("place_id", ""),
+            })
+        return results
+    except Exception as e:
+        logger.error(f"find_place failed: {e}")
         return [{"error": str(e)}]

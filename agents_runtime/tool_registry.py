@@ -1123,6 +1123,19 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
             "required": ["local"],
         },
     },
+    "locomotion.find_place": {
+        "function": locomotion.find_place,
+        "implementation": "locomotion",
+        "description": "Busca um estabelecimento pelo NOME (ex: 'Emporio Alto Pinheiro'). Retorna nome, endereco, avaliacao e se esta aberto. Usa Google Places Text Search.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Nome do estabelecimento ou negocio a buscar"},
+                "localizacao": {"type": "string", "description": "Cidade/regiao para refinar (opcional)"},
+            },
+            "required": ["query"],
+        },
+    },
     "weather.current": {
         "function": weather.current,
         "implementation": "weather",
