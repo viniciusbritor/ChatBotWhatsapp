@@ -229,9 +229,12 @@ def extract_envelope(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                 "webhook_group_mention_skipped instance=%s group=%s phone=%s mentioned=%s bot_jid=%s",
                 instance, remote_jid.split("@", 1)[0], phone, mentioned_jids[:5], bot_jid,
             )
-            logger.debug(
-                "webhook_group_raw_message instance=%s group=%s message=%s",
-                instance, remote_jid.split("@", 1)[0], str(message)[:800],
+            logger.info(
+                "webhook_group_raw_payload instance=%s group=%s data_keys=%s message_keys=%s message_preview=%s",
+                instance, remote_jid.split("@", 1)[0],
+                list(data.keys()) if isinstance(data, dict) else "NOT_DICT",
+                list(message.keys()) if isinstance(message, dict) else "NOT_DICT",
+                str(message)[:1000],
             )
             return None
     extra["was_mentioned"] = was_mentioned
