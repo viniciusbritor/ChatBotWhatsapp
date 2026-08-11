@@ -810,7 +810,7 @@ function showAuthBanner() {
   }
   const banner = document.createElement('div');
   banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#ef4444;color:#fff;text-align:center;padding:12px;font-weight:600;z-index:9999;font-size:14px;cursor:pointer';
-  banner.innerHTML = '\uD83D\uDD12 Sessão expirada — <a href="' + loginUrl + '" style="color:#fff;text-decoration:underline">clique aqui para fazer Login novamente</a>.';
+  banner.innerHTML = '🔒 Sessão expirada — <a href="' + loginUrl + '" style="color:#fff;text-decoration:underline">clique aqui para fazer Login novamente</a>.';
   document.body.prepend(banner);
 }
 
