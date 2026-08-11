@@ -37,6 +37,8 @@ logger = logging.getLogger(__name__)
 
 EVOLUTION_BASE_URL = os.getenv("EVO_BASE_URL", "https://evolution.coherenceai.com.br")
 
+from core.secrets import get_secret  # noqa: E402
+
 VALID_EVENTS = {"MESSAGES_UPSERT", "messages.upsert", "messages.update"}
 
 _BOT_JID_CACHE: Dict[str, tuple] = {}
@@ -48,10 +50,14 @@ class EvolutionWebhookError(Exception):
 
 
 def _resolve_bot_jid(instance: str) -> str:
-    """Resolve o JID do bot (Jennifer) para a instancia.
+    """Resolve o JID (phone-number form) do bot para a instancia.
 
-    O numero do bot e o owner_phone da conta Evolution (whatsapp_accounts).
-    Cache in-process de 300s para evitar round-trip Firestore por mensagem.
+    Fonte primaria: Evolution API ``/instance/fetchInstances`` -> campo
+    ``ownerJid`` (ex: ``5511917389901@s.whatsapp.net``). O ``owner_phone``
+    do Firestore e o telefone do OWNER (quem controla o bot), que nao e
+    necessariamente o numero do bot. Fonte secundaria (fallback): Firestore.
+
+    Cache in-process de 300s para evitar round-trip por mensagem.
     Retorna "" se nao resolver (nesse caso, nenhum filtro de mencao e aplicado).
     """
     if not instance:
@@ -61,27 +67,130 @@ def _resolve_bot_jid(instance: str) -> str:
         return cached[0]
     bot_jid = ""
     try:
-        from google.cloud import firestore
-
-        project = os.getenv("GCP_PROJECT") or os.getenv("GCLOUD_PROJECT")
-        if not project or os.getenv("FIRESTORE_EMULATOR_HOST"):
-            return ""
-        db = firestore.Client(project=project)
-        for doc in db.collection("whatsapp_accounts").stream():
-            data = doc.to_dict() or {}
-            if (data.get("instance") or "").lower() == str(instance).lower():
-                owner = str(data.get("owner_phone") or "")
-                digits = "".join(c for c in owner if c.isdigit())
-                if digits:
-                    bot_jid = f"{digits}@s.whatsapp.net"
-                break
-    except Exception as exc:
-        logger.debug("resolve_bot_jid_failed instance=%s exc=%s", instance, exc)
+        bot_jid = _fetch_owner_jid_from_evolution(instance)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("resolve_bot_jid_evolution_failed instance=%s exc=%s", instance, exc)
+    if not bot_jid:
+        bot_jid = _fetch_owner_jid_from_firestore(instance)
     _BOT_JID_CACHE[instance] = (bot_jid, time.time())
     return bot_jid
 
 
-def _extract_mentioned_jids(message: Dict[str, Any]) -> List[str]:
+def _fetch_owner_jid_from_evolution(instance: str) -> str:
+    """Consulta a Evolution API para descobrir o ownerJid do bot (PN form)."""
+    import httpx
+
+    base_url = os.getenv("EVO_BASE_URL", "https://evolution.coherenceai.com.br").rstrip("/")
+    api_key = os.getenv("EVOLUTION_API_KEY") or get_secret("EVOLUTION_API_KEY") or ""
+    if not api_key:
+        return ""
+    response = httpx.get(
+        f"{base_url}/instance/fetchInstances",
+        headers={"apikey": api_key},
+        timeout=5.0,
+    )
+    if response.status_code >= 400:
+        return ""
+    payload = response.json() or []
+    for entry in payload if isinstance(payload, list) else []:
+        name = (entry.get("name") or "").strip()
+        if name.lower() == str(instance).lower():
+            owner_jid = str(entry.get("ownerJid") or "")
+            if owner_jid and "@" in owner_jid:
+                logger.info(
+                    "resolve_bot_jid_from_evolution instance=%s ownerJid=%s",
+                    instance, owner_jid,
+                )
+                return owner_jid
+    return ""
+
+
+def _fetch_owner_jid_from_firestore(instance: str) -> str:
+    """Fallback legado: owner_phone do whatsapp_accounts como JID do bot."""
+    from google.cloud import firestore
+
+    project = os.getenv("GCP_PROJECT") or os.getenv("GCLOUD_PROJECT")
+    if not project or os.getenv("FIRESTORE_EMULATOR_HOST"):
+        return ""
+    db = firestore.Client(project=project)
+    for doc in db.collection("whatsapp_accounts").stream():
+        data = doc.to_dict() or {}
+        if (data.get("instance") or "").lower() == str(instance).lower():
+            owner = str(data.get("owner_phone") or "")
+            digits = "".join(c for c in owner if c.isdigit())
+            if digits:
+                return f"{digits}@s.whatsapp.net"
+    return ""
+
+
+def _resolve_bot_lid(instance: str, remote_jid: str) -> str:
+    """Resolve o LID do bot dentro de um grupo (Evolution findGroupInfos).
+
+    O WhatsApp migrou para LID (Linked ID): as mencoes chegam como
+    ``75793925419076@lid`` em vez do phone-number. O grupo conhece o
+    mapeamento LID <-> phoneNumber nos participantes. Este metodo encontra
+    o participante cujo phoneNumber bate com o ownerJid do bot e devolve
+    o seu ``id`` (LID form). Cache in-process de 300s por (instance, group).
+
+    Retorna "" quando nao resolver (fallback = filtro legado por PN).
+    """
+    if not instance or not remote_jid:
+        return ""
+    cache_key = f"{instance.lower()}|{remote_jid}"
+    cached = _BOT_JID_CACHE.get(cache_key)
+    if cached and cached[1] > time.time() - _BOT_JID_TTL_SEC:
+        return cached[0]
+    bot_lid = ""
+    try:
+        bot_jid = _resolve_bot_jid(instance)
+        if not bot_jid:
+            return ""
+        import httpx
+
+        base_url = os.getenv("EVO_BASE_URL", "https://evolution.coherenceai.com.br").rstrip("/")
+        api_key = os.getenv("EVOLUTION_API_KEY") or get_secret("EVOLUTION_API_KEY") or ""
+        if not api_key:
+            return ""
+        response = httpx.get(
+            f"{base_url}/group/findGroupInfos/{instance}?groupJid={remote_jid}",
+            headers={"apikey": api_key},
+            timeout=5.0,
+        )
+        if response.status_code >= 400:
+            return ""
+        info = response.json() or {}
+        participants = info.get("participants") or []
+        bot_digits = "".join(c for c in bot_jid.split("@", 1)[0] if c.isdigit())
+        for participant in participants:
+            pn = str(participant.get("phoneNumber") or "")
+            pn_digits = "".join(c for c in pn if c.isdigit())
+            if pn_digits and pn_digits == bot_digits:
+                lid = str(participant.get("id") or "")
+                if lid:
+                    bot_lid = lid
+                    break
+        if bot_lid:
+            logger.info(
+                "resolve_bot_lid instance=%s group=%s bot_jid=%s bot_lid=%s",
+                instance, remote_jid.split("@", 1)[0], bot_jid, bot_lid,
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("resolve_bot_lid_failed instance=%s group=%s exc=%s", instance, remote_jid, exc)
+    _BOT_JID_CACHE[cache_key] = (bot_lid, time.time())
+    return bot_lid
+
+
+def _jids_digit_set(jids: List[str]) -> set:
+    """Normaliza JIDs para digits puros (agnostico a @s.whatsapp.net/@lid)."""
+    out = set()
+    for jid in jids:
+        digits = "".join(c for c in str(jid) if c.isdigit())
+        if digits:
+            out.add(digits)
+    return out
+
+
+def _extract_mentioned_jids(message: Dict[str, Any], data: Optional[Dict[str, Any]] = None) -> List[str]:
     """Extrai JIDs mencionados de uma mensagem (contextInfo.mentionedJid).
 
     Baileys/Evolution coloca a lista em:
@@ -89,6 +198,7 @@ def _extract_mentioned_jids(message: Dict[str, Any]) -> List[str]:
     - message.conversation.contextInfo (raramente presente)
     - message.documentMessage.contextInfo (caption com @mention)
     - message.contextInfo (nivel raiz do message — formato alternativo)
+    - data.contextInfo (LID mode: contextInfo fica FORA do message, no data)
     """
     mentioned: List[str] = []
     for node_name in ("extendedTextMessage", "conversation", "documentMessage", "audioMessage"):
@@ -104,6 +214,12 @@ def _extract_mentioned_jids(message: Dict[str, Any]) -> List[str]:
         jids = ctx.get("mentionedJid")
         if isinstance(jids, list):
             mentioned.extend(str(j) for j in jids if isinstance(j, str))
+    if isinstance(data, dict):
+        ctx = data.get("contextInfo")
+        if isinstance(ctx, dict):
+            jids = ctx.get("mentionedJid")
+            if isinstance(jids, list):
+                mentioned.extend(str(j) for j in jids if isinstance(j, str))
     return mentioned
 
 
@@ -141,10 +257,18 @@ def extract_envelope(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
     is_group = "@g.us" in remote_jid
     participant_jid = str(key.get("participant") or message.get("participant") or "")
+    # LID mode: key.participant vem como "82927262154987@lid" (Linked ID).
+    # O phone-number real do remetente fica em key.participantAlt
+    # ("5511966830020@s.whatsapp.net"). Preferir participantAlt para que o
+    # owner_phone/owner_hash e as facts do user continuem resolvendo.
+    participant_alt = str(key.get("participantAlt") or "")
 
     # Em GRUPO, o phone vem do participant (user individual). Em PRIVADO,
     # do remoteJid. Fallback para remoteJid se participant ausente.
-    if is_group and participant_jid and "@" in participant_jid:
+    if is_group and participant_alt and "@" in participant_alt and participant_alt.split("@", 1)[0][0].isdigit():
+        phone = participant_alt.split("@", 1)[0]
+        phone_source = "participant_alt"
+    elif is_group and participant_jid and "@" in participant_jid:
         phone = participant_jid.split("@", 1)[0]
         phone_source = "participant"
     else:
@@ -214,16 +338,31 @@ def extract_envelope(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return None
 
     # ========================
-    # FILTRO DE MENCAO EM GRUPO (11/08/2026 — agressivo)
+    # FILTRO DE MENCAO EM GRUPO (11/08/2026 — agressivo, LID-aware)
     # Jennifer so responde em grupo quando @mencionada explicitamente.
-    # Se mentionedJid vier vazio OU nao contiver o bot, a mensagem e
+    # O WhatsApp migrou para LID (Linked ID): mentionedJid chega como
+    # "75793925419076@lid" enquanto o ownerJid do bot e um phone-number
+    # ("5511917389901@s.whatsapp.net"). O match compara por DIGITS puros
+    # e tambem resolve o LID do bot no grupo via findGroupInfos.
+    # Se mentionedJid vier vazio OU nao conter o bot, a mensagem e
     # IGNORADA. Conversa 1:1 nao e afetada.
     # ========================
     was_mentioned = False
     if is_group:
         bot_jid = _resolve_bot_jid(instance)
-        mentioned_jids = _extract_mentioned_jids(message)
-        was_mentioned = bool(bot_jid) and bot_jid in mentioned_jids
+        mentioned_jids = _extract_mentioned_jids(message, data)
+        was_mentioned = False
+        if bot_jid:
+            bot_digits = "".join(c for c in bot_jid.split("@", 1)[0] if c.isdigit())
+            mentioned_digits = _jids_digit_set(mentioned_jids)
+            if bot_digits and bot_digits in mentioned_digits:
+                was_mentioned = True
+            else:
+                bot_lid = _resolve_bot_lid(instance, remote_jid)
+                if bot_lid:
+                    lid_digits = "".join(c for c in bot_lid.split("@", 1)[0] if c.isdigit())
+                    if lid_digits and lid_digits in mentioned_digits:
+                        was_mentioned = True
         if not was_mentioned:
             logger.info(
                 "webhook_group_mention_skipped instance=%s group=%s phone=%s mentioned=%s bot_jid=%s",

@@ -710,3 +710,119 @@ def test_mention_at_message_root_level():
     assert envelope is not None
     assert envelope["extra"]["was_mentioned"] is True
     assert envelope["phone"] == "5511777777777"
+
+
+REAL_BOT_PN_JID = "5511917389901@s.whatsapp.net"
+REAL_BOT_LID_JID = "75793925419076@lid"
+REAL_OWNER_PN_JID = "5511966830020@s.whatsapp.net"
+REAL_GROUP_JID = "120363429893582550@g.us"
+
+
+def _patch_bot_lid(jid=REAL_BOT_LID_JID):
+    from unittest.mock import patch
+
+    return patch("core.evolution_webhook._resolve_bot_lid", return_value=jid)
+
+
+def test_group_mention_lid_mode_matches_bot_pn():
+    """WhatsApp LID mode: mentionedJid vem como @lid, bot_jid como PN.
+
+    No LID mode o LID (75793925419076) e um numero DIFERENTE do PN do bot
+    (5511917389901). O match por digits do PN nao casa; o caminho real e
+    resolver o LID do bot no grupo via findGroupInfos (_resolve_bot_lid).
+    Este teste cobre o caso em que o mentionedJid traz o PN diretamente
+    (grupo que ainda nao migrou para LID) e o match e por digits.
+    """
+    payload = {
+        "event": "MESSAGES_UPSERT",
+        "instance": "Jennifer",
+        "data": {
+            "key": {
+                "remoteJid": REAL_GROUP_JID,
+                "fromMe": False,
+                "id": "LID_GRP_001",
+                "participant": "82927262154987@lid",
+                "participantAlt": REAL_OWNER_PN_JID,
+                "addressingMode": "lid",
+            },
+            "pushName": "Vinicius Rocha",
+            "message": {
+                "messageContextInfo": {"threadId": []},
+                "conversation": "@5511917389901 oi",
+            },
+            "contextInfo": {"mentionedJid": [REAL_BOT_PN_JID], "groupMentions": []},
+            "messageType": "conversation",
+            "messageTimestamp": 1786464623,
+            "instanceId": "2e0b001f-3ace-4576-a1ea-bcbb4d6e664c",
+            "source": "web",
+        },
+    }
+    with _patch_bot_jid(REAL_BOT_PN_JID):
+        envelope = extract_envelope(payload)
+    assert envelope is not None
+    assert envelope["extra"]["was_mentioned"] is True
+    # phone do remetente (owner) vem do participantAlt normalizado
+    assert envelope["phone"] == "5511966830020"
+    assert envelope["extra"]["is_group"] is True
+
+
+def test_group_mention_lid_mode_matches_bot_lid_via_findgroupinfos():
+    """Caso REAL do WhatsApp LID: mentionedJid = 75793925419076@lid (LID
+    do bot), enquanto o ownerJid resolvido e o PN 5511917389901.
+
+    Os digits nao casam (LID != PN), entao o filtro resolve o LID do bot
+    no grupo via _resolve_bot_lid (findGroupInfos) e casa por digits.
+    """
+    payload = {
+        "event": "MESSAGES_UPSERT",
+        "instance": "Jennifer",
+        "data": {
+            "key": {
+                "remoteJid": REAL_GROUP_JID,
+                "fromMe": False,
+                "id": "LID_GRP_002",
+                "participant": "82927262154987@lid",
+                "participantAlt": REAL_OWNER_PN_JID,
+                "addressingMode": "lid",
+            },
+            "pushName": "Vinicius Rocha",
+            "message": {"conversation": "@75793925419076 oi"},
+            "contextInfo": {"mentionedJid": [REAL_BOT_LID_JID]},
+            "messageType": "conversation",
+            "messageTimestamp": 1786464624,
+            "instanceId": "2e0b001f-3ace-4576-a1ea-bcbb4d6e664c",
+            "source": "web",
+        },
+    }
+    with _patch_bot_jid(REAL_BOT_PN_JID), _patch_bot_lid(REAL_BOT_LID_JID):
+        envelope = extract_envelope(payload)
+    assert envelope is not None
+    assert envelope["extra"]["was_mentioned"] is True
+
+
+def test_group_mention_other_lid_still_blocked():
+    """Menção @lid de OUTRA pessoa (nao o bot) continua bloqueada."""
+    payload = {
+        "event": "MESSAGES_UPSERT",
+        "instance": "Jennifer",
+        "data": {
+            "key": {
+                "remoteJid": REAL_GROUP_JID,
+                "fromMe": False,
+                "id": "LID_GRP_003",
+                "participant": "82927262154987@lid",
+                "participantAlt": REAL_OWNER_PN_JID,
+                "addressingMode": "lid",
+            },
+            "pushName": "Vinicius Rocha",
+            "message": {"conversation": "@99999999999999 oi"},
+            "contextInfo": {"mentionedJid": ["99999999999999@lid"]},
+            "messageType": "conversation",
+            "messageTimestamp": 1786464625,
+            "instanceId": "2e0b001f-3ace-4576-a1ea-bcbb4d6e664c",
+            "source": "web",
+        },
+    }
+    with _patch_bot_jid(REAL_BOT_PN_JID), _patch_bot_lid(REAL_BOT_LID_JID):
+        envelope = extract_envelope(payload)
+    assert envelope is None
