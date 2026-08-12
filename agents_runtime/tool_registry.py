@@ -12,14 +12,17 @@ from typing import Dict, Any, Callable, Awaitable
 
 from tools import google_calendar, google_drive, google_gmail, web_search, nickname
 from tools import locomotion, youtube, group, correction, chat_history
-from tools import memory, weather
+from tools import memory, weather, translate, vision
+from tools import google_tasks, google_people, google_photos
+from tools import googlesheets_composio
 
 logger = logging.getLogger(__name__)
 
 ToolFn = Callable[..., Awaitable[Dict[str, Any]]]
 USER_SCOPED_TOOL_PREFIXES = (
     "calendar.", "drive.", "gmail.", "youtube.", "linkedin.", "googledocs.",
-    "notion.", "github.", "onedrive.", "memory.",
+    "notion.", "github.", "onedrive.", "memory.", "tasks.", "people.",
+    "photos.", "googlesheets.",
 )
 
 
@@ -1159,6 +1162,192 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
                 "dias": {"type": "integer", "description": "Quantidade de dias (1-7, default 3)"},
             },
             "required": ["cidade"],
+        },
+    },
+    "translate.text": {
+        "function": translate.translate_text,
+        "implementation": "translate",
+        "description": "Traduz um texto para outro idioma (default pt). Retorna o texto traduzido e o idioma detectado.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "Texto a traduzir"},
+                "target_lang": {"type": "string", "description": "Idioma alvo (ex: en, es, pt)"},
+                "source_lang": {"type": "string", "description": "Idioma de origem (opcional)"},
+            },
+            "required": ["text"],
+        },
+    },
+    "translate.detect": {
+        "function": translate.detect_language,
+        "implementation": "translate",
+        "description": "Detecta o idioma de um texto.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "Texto para detectar o idioma"},
+            },
+            "required": ["text"],
+        },
+    },
+    "vision.ocr": {
+        "function": vision.ocr_image,
+        "implementation": "vision",
+        "description": "Extrai texto de uma imagem via OCR (aceita bytes, base64, URL ou caminho local).",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "image": {"type": "string", "description": "Imagem: bytes, base64, URL ou caminho"},
+            },
+            "required": ["image"],
+        },
+    },
+    "vision.detect_labels": {
+        "function": vision.detect_labels,
+        "implementation": "vision",
+        "description": "Identifica objetos e categorias em uma imagem.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "image": {"type": "string", "description": "Imagem: bytes, base64, URL ou caminho"},
+                "max_results": {"type": "integer", "description": "Maximo de labels (default 5)"},
+            },
+            "required": ["image"],
+        },
+    },
+    "tasks.list": {
+        "function": google_tasks.list_tasks,
+        "implementation": "google_tasks",
+        "description": "Lista as tarefas do usuario no Google Tasks.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string", "description": "Telefone do usuario para token OAuth"},
+                "max_results": {"type": "integer", "description": "Maximo de tarefas (default 20)"},
+            },
+            "required": ["phone"],
+        },
+    },
+    "tasks.create": {
+        "function": google_tasks.create_task,
+        "implementation": "google_tasks",
+        "description": "Cria uma nova tarefa no Google Tasks do usuario.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string", "description": "Telefone do usuario para token OAuth"},
+                "title": {"type": "string", "description": "Titulo da tarefa"},
+                "notes": {"type": "string", "description": "Notas/descricao da tarefa"},
+                "due": {"type": "string", "description": "Data de vencimento (ISO 8601)"},
+            },
+            "required": ["phone", "title"],
+        },
+    },
+    "tasks.update": {
+        "function": google_tasks.update_task,
+        "implementation": "google_tasks",
+        "description": "Atualiza uma tarefa (marca concluida ou renomeia).",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string", "description": "Telefone do usuario para token OAuth"},
+                "task_id": {"type": "string", "description": "ID da tarefa"},
+                "completed": {"type": "boolean", "description": "Marcar como concluida"},
+                "title": {"type": "string", "description": "Novo titulo (opcional)"},
+            },
+            "required": ["phone", "task_id"],
+        },
+    },
+    "people.search": {
+        "function": google_people.search_contacts,
+        "implementation": "google_people",
+        "description": "Busca contatos do usuario no Google (por nome/email/telefone).",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string", "description": "Telefone do usuario para token OAuth"},
+                "query": {"type": "string", "description": "Nome, email ou telefone a buscar"},
+                "page_size": {"type": "integer", "description": "Maximo de resultados (default 10)"},
+            },
+            "required": ["phone", "query"],
+        },
+    },
+    "people.get_profile": {
+        "function": google_people.get_profile,
+        "implementation": "google_people",
+        "description": "Retorna o perfil do proprio usuario autenticado.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string", "description": "Telefone do usuario para token OAuth"},
+            },
+            "required": ["phone"],
+        },
+    },
+    "photos.search": {
+        "function": google_photos.search_photos,
+        "implementation": "google_photos",
+        "description": "Busca fotos do usuario no Google Photos.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string", "description": "Telefone do usuario para token OAuth"},
+                "query": {"type": "string", "description": "Texto de pesquisa (opcional)"},
+                "max_results": {"type": "integer", "description": "Maximo de fotos (default 5)"},
+            },
+            "required": ["phone"],
+        },
+    },
+    "photos.get_media": {
+        "function": google_photos.get_photo_base64,
+        "implementation": "google_photos",
+        "description": "Retorna uma foto do Google Photos em base64.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string", "description": "Telefone do usuario para token OAuth"},
+                "media_id": {"type": "string", "description": "ID da foto"},
+            },
+            "required": ["phone", "media_id"],
+        },
+    },
+    "googlesheets.read_cells": {
+        "function": googlesheets_composio.read_cells,
+        "implementation": "googlesheets_composio",
+        "description": "Le celulas de uma planilha Google Sheets.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "spreadsheet_id": {"type": "string", "description": "ID da planilha"},
+                "range_": {"type": "string", "description": "Intervalo de celulas (ex: A1:Z100)"},
+            },
+            "required": ["spreadsheet_id"],
+        },
+    },
+    "googlesheets.write_cells": {
+        "function": googlesheets_composio.write_cells,
+        "implementation": "googlesheets_composio",
+        "description": "Escreve valores em celulas de uma planilha Google Sheets.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "spreadsheet_id": {"type": "string", "description": "ID da planilha"},
+                "range_": {"type": "string", "description": "Intervalo de celulas"},
+                "values": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}, "description": "Matriz de valores"},
+            },
+            "required": ["spreadsheet_id", "range_", "values"],
+        },
+    },
+    "googlesheets.create_spreadsheet": {
+        "function": googlesheets_composio.create_spreadsheet,
+        "implementation": "googlesheets_composio",
+        "description": "Cria uma nova planilha Google Sheets.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Titulo da planilha"},
+            },
+            "required": ["title"],
         },
     },
     "youtube.search_videos": {

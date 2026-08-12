@@ -9,6 +9,7 @@ instance.
 """
 import functools
 import logging
+import uuid
 from typing import Optional, List, Dict, Any
 
 from google.oauth2.credentials import Credentials
@@ -55,6 +56,13 @@ def _get_service(phone: str):
 
 def _format_event(event: Dict[str, Any]) -> Dict[str, Any]:
     """Format event for response."""
+    hangout = (event.get("conferenceData") or {}).get("entryPoints")
+    meet_link = ""
+    if isinstance(hangout, list):
+        for ep in hangout:
+            if ep.get("entryPointType") == "video" and ep.get("uri"):
+                meet_link = ep["uri"]
+                break
     return {
         "id": event.get("id"),
         "summary": event.get("summary", ""),
@@ -64,6 +72,7 @@ def _format_event(event: Dict[str, Any]) -> Dict[str, Any]:
         "location": event.get("location", ""),
         "attendees": [a.get("email") for a in event.get("attendees", [])],
         "status": event.get("status", ""),
+        "hangout_link": meet_link or event.get("hangoutLink", ""),
     }
 
 
@@ -164,8 +173,20 @@ async def create_event(
             event_body["location"] = location
         if attendees:
             event_body["attendees"] = [{"email": e} for e in attendees]
+            # M3a (12/08/2026): reuniao com 2+ pessoas => Google Meet automatico.
+            # Calendar API cria a videochamada via conferenceData.createRequest.
+            if len(attendees) >= 2:
+                event_body["conferenceDataVersion"] = 1
+                event_body["conferenceData"] = {
+                    "createRequest": {
+                        "requestId": str(uuid.uuid4()),
+                        "conferenceSolutionKey": {"type": "hangoutsMeet"},
+                    }
+                }
 
-        created = service.events().insert(calendarId=calendar_id, body=event_body).execute()
+        created = service.events().insert(
+            calendarId=calendar_id, body=event_body, conferenceDataVersion=1 if len((attendees or [])) >= 2 else None
+        ).execute()
         return {"event": _format_event(created)}
     except HttpError as e:
         logger.error(f"Calendar create_event error: {e}")
