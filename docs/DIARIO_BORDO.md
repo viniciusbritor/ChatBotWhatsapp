@@ -4340,3 +4340,33 @@ Suite: 1093 passed, 0 failures. E2E validado no ar:
 - /a/5511966830020/conectar: 'Google ja conectado' + 'Conectar TODOS'
 - /a/5511966830020/composio: 3 links pendentes, 10 ja conectados
 - /admin/ping sem token: HTTP 403 (auth preservada)
+
+## 11/08/2026 (21:30 BRT) - Todas as APIs Google + cockpit multi-instancia + portal React
+
+Commit 7302888 (branch feat/all-google-apis, 4 commits).
+
+M3 - 7 novas APIs Google (total 13):
+- Meet: calendar.create_event adiciona conferenceData quando 2+ attendees
+- Sheets (Composio): read_cells/write_cells/create_spreadsheet
+- Translate: text/detect (REST API Key)
+- Tasks (OAuth): list/create/update + scope auth/tasks
+- People (OAuth): search/get_profile + scope contacts.readonly
+- Vision: ocr/detect_labels (API Key)
+- Photos (OAuth): search/get_media + scope photoslibrary.readonly
+OAUTH_SCOPES expandido; 14 tools novas (total 87).
+
+M1 - Cockpit multi-instancia:
+- POST /admin/instances (cria instancia Evolution + QR code)
+- POST /admin/instances/{id}/seed (duplica agentes da Jennifer com prefixo
+  {instance}__{agent_id}). Jennifer intacta.
+
+M2 - resolve_agent_for_instance() no agent_loader + run_agent usa instance
+  do payload. Cada numero WhatsApp tem seu proprio agente/prompt.
+
+M4 - Portal React (Google AI Studio Stitch) servido no Cloud Run:
+- portal/dist montado em /portal/ (StaticFiles)
+- /admin/dashboard redireciona para /portal/ (fallback module_ui se sem dist)
+- App.tsx usa API real (/admin/*) em vez de localStorage mock
+- cloudbuild-test.yaml builda o React (node:22-slim) antes do docker
+
+Suite: 1111 passed, 0 failures. E2E no ar: /portal/ 200, redirect 307.
