@@ -48,6 +48,13 @@ VERSION = "1.0.0"
 COMMIT_SHA = os.getenv("COMMIT_SHA", "local-dev")
 DEPLOYED_AT = os.getenv("DEPLOYED_AT", "local")
 
+# URL do Portal Coherence (frontend que emite o JWT). Test = portal-test.
+COHERENCE_PORTAL_URL = (
+    os.getenv("COHERENCE_PORTAL_URL")
+    or os.getenv("PORTAL_URL")
+    or "https://coherence-portal-test-894828119087.us-central1.run.app"
+).rstrip("/")
+
 MARK_READ_TIMEOUT_COLD_SEC = float(os.getenv("MARK_READ_TIMEOUT_COLD_SEC", "12"))
 MARK_READ_TIMEOUT_WARM_SEC = float(os.getenv("MARK_READ_TIMEOUT_WARM_SEC", "5"))
 
@@ -787,16 +794,20 @@ def _require_self_or_admin(request: Request, phone: str) -> None:
 async def admin_dashboard(request: Request):
     """Render the Agentes Omnichannel control plane.
 
-    Se o portal React (Stitch) esta disponivel, redireciona para /portal/.
-    Caso contrario, usa o module_ui.py legado (fallback).
+    O acesso ao modulo e SEMPRE via Portal Coherence. Se nao ha token
+    valido, redireciona para o portal (que emite o JWT). Com token,
+    redireciona para o portal React ou usa o module_ui.py legado.
     """
     from core.auth import resolve_caller
 
     token = _bearer_token(request)
     if not token:
         token = request.query_params.get("token", "")
+    if not token:
+        return RedirectResponse(url=COHERENCE_PORTAL_URL)
+
     if _portal_available():
-        portal_url = "/portal/?token=" + token if token else "/portal/"
+        portal_url = "/portal/?token=" + token
         return RedirectResponse(url=portal_url)
 
     from core.module_ui import render_dashboard

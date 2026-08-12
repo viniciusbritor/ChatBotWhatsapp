@@ -11,7 +11,7 @@ import {
   KnowledgeCategory,
   SystemStatusMetric
 } from './types';
-import { api } from './api/client';
+import { api, getToken, getPortalUrl } from './api/client';
 
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
@@ -156,15 +156,30 @@ export default function App() {
   const [newItemModalOpen, setNewItemModalOpen] = useState<boolean>(false);
 
   useEffect(() => {
+    if (!getToken()) {
+      // Acesso direto ao modulo sem token: redireciona para o Portal Coherence.
+      window.location.href = getPortalUrl();
+      return;
+    }
     (async () => {
+      const fetchSafe = async (path: string, fallback: any) => {
+        try {
+          return await api(path);
+        } catch (e: any) {
+          if (e.status === 401 || e.status === 403) {
+            setLoadError(`Sessão expirada ou sem permissão (${e.status}). Faça login novamente no Portal Coherence.`);
+          }
+          return fallback;
+        }
+      };
       try {
         const [acc, ag, sk, tl, users, kn] = await Promise.all([
-          api('/admin/accounts').catch(() => ({ accounts: [] })),
-          api('/admin/agents').catch(() => ({ agents: [] })),
-          api('/admin/skills').catch(() => ({ skills: [] })),
-          api('/admin/tools').catch(() => ({ tools: [] })),
-          api('/admin/users').catch(() => ({ users: [] })),
-          api('/admin/knowledge').catch(() => ({ documents: [] })),
+          fetchSafe('/admin/accounts', { accounts: [] }),
+          fetchSafe('/admin/agents', { agents: [] }),
+          fetchSafe('/admin/skills', { skills: [] }),
+          fetchSafe('/admin/tools', { tools: [] }),
+          fetchSafe('/admin/users', { users: [] }),
+          fetchSafe('/admin/knowledge', { documents: [] }),
         ]);
         setAccounts(mapAccounts(acc));
         setAgents(mapAgents(ag));
@@ -270,8 +285,14 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#f9f9ff] text-[#191b23] flex flex-col font-sans">
       {loadError && (
-        <div style={{ background: '#fef2f2', color: '#991b1b', padding: '10px 16px', fontSize: 13, borderBottom: '1px solid #fecaca' }}>
-          ⚠️ {loadError}
+        <div style={{ background: '#fef2f2', color: '#991b1b', padding: '10px 16px', fontSize: 13, borderBottom: '1px solid #fecaca', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ flex: 1 }}>⚠️ {loadError}</span>
+          <button
+            onClick={() => window.location.href = window.location.origin + '/'}
+            style={{ background: '#991b1b', color: '#fff', border: 0, padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+          >
+            Refazer login
+          </button>
         </div>
       )}
 

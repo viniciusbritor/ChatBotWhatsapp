@@ -9,8 +9,17 @@ const _tok = (() => {
   } catch (_) { return ''; }
 })();
 
+const _portalUrl = (
+  import.meta.env.VITE_COHERENCE_PORTAL_URL
+  || 'https://coherence-portal-test-894828119087.us-central1.run.app'
+);
+
 export function getToken(): string {
   return _tok;
+}
+
+export function getPortalUrl(): string {
+  return _portalUrl;
 }
 
 export async function api<T = any>(path: string, opts: RequestInit = {}): Promise<T> {
