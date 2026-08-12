@@ -46,8 +46,8 @@ export interface Tool {
   id: string;
   code: string; // e.g. 'calendar.read_events'
   name: string;
-  category: 'Google Calendar' | 'Gmail' | 'Google Drive' | 'Composio MCP' | 'Custom';
-  typeFilter: 'Google Native' | 'Composio MCP';
+  category: 'Google Calendar' | 'Gmail' | 'Google Drive' | 'Composio' | 'Custom';
+  typeFilter: 'Google Native' | 'Composio';
   description: string;
   status: 'Active' | 'Inactive';
   permissions: string[];
@@ -94,6 +94,7 @@ export interface KnowledgeCategory {
   formats: string;
   collection: string;
   classification: string;
+  ownerId?: string;
   fileCount: number;
   chunkCount: number;
   status: 'Indexado' | 'Em processamento' | 'Pendente';

@@ -127,6 +127,11 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
                 Collection: {cat.collection}
               </p>
               <p className="text-[12px] font-mono text-[#727785]">Class: {cat.classification}</p>
+              {cat.ownerId && (
+                <p className="text-[12px] font-mono text-[#196b52] dark:text-[#a3efcf] mt-1">
+                  👤 Owner: {cat.ownerId}
+                </p>
+              )}
             </div>
 
             <div className="py-2.5 border-y border-[#c2c6d6]/40 flex justify-between text-[13px] font-medium text-[#424754] dark:text-[#c2c6d6]">

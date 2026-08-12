@@ -75,7 +75,7 @@ function mapTools(data: any): Tool[] {
     code: t.tool_id || t.id || '',
     name: t.name || t.tool_id || '',
     category: 'Custom',
-    typeFilter: (t.implementation || '').includes('composio') ? 'Composio MCP' : 'Google Native',
+    typeFilter: (t.implementation || '').includes('composio') ? 'Composio' : 'Google Native',
     description: t.description || '',
     status: t.enabled === false ? 'Inactive' : 'Active',
     permissions: [],
@@ -126,11 +126,77 @@ function mapKnowledge(data: any): KnowledgeCategory[] {
     formats: d.klass || '',
     collection: d.collection || 'agent-knowledge-v2',
     classification: d.klass || d.class || '',
+    ownerId: d.owner_phone || d.owner_id || '',
     fileCount: 1,
     chunkCount: d.chunk_count || 0,
     status: 'Indexado',
     chunks: [],
   }));
+}
+
+function mapOwners(data: any): Owner[] {
+  return (data?.owners || []).map((o: any) => ({
+    id: o.owner_uid || o.owner_phone || o.phone || '',
+    name: o.display_name || o.name || o.owner_phone || o.phone || '',
+    role: 'Owner',
+    uid: o.owner_uid || o.owner_phone || '',
+    phone: o.owner_phone || o.phone || '',
+    instance: o.instance || '',
+  }));
+}
+
+function mapIntegrations(data: any): Integration[] {
+  return (data?.integrations || []).map((i: any) => ({
+    id: i.id || '',
+    name: i.name || i.id || '',
+    category: i.category || 'Integração',
+    status: (i.status || 'Desconectado') as any,
+    details: {
+      activeScopes: i.details?.active_scopes ? [`${i.details.active_scopes} scopes`] : [],
+      storagePath: i.details?.storage_path || i.details?.storagePath || '',
+      redirectUri: i.details?.redirect_uri || i.details?.redirectUri || '',
+      apiKeySource: i.details?.api_key_source || i.details?.apiKeySource || '',
+      connectedApps: i.details?.connected_apps
+        ? [`${i.details.connected_apps} apps`]
+        : (i.details?.connectedApps || []),
+      endpoint: i.details?.endpoint || '',
+      webhookInfo: i.details?.webhook_info || i.details?.webhookInfo || '',
+    },
+  }));
+}
+
+function mapStatus(data: any): SystemStatusMetric[] {
+  const out: SystemStatusMetric[] = [];
+  const kpis: any[] = Array.isArray(data?.kpis) ? data.kpis : [];
+  // Info do runtime como detalhes
+  const runtimeDetails: Record<string, string> = {};
+  if (data?.agents_summary?.counts) {
+    const c = data.agents_summary.counts;
+    runtimeDetails['Agentes configurados'] = String(c.configured ?? 0);
+    runtimeDetails['Agentes roteáveis'] = String(c.routable ?? 0);
+    runtimeDetails['Agentes saudáveis'] = String(c.healthy ?? 0);
+    runtimeDetails['Execuções em voo'] = String(c.in_flight ?? 0);
+  }
+  if (data?.llm?.provider) runtimeDetails['LLM Provider'] = data.llm.provider;
+  if (data?.llm?.model) runtimeDetails['Modelo'] = data.llm.model;
+  if (data?.stt?.primary) runtimeDetails['STT Primário'] = data.stt.primary;
+  kpis.forEach((k, idx) => {
+    const val = String(k.value ?? '—');
+    const isHealthyMetric = String(k.label || '').includes('healthy');
+    out.push({
+      id: `kpi-${idx}`,
+      name: (k.label || '').replace(/_/g, ' '),
+      code: val,
+      status: data?.runtime_ok ? 'Healthy' : (isHealthyMetric && Number(val) === 0 ? 'Degraded' : 'Healthy'),
+      primaryStatLabel: k.label || '',
+      primaryStatValue: val,
+      secondaryStatLabel: k.sub || '',
+      secondaryStatValue: k.sub ? '—' : '',
+      sparklineType: data?.runtime_ok ? 'healthy' : 'degraded',
+      details: runtimeDetails,
+    });
+  });
+  return out;
 }
 
 export default function App() {
@@ -142,11 +208,11 @@ export default function App() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [tools, setTools] = useState<Tool[]>([]);
-  const [owners] = useState<Owner[]>([]);
-  const [integrations] = useState<Integration[]>([]);
+  const [owners, setOwners] = useState<Owner[]>([]);
+  const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [connections, setConnections] = useState<ServiceConnection[]>([]);
   const [categories, setCategories] = useState<KnowledgeCategory[]>([]);
-  const [statusMetrics] = useState<SystemStatusMetric[]>([]);
+  const [statusMetrics, setStatusMetrics] = useState<SystemStatusMetric[]>([]);
   const [loadError, setLoadError] = useState<string>('');
 
   const [editingAgentPrompt, setEditingAgentPrompt] = useState<Agent | null>(null);
@@ -173,13 +239,16 @@ export default function App() {
         }
       };
       try {
-        const [acc, ag, sk, tl, users, kn] = await Promise.all([
+        const [acc, ag, sk, tl, users, kn, ow, integ, st] = await Promise.all([
           fetchSafe('/admin/accounts', { accounts: [] }),
           fetchSafe('/admin/agents', { agents: [] }),
           fetchSafe('/admin/skills', { skills: [] }),
           fetchSafe('/admin/tools', { tools: [] }),
           fetchSafe('/admin/users', { users: [] }),
           fetchSafe('/admin/knowledge', { documents: [] }),
+          fetchSafe('/admin/owners', { owners: [] }),
+          fetchSafe('/admin/integrations', { integrations: [] }),
+          fetchSafe('/admin/status', {}),
         ]);
         setAccounts(mapAccounts(acc));
         setAgents(mapAgents(ag));
@@ -188,6 +257,9 @@ export default function App() {
         const usersList = (users as any)?.users || [];
         setConnections(mapConnections(usersList));
         setCategories(mapKnowledge(kn));
+        setOwners(mapOwners(ow));
+        setIntegrations(mapIntegrations(integ));
+        setStatusMetrics(mapStatus(st as any));
       } catch (e: any) {
         setLoadError(e.message || 'Falha ao carregar dados do backend');
       }
@@ -221,9 +293,39 @@ export default function App() {
     );
   };
 
+  const refreshConnections = async () => {
+    try {
+      const users: any = await api('/admin/users');
+      const usersList = users?.users || [];
+      setConnections(mapConnections(usersList));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const authorizeGoogle = (phone: string) => {
     const base = window.location.origin;
+    // Abre 1 aba apenas. Apos autorizar, o callback do OAuth volta e a
+    // pagina recarrega via polling do refreshConnections.
     window.open(`${base}/oauth/google?phone=${encodeURIComponent(phone)}`, '_blank');
+    const timer = setInterval(async () => {
+      const users: any = await api('/admin/users').catch(() => null);
+      if (users) {
+        const usersList = users?.users || [];
+        const updated = mapConnections(usersList);
+        setConnections(updated);
+        // Verifica se os servicos do phone agora estao conectados
+        const user = usersList.find((u: any) => (u.phone || '') === phone);
+        const allConnected = user && user.google && user.google.services &&
+          user.google.services.every((s: any) => s.connected || !s.needs_scope);
+        if (allConnected || user?.google?.scopes_loaded === user?.google?.scopes_total) {
+          clearInterval(timer);
+          alert('Google conectado! ✅');
+        }
+      }
+    }, 3000);
+    setTimeout(() => clearInterval(timer), 120000);
   };
 
   const authorizeComposio = async (phone: string) => {
@@ -233,10 +335,12 @@ export default function App() {
       const links = (res && res.links) || [];
       const pendentes = links.filter((l: any) => l.url);
       if (pendentes.length) {
-        alert(`Abra ${pendentes.length} aba(s) para autorizar cada app.`);
-        pendentes.forEach((l: any) => window.open(l.url, '_blank'));
+        // Abre apenas a PRIMEIRA aba pendente (evita muitas abas).
+        window.open(pendentes[0].url, '_blank');
+        alert(`Autorize o app ${pendentes[0].toolkit || ''}. Depois volte aqui e clique novamente para o próximo.`);
       } else {
         alert('Todos os apps já estão conectados! ✅');
+        await refreshConnections();
       }
     } catch (e: any) {
       alert('Erro ao iniciar Composio: ' + e.message);

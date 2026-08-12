@@ -194,6 +194,65 @@ async def _finalize_orchestration(
         except Exception as exc:
             logger.warning("auto_render_failed: %s", exc)
 
+    try:
+        result = await _maybe_onboarding_nudge(payload, result)
+    except Exception as exc:
+        logger.debug("onboarding_nudge_skipped: %s", exc)
+
+    return result
+
+
+async def _user_has_any_connection(phone: str):
+    """True se o user ja tem OAuth Google OU alguma conexao Composio.
+
+    Retorna None quando nao e possivel verificar (Firestore/Composio
+    indisponiveis) — nesse caso o onboarding nudge NAO deve disparar,
+    para nao anexar dica em respostas de usuarios ja conectados.
+    """
+    try:
+        from agent_loader import get_user
+
+        user = get_user(phone) or {}
+        if user.get("google_oauth_token"):
+            return True
+        from tools.composio_connect import get_status
+
+        status = await get_status(phone)
+        apps = (status or {}).get("apps") or {}
+        if any((a or {}).get("connected") for a in apps.values()):
+            return True
+        return False
+    except Exception:  # noqa: BLE001
+        return None
+
+
+async def _maybe_onboarding_nudge(payload: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
+    """Onboarding (P5/loop 12/08/2026): user novo sem conexao recebe link.
+
+    Apenas conversa PRIVADA (nao grupo), sem erro na resposta, e sem o link
+    ja presente no texto. Anexa uma sugestao discreta de conectar contas.
+    """
+    extra = payload.get("extra", {}) or {}
+    if extra.get("is_group"):
+        return result
+    phone = str(payload.get("phone", "") or "")
+    if not phone:
+        return result
+    metadata = result.get("metadata", {}) or {}
+    if metadata.get("error") or result.get("reply", "").lower().find("conecte suas contas") != -1:
+        return result
+    has_conn = await _user_has_any_connection(phone)
+    if has_conn is not False:
+        return result  # conectado OU nao verificavel (None) — sem nudge
+    reply = result.get("reply", "")
+    if not reply:
+        return result
+    url = _onboarding_url(phone)
+    nudge = (
+        f"\n\n💡 *Dica:* para eu acessar seus emails, agenda, Drive, "
+        f"YouTube, LinkedIn e mais, conecte suas contas aqui: {url}"
+    )
+    result["reply"] = reply + nudge
     return result
 
 

@@ -63,7 +63,7 @@ class TestAttachmentsAndCommands:
                                                      "presence": "composing",
                                                      "metadata": {"attachment": "indexed"}}
                             with patch("pipelines.jennifer_pipeline.run", new_callable=AsyncMock):
-                                result = await orchestrate(
+                                await orchestrate(
                                     self._payload("pdf", {"has_document": True, "doc_mimetype": "application/pdf"})
                                 )
         assert mock_att.called
@@ -122,8 +122,9 @@ class TestAttachmentModeConfirmation:
                                         "metadata": {"attachment": "rag_individual", "source_name": "teste.pdf"},
                                     }
                                     with patch("pipelines.jennifer_pipeline.run", new_callable=AsyncMock):
-                                        mock_get.return_value = pending
-                                        result = await orchestrate(self._payload("memorizar"))
+                                        with patch("orchestrator._user_has_any_connection", AsyncMock(return_value=True)):
+                                            mock_get.return_value = pending
+                                            result = await orchestrate(self._payload("memorizar"))
 
         assert mock_get.called
         assert mock_consume.called
@@ -145,7 +146,7 @@ class TestAttachmentModeConfirmation:
         pending = self._pending_action()
 
         with patch("core.pending_actions.get_pending_action", new_callable=AsyncMock) as mock_get:
-            with patch("core.pending_actions.consume_pending_action", new_callable=AsyncMock) as mock_consume:
+            with patch("core.pending_actions.consume_pending_action", new_callable=AsyncMock):
                 with patch("pipelines.calendar_pipeline.detect", return_value=False):
                     with patch("pipelines.email_pipeline.detect", return_value=False):
                         with patch("orchestrator._classify_intent_llm", return_value="conversa"):
@@ -158,8 +159,9 @@ class TestAttachmentModeConfirmation:
                                         "metadata": {"attachment": "drive_individual", "source_name": "teste.pdf"},
                                     }
                                     with patch("pipelines.jennifer_pipeline.run", new_callable=AsyncMock):
-                                        mock_get.return_value = pending
-                                        result = await orchestrate(self._payload("salvar"))
+                                        with patch("orchestrator._user_has_any_connection", AsyncMock(return_value=True)):
+                                            mock_get.return_value = pending
+                                            result = await orchestrate(self._payload("salvar"))
 
         assert mock_att.called
         call_kwargs = mock_att.call_args
@@ -272,3 +274,43 @@ class TestVerifyCalendarEvent:
         with patch("tools.google_calendar.list_events", AsyncMock(side_effect=RuntimeError("boom"))):
             out = await _verify_calendar_event("5511966830020", fake_result, {"summary": "X"})
         assert "error" not in out
+
+class TestOnboardingNudge:
+    @pytest.mark.asyncio
+    async def test_nudge_para_user_sem_conexao(self):
+        from orchestrator import _maybe_onboarding_nudge
+
+        payload = {"phone": "5511999999999", "extra": {"is_group": False}}
+        result = {"reply": "Oi! Como posso ajudar?", "metadata": {}}
+        with patch("orchestrator._user_has_any_connection", return_value=False):
+            out = await _maybe_onboarding_nudge(payload, result)
+        assert "conecte suas contas" in out["reply"]
+        assert "/a/5511999999999/conectar" in out["reply"]
+
+    @pytest.mark.asyncio
+    async def test_sem_nudge_se_ja_conectado(self):
+        from orchestrator import _maybe_onboarding_nudge
+
+        payload = {"phone": "5511966830020", "extra": {"is_group": False}}
+        result = {"reply": "Oi! Como posso ajudar?", "metadata": {}}
+        with patch("orchestrator._user_has_any_connection", return_value=True):
+            out = await _maybe_onboarding_nudge(payload, result)
+        assert "conecte suas contas" not in out["reply"]
+
+    @pytest.mark.asyncio
+    async def test_sem_nudge_em_grupo(self):
+        from orchestrator import _maybe_onboarding_nudge
+
+        payload = {"phone": "5511999999999", "extra": {"is_group": True}}
+        result = {"reply": "Oi pessoal!", "metadata": {}}
+        with patch("orchestrator._user_has_any_connection", return_value=False):
+            out = await _maybe_onboarding_nudge(payload, result)
+        assert "conecte suas contas" not in out["reply"]
+
+    @pytest.mark.asyncio
+    async def test_user_sem_conexao(self):
+        from orchestrator import _user_has_any_connection
+
+        with patch("agent_loader.get_user", return_value=None), \
+             patch("tools.composio_connect.get_status", AsyncMock(return_value={"apps": {"youtube": {"connected": False}}})):
+            assert await _user_has_any_connection("5511999999999") is False

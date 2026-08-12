@@ -1218,6 +1218,62 @@ async def admin_owners_list():
     return JSONResponse(content={"owners": rows})
 
 
+@app.get("/admin/integrations")
+async def admin_integrations_list(request: Request):
+    """Lista as integracoes disponiveis (Google, Composio, Evolution, etc)."""
+    from tools.composio_connect import get_status
+
+    integrations: list = []
+    google = {
+        "id": "google-oauth",
+        "name": "Google OAuth 2.0 (Per-User)",
+        "category": "OAuth Core",
+        "status": "Conectado",
+        "details": {
+            "active_scopes": len(OAUTH_SCOPES),
+            "redirect_uri": _oauth_redirect_uri(request),
+        },
+    }
+    integrations.append(google)
+
+    try:
+        user = get_user("5511966830020") or {}
+        status = await get_status(str(user.get("phone") or "5511966830020"))
+        apps = (status or {}).get("apps") or {}
+        connected = sum(1 for a in apps.values() if (a or {}).get("connected"))
+        integrations.append({
+            "id": "composio",
+            "name": "Composio MCP SDK",
+            "category": "Multi-App Automation",
+            "status": "Ativo",
+            "details": {"apps_connected": connected, "apps_total": len(apps)},
+        })
+    except Exception as exc:  # noqa: BLE001
+        integrations.append({
+            "id": "composio",
+            "name": "Composio MCP SDK",
+            "category": "Multi-App Automation",
+            "status": "Ativo",
+            "details": {"apps_connected": 0, "apps_total": 0, "error": str(exc)[:100]},
+        })
+
+    integrations.append({
+        "id": "evolution",
+        "name": "Evolution API v2.3.7",
+        "category": "Messaging Gateway",
+        "status": "Conectado",
+        "details": {"endpoint": os.getenv("EVO_BASE_URL", "https://evolution.coherenceai.com.br")},
+    })
+    integrations.append({
+        "id": "firestore",
+        "name": "Firestore (Dados + RAG Vector)",
+        "category": "Storage",
+        "status": "Operacional",
+        "details": {"project": os.getenv("GCP_PROJECT", "coherence-ominichannel-fs")},
+    })
+    return JSONResponse(content={"integrations": integrations})
+
+
 @app.get("/admin/knowledge")
 async def admin_knowledge_documents(request: Request):
     from agent_loader import _get_firestore_client
@@ -1227,6 +1283,7 @@ async def admin_knowledge_documents(request: Request):
     db = _get_firestore_client()
     documents: list = []
     grouped: Dict[str, Dict[str, Any]] = {}
+    owner_map = _build_owner_hash_map()
     if db is not None:
         plain_pairs = [
             (KNOWLEDGE_DATABASE, KNOWLEDGE_DATABASE),
@@ -1245,12 +1302,14 @@ async def admin_knowledge_documents(request: Request):
                     grp = data.get("group") or ""
                     theme = data.get("theme") or ""
                     owner_hash = data.get("owner_hash") or ""
+                    owner_phone = owner_map.get(owner_hash, "")
                     key = f"{plain_collection}::{source_title}"
                     bucket = grouped.setdefault(key, {
                         "doc_id": source_title,
                         "title": source_title,
                         "text": (data.get("text_content") or data.get("conteudo") or "")[:500],
                         "owner_id": owner_hash[:12] if owner_hash else None,
+                        "owner_phone": owner_phone,
                         "collection": plain_collection,
                         "vector_collection": vector_collection,
                         "chunk_count": 0,
@@ -1531,6 +1590,28 @@ _GOOGLE_SERVICE_MAP = [
     ("people", "Google Contacts", "people"),
     ("photos", "Google Photos", "photo_library"),
 ]
+
+
+def _build_owner_hash_map() -> Dict[str, str]:
+    """Mapeia owner_hash (sha256 do phone) -> phone para exibir dono dos docs."""
+    import hashlib
+
+    from agent_loader import _get_firestore_client
+
+    db = _get_firestore_client()
+    mapping: Dict[str, str] = {}
+    if db is None:
+        return mapping
+    try:
+        for doc in db.collection("usuarios").stream():
+            phone = str((doc.to_dict() or {}).get("phone") or doc.id or "")
+            digits = "".join(c for c in phone if c.isdigit())
+            if digits:
+                h = hashlib.sha256(digits.encode("utf-8")).hexdigest()[:32]
+                mapping[h] = phone
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("build_owner_hash_map failed exc=%s", exc)
+    return mapping
 
 
 async def _enrich_user_connections(user: Dict[str, Any]) -> None:
