@@ -2386,6 +2386,50 @@ async def _execute_deep_agent(
     }
 
 
+async def _verify_calendar_event(phone: str, result: dict, tool_args: dict) -> dict:
+    """Anti-alucinacao: confirma que um evento criado realmente existe.
+
+    Apos calendar.create_event retornar sucesso, consulta a agenda nas
+    proximas 48h e verifica se o evento com o summary esperado apareceu.
+    Se nao aparecer, devolve erro explicito para o LLM nao declarar
+    'criei/agendei' sem base real.
+    """
+    try:
+        from tools.google_calendar import list_events
+        from core.timezone import now_brt
+        from datetime import timedelta
+
+        summary = str(tool_args.get("summary") or result.get("summary") or "")
+        start = str(tool_args.get("start") or result.get("start") or "")
+        now = now_brt()
+        listing = await list_events(
+            phone,
+            time_min=now.isoformat(),
+            time_max=(now + timedelta(hours=48)).isoformat(),
+            max_results=50,
+        )
+        events = listing.get("events", []) if isinstance(listing, dict) else []
+        if not summary:
+            return result
+        match = any(str(e.get("summary", "")) == summary for e in events)
+        if not match:
+            logger.warning(
+                "create_event_false_positive phone=%s summary=%s start=%s events_seen=%d",
+                phone, summary, start, len(events),
+            )
+            return {
+                **result,
+                "error": (
+                    f"O evento '{summary}' NAO foi encontrado na agenda apos a criacao. "
+                    "NAO diga que criou. Informe o usuario que a criacao falhou."
+                ),
+            }
+        return result
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("verify_calendar_event_skipped phone=%s exc=%s", phone, exc)
+        return result
+
+
 def _resolve_agent_tools(agent: Dict[str, Any]) -> List[str]:
     """Resolve as tools disponiveis para um agente (fix 12/08/2026).
 
@@ -2543,6 +2587,7 @@ async def _execute_agent(
     captured_tool_results: List[Dict[str, Any]] = []
 
     async def tool_executor(tool_name: str, tool_args: dict) -> str:
+        _tool_started = time.monotonic()
         tool_fn = get_tool(tool_name)
         if not tool_fn:
             logger.warning("tool_unknown tool=%s", tool_name)
@@ -2555,6 +2600,11 @@ async def _execute_agent(
                 result = await asyncio.wait_for(coro, timeout=30)
             else:
                 result = coro
+            # Anti-alucinacao (fix 12/08/2026): apos calendar.create_event
+            # "bem-sucedido", verificar se o evento realmente apareceu na
+            # agenda. Evita que o LLM diga "criei/agendei" sem confirmacao.
+            if tool_name == "calendar.create_event" and isinstance(result, dict) and not result.get("error"):
+                result = await _verify_calendar_event(phone, result, tool_args)
             if isinstance(result, dict):
                 captured_tool_results.append({"tool": tool_name, "result": result})
                 if len(captured_tool_results) > 10:
@@ -2562,6 +2612,12 @@ async def _execute_agent(
             truncated = mask_pii(json.dumps(result, ensure_ascii=False, default=str))
             if len(truncated) > 2000:
                 truncated = truncated[:2000] + "...(truncated)"
+            logger.info(
+                "tool_invocation_result tool=%s status=%s duration_ms=%d",
+                tool_name,
+                "ok" if (isinstance(result, dict) and not result.get("error")) else "ok",
+                round((time.monotonic() - _tool_started) * 1000, 2),
+            )
             logger.info("tool_result tool=%s length=%d", tool_name, len(truncated))
             return truncated
         except asyncio.TimeoutError:

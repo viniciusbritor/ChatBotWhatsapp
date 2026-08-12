@@ -232,4 +232,43 @@ class TestResolveAgentTools:
 
         agent = {"id": "x", "tools": []}
         assert _resolve_agent_tools(agent) == []
-    pass
+
+
+class TestVerifyCalendarEvent:
+    """Fix 12/08/2026: anti-alucinacao apos calendar.create_event."""
+
+    @pytest.mark.asyncio
+    async def test_evento_confirmado_mantem_resultado(self):
+        from orchestrator import _verify_calendar_event
+
+        fake_result = {"id": "evt-1", "summary": "Reuniao Maycon", "status": "confirmed"}
+        fake_events = [{"summary": "Reuniao Maycon", "id": "evt-1"}]
+        with patch("tools.google_calendar.list_events", AsyncMock(return_value={"events": fake_events})):
+            out = await _verify_calendar_event(
+                "5511966830020", fake_result,
+                {"summary": "Reuniao Maycon", "start": "2026-08-12T14:00:00"},
+            )
+        assert "error" not in out
+        assert out["id"] == "evt-1"
+
+    @pytest.mark.asyncio
+    async def test_evento_fantasma_adiciona_erro(self):
+        from orchestrator import _verify_calendar_event
+
+        fake_result = {"id": "evt-2", "summary": "Evento Falso", "status": "confirmed"}
+        with patch("tools.google_calendar.list_events", AsyncMock(return_value={"events": []})):
+            out = await _verify_calendar_event(
+                "5511966830020", fake_result,
+                {"summary": "Evento Falso", "start": "2026-08-12T14:00:00"},
+            )
+        assert "error" in out
+        assert "NAO foi encontrado" in out["error"]
+
+    @pytest.mark.asyncio
+    async def test_erro_listing_nao_quebra(self):
+        from orchestrator import _verify_calendar_event
+
+        fake_result = {"id": "evt-3", "summary": "X", "status": "confirmed"}
+        with patch("tools.google_calendar.list_events", AsyncMock(side_effect=RuntimeError("boom"))):
+            out = await _verify_calendar_event("5511966830020", fake_result, {"summary": "X"})
+        assert "error" not in out
