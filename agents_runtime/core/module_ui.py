@@ -1047,7 +1047,7 @@ function renderTools(root) {
 
 /* -- Conexões / OAuth -- */
 function renderConexoes(root) {
-  root.innerHTML = panelHtml('Conexões', 'Autorize o acesso do agente às suas contas', null, skel(2));
+  root.innerHTML = panelHtml('Conexões', 'Serviços Google e apps conectados por usuário', null, skel(2));
 
   const phone = CALLER_ROLE === 'agent_user' ? CALLER_PHONE : null;
   const endpoint = phone ? '/admin/users/' + encodeURIComponent(phone) : '/admin/users';
@@ -1059,31 +1059,50 @@ function renderConexoes(root) {
     if (!list.length) { setTabBody(emptyHtml('Nenhum usuário', 'Nenhum usuário encontrado.')); return; }
     setTabBody(
       '<div id="list">'
-      + list.map(u => {
-        const hasOAuth = !!(u.google_oauth_token);
-        return (
-          '<div class="card">'
-          + '<div class="card-title-row"><h3>' + esc(u.phone || u.id) + '</h3>'
-          + '<span class="tag ' + (hasOAuth ? 'good' : 'warn') + '">'
-          + (hasOAuth ? 'Google conectado' : 'Google pendente')
-          + '</span></div>'
-          + '<div class="meta">'
-          + '<span>Composio: <strong id="composio-state-' + esc(u.phone) + '">consultando…</strong></span>'
-          + (u.name ? '<span>Nome: ' + esc(u.name) + '</span>' : '')
-          + '</div>'
-          + '<div class="actions-inline" style="margin-top:12px">'
-          + (hasOAuth
-              ? '<span class="tag good">✓ OAuth Google</span>'
-              : '<button class="secondary" onclick="requestOAuth(' + JSON.stringify(esc(u.phone)) + ')">Conectar Google</button>')
-          + '<button class="secondary" onclick="conectarComposio(' + JSON.stringify(esc(u.phone)) + ')">Conectar Apps (Composio)</button>'
-          + '</div>'
-          + '</div>'
-        );
-      }).join('')
+      + list.map(u => _conexoesCard(u)).join('')
       + '</div>'
     );
     list.forEach(u => { if (u.phone) refreshComposioState(u.phone); });
   }).catch(e => setTabBody(errHtml(e.message, e.status)));
+}
+
+function _conexoesCard(u) {
+  const google = u.google || {};
+  const gConnected = google.connected || !!(u.google_oauth_token);
+  const gServices = google.services || {};
+  const email = google.email || u.email || '';
+  const googleApps = [
+    ['calendar', 'Calendar', gServices.calendar],
+    ['gmail', 'Gmail', gServices.gmail],
+    ['drive', 'Drive', gServices.drive],
+  ].map(([k, label, on]) => (
+    '<span class="tag ' + (on ? 'good' : 'warn') + '">' + (on ? '✅ ' : '❌ ') + label + '</span>'
+  )).join('');
+  const composio = u.composio || {};
+  const compSlugs = Object.keys(composio);
+  const compChips = compSlugs.length
+    ? compSlugs.map(slug => (
+        '<span class="tag ' + (composio[slug] ? 'good' : 'warn') + '">' + (composio[slug] ? '✅ ' : '❌ ') + esc(slug) + '</span>'
+      )).join('')
+    : '<span class="tag" id="composio-state-' + esc(u.phone) + '">consultando…</span>';
+  return (
+    '<div class="card">'
+    + '<div class="card-title-row"><h3>' + esc(u.phone || u.id) + '</h3>'
+    + '<span class="tag ' + (gConnected ? 'good' : 'warn') + '">'
+    + (gConnected ? 'Google conectado' : 'Google pendente') + '</span></div>'
+    + (email ? '<div class="meta"><span>📧 ' + esc(email) + '</span></div>' : '')
+    + '<div class="sec-title">🔵 Google</div>'
+    + '<div class="meta">' + googleApps + '</div>'
+    + '<div class="sec-title">🟣 Composio</div>'
+    + '<div class="meta" style="display:flex;flex-wrap:wrap;gap:6px">' + compChips + '</div>'
+    + '<div class="actions-inline" style="margin-top:12px">'
+    + (gConnected
+        ? '<span class="tag good">✓ OAuth Google</span>'
+        : '<button class="secondary" onclick="requestOAuth(' + JSON.stringify(esc(u.phone)) + ')">Conectar Google</button>')
+    + '<button class="secondary" onclick="conectarComposio(' + JSON.stringify(esc(u.phone)) + ')">Conectar Apps (Composio)</button>'
+    + '</div>'
+    + '</div>'
+  );
 }
 
 function refreshComposioState(phone) {

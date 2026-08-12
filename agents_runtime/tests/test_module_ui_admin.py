@@ -290,3 +290,53 @@ class TestAdminKnowledgeGrouping(_AuthFixture):
         with patch("agent_loader._get_firestore_client", return_value=fake):
             resp = self.client.get("/admin/knowledge/inexistente.pdf", headers=self.headers)
         assert resp.status_code == 404
+
+
+class TestEnrichUserConnections:
+    def test_google_scopes_derived(self):
+        from main import _enrich_user_connections
+
+        user = {
+            "phone": "5511966830020",
+            "google_oauth_token": {
+                "scopes": [
+                    "https://www.googleapis.com/auth/calendar",
+                    "https://www.googleapis.com/auth/gmail.modify",
+                    "https://www.googleapis.com/auth/drive",
+                ],
+                "email": "viniciusbritor@gmail.com",
+            },
+        }
+        import asyncio
+
+        asyncio.run(_enrich_user_connections(user))
+        assert user["google"]["connected"] is True
+        assert user["google"]["email"] == "viniciusbritor@gmail.com"
+        assert user["google"]["services"]["calendar"] is True
+        assert user["google"]["services"]["gmail"] is True
+        assert user["google"]["services"]["drive"] is True
+
+    def test_google_sem_token(self):
+        from main import _enrich_user_connections
+
+        user = {"phone": "5511999999999"}
+        import asyncio
+
+        asyncio.run(_enrich_user_connections(user))
+        assert user["google"]["connected"] is False
+
+    def test_composio_status_merged(self):
+        from main import _enrich_user_connections
+
+        fake_status = {
+            "phone": "5511966830020",
+            "apps": {"youtube": {"connected": True}, "linkedin": {"connected": False}},
+        }
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        with patch("tools.composio_connect.get_status", AsyncMock(return_value=fake_status)):
+            user = {"phone": "5511966830020"}
+            asyncio.run(_enrich_user_connections(user))
+        assert user["composio"]["youtube"] is True
+        assert user["composio"]["linkedin"] is False

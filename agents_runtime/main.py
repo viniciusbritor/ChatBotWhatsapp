@@ -1382,9 +1382,50 @@ async def admin_register_user(request: Request):
 
 @app.get("/admin/users")
 async def admin_users_list(request: Request):
-    """List all registered users (admin only)."""
+    """List all registered users (admin only), enriched with connections."""
     _require_admin(request)
-    return JSONResponse(content={"users": list_users()})
+    users = list_users()
+    for user in users:
+        await _enrich_user_connections(user)
+    return JSONResponse(content={"users": users})
+
+
+async def _enrich_user_connections(user: Dict[str, Any]) -> None:
+    """Adiciona google_scopes + composio_apps ao dict do user (P4).
+
+    - google: conectado, email (do token), e services (calendar/gmail/drive)
+      derivados dos scopes do google_oauth_token no Firestore.
+    - composio: resultado do get_status(phone) com cada app + connected.
+    """
+    try:
+        token = (user.get("google_oauth_token") or {})
+        scopes = token.get("scopes") or user.get("scopes") or []
+        scope_str = " ".join(str(s) for s in scopes)
+        user["google"] = {
+            "connected": bool(token),
+            "email": token.get("email") or user.get("email") or "",
+            "services": {
+                "calendar": "calendar" in scope_str,
+                "gmail": "gmail" in scope_str,
+                "drive": "drive" in scope_str,
+            },
+            "scopes": [str(s) for s in scopes],
+        }
+    except Exception as exc:  # noqa: BLE001
+        user["google"] = {"connected": False, "email": "", "services": {}, "scopes": []}
+        logger.debug("enrich_google_skipped phone=%s exc=%s", user.get("phone"), exc)
+    try:
+        from tools.composio_connect import get_status
+
+        status = await get_status(str(user.get("phone") or ""))
+        apps = (status or {}).get("apps") or {}
+        user["composio"] = {
+            slug: (data or {}).get("connected", False)
+            for slug, data in apps.items()
+        }
+    except Exception as exc:  # noqa: BLE001
+        user["composio"] = {}
+        logger.debug("enrich_composio_skipped phone=%s exc=%s", user.get("phone"), exc)
 
 
 @app.get("/admin/users/{phone}")
