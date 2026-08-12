@@ -229,82 +229,39 @@ async def chat(request: Request):
         raise HTTPException(status_code=422, detail="text, audio, or document required")
 
     if has_audio:
-        try:
-            from core.audio_transcribe import (
-                transcribe_base64,
-                transcribe_url,
-            )
+        from core.audio_pipeline import transcribe_envelope_audio
 
-            mimetype = extra.get("audio_mimetype", "audio/ogg")
-            if extra.get("audio_base64"):
-                result = await transcribe_base64(
-                    extra["audio_base64"],
-                    mimetype,
-                    instance=body.get("instance", "Jennifer"),
-                )
-                source = "base64"
-            elif extra.get("audio_url"):
-                result = await transcribe_url(
-                    extra["audio_url"],
-                    mimetype,
-                    instance=body.get("instance", "Jennifer"),
-                )
-                source = "url"
-            else:
-                raise ValueError("audio_payload_missing")
-
-            transcript = result["transcript"]
-            extra["audio_provider"] = result.get("provider", "minimax:MiniMax-M3")
-            extra["audio_provider_reason"] = result.get("reason", "")
-            body["text"] = mask_pii(transcript)
+        body["extra"] = extra
+        audio = await transcribe_envelope_audio(body)
+        if "error" in audio:
+            if not body.get("text"):
+                audit_result = await index_audio_failure_for_audit(body, audio["error"])
+                if audio["error"].startswith("unavailable:"):
+                    reply = "Nao consegui transcrever esse audio agora. Pode tentar novamente ou enviar em texto?"
+                    err_code = "audio_transcription_unavailable"
+                else:
+                    reply = "Nao consegui processar esse audio com seguranca. Pode reenviar ou mandar a mensagem em texto?"
+                    err_code = "audio_transcription_failed"
+                return JSONResponse(content={
+                    "reply": reply,
+                    "delay_ms": calculate_delay_ms(reply),
+                    "presence": "paused",
+                    "metadata": {
+                        "agent_id": "audio-transcriber",
+                        "response_identity": "Jennifer",
+                        "error": err_code,
+                        "reason": audio["error"],
+                        "audit_indexed": audit_result.get("status") == "indexed",
+                        "audit_status": audit_result.get("status", "error"),
+                    },
+                })
+        else:
+            body["text"] = audio["transcript"]
+            extra["audio_provider"] = audio.get("provider", "minimax:MiniMax-M3")
+            extra["audio_provider_reason"] = audio.get("reason", "")
             extra["audio_transcribed"] = True
-            extra["audio_source"] = source
+            extra["audio_source"] = audio.get("source", "url")
             body["extra"] = extra
-            logger.info(
-                "Audio transcribed: source=%s provider=%s chars=%s",
-                source,
-                extra.get("audio_provider"),
-                len(body["text"]),
-            )
-        except (ValueError, RuntimeError) as e:
-            logger.warning("Audio transcription rejected: code=%s message_id=%s", str(e), body.get("message_id", ""))
-            if not body.get("text"):
-                audit_result = await index_audio_failure_for_audit(body, str(e))
-                reply = "Nao consegui processar esse audio com seguranca. Pode reenviar ou mandar a mensagem em texto?"
-                return JSONResponse(content={
-                    "reply": reply,
-                    "delay_ms": calculate_delay_ms(reply),
-                    "presence": "paused",
-                    "metadata": {
-                        "agent_id": "audio-transcriber",
-                        "response_identity": "Jennifer",
-                        "error": "audio_transcription_failed",
-                        "reason": str(e),
-                        "audit_indexed": audit_result.get("status") == "indexed",
-                        "audit_status": audit_result.get("status", "error"),
-                    },
-                })
-        except Exception as e:
-            logger.error(
-                "Audio transcription failed: error_type=%s message_id=%s",
-                type(e).__name__,
-                body.get("message_id", ""),
-            )
-            if not body.get("text"):
-                audit_result = await index_audio_failure_for_audit(body, f"unavailable:{type(e).__name__}")
-                reply = "Nao consegui transcrever esse audio agora. Pode tentar novamente ou enviar em texto?"
-                return JSONResponse(content={
-                    "reply": reply,
-                    "delay_ms": calculate_delay_ms(reply),
-                    "presence": "paused",
-                    "metadata": {
-                        "agent_id": "audio-transcriber",
-                        "response_identity": "Jennifer",
-                        "error": "audio_transcription_unavailable",
-                        "audit_indexed": audit_result.get("status") == "indexed",
-                        "audit_status": audit_result.get("status", "error"),
-                    },
-                })
 
     if has_document:
         # F4d: handler de attachment foi MOVIDO para orchestrator._handle_attachment
@@ -620,8 +577,34 @@ async def pubsub_push(request: Request):
 
     async def _process(p: Dict[str, Any]) -> Dict[str, Any]:
         from core.evolution_client import send_text
+        from core.audio_pipeline import transcribe_envelope_audio
 
-        result = await orchestrate(p)
+        result = None
+        if (p.get("extra") or {}).get("has_audio"):
+            audio = await transcribe_envelope_audio(p)
+            if "error" in audio:
+                await index_audio_failure_for_audit(p, audio["error"])
+                reply = "Nao consegui transcrever esse audio agora. Pode tentar novamente ou enviar em texto?"
+                result = {
+                    "reply": reply,
+                    "delay_ms": calculate_delay_ms(reply),
+                    "presence": "paused",
+                    "metadata": {
+                        "agent_id": "audio-transcriber",
+                        "response_identity": "Jennifer",
+                        "error": "audio_transcription_unavailable",
+                        "reason": audio["error"],
+                    },
+                }
+            else:
+                p["text"] = audio["transcript"]
+                extra_updates = p.setdefault("extra", {})
+                extra_updates["audio_transcribed"] = True
+                extra_updates["audio_provider"] = audio["provider"]
+
+        if result is None:
+            result = await orchestrate(p)
+
         reply = result.get("reply", "")
         phone = p.get("phone", "") or (p.get("extra") or {}).get("phone", "")
         delivered = False

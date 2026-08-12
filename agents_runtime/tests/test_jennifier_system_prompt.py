@@ -89,7 +89,7 @@ class TestJennifierSystemPrompt:
         assert "nunca ironizar o usuario" in sp
 
     def test_version_incremented(self, jennifier_yaml):
-        assert jennifier_yaml.get("system_prompt_version") == 9
+        assert jennifier_yaml.get("system_prompt_version") == 10
 
     def test_includes_introspection_guidance(self, jennifier_yaml):
         sp = jennifier_yaml.get("system_prompt", "").lower()
@@ -112,6 +112,15 @@ class TestJennifierSystemPrompt:
         sp = jennifier_yaml.get("system_prompt", "").lower()
         assert "respostas humanas" in sp
         assert "curtas" in sp
+
+    def test_tools_dinamicas_explicitadas_no_prompt(self, jennifier_yaml):
+        sp = jennifier_yaml.get("system_prompt", "").lower()
+        assert "people.search" in sp
+        assert "tasks.list" in sp
+        assert "photos.search" in sp
+        assert "googlesheets.create_spreadsheet" in sp
+        assert "locomotion.find_place" in sp
+        assert "locomotion.search_places" in sp
 
 
 class TestRetrieverSystemPrompt:

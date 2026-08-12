@@ -1944,6 +1944,19 @@ def list_tool_ids() -> list:
     return list(TOOL_REGISTRY.keys())
 
 
+# Tools internas que a LLM nunca deve chamar (executadas diretamente pelo
+# orquestrador/pipelines). Excluidas do modo auto-all (list_llm_tool_ids).
+INTERNAL_TOOL_IDS = {
+    "image_report.render",
+    "group.resolve_mention",
+}
+
+
+def list_llm_tool_ids() -> list:
+    """IDs de tools expostas a LLM no modo auto-all (registry - internas)."""
+    return [tid for tid in TOOL_REGISTRY if tid not in INTERNAL_TOOL_IDS]
+
+
 def get_tools_for_agent(tool_ids: list) -> list:
     """Get tool schemas for an agent."""
     return [get_tool_schema(tid) for tid in tool_ids if get_tool_schema(tid)]

@@ -206,11 +206,11 @@ class TestResolveAgentTools:
 
     def test_tools_ausente_usa_todas_do_registry(self):
         from orchestrator import _resolve_agent_tools
-        from tool_registry import list_tool_ids
+        from tool_registry import list_llm_tool_ids
 
         agent = {"id": "jennifier", "name": "Jennifer"}
         tools = _resolve_agent_tools(agent)
-        assert tools == list_tool_ids()
+        assert tools == list_llm_tool_ids()
         assert "youtube.search_videos" in tools
         assert "locomotion.find_place" in tools
         assert "linkedin.my_profile" in tools
@@ -218,10 +218,10 @@ class TestResolveAgentTools:
 
     def test_tools_none_usa_todas(self):
         from orchestrator import _resolve_agent_tools
-        from tool_registry import list_tool_ids
+        from tool_registry import list_llm_tool_ids
 
         agent = {"id": "x", "tools": None}
-        assert _resolve_agent_tools(agent) == list_tool_ids()
+        assert _resolve_agent_tools(agent) == list_llm_tool_ids()
 
     def test_tools_explicito_respeita_lista(self):
         from orchestrator import _resolve_agent_tools
@@ -234,6 +234,15 @@ class TestResolveAgentTools:
 
         agent = {"id": "x", "tools": []}
         assert _resolve_agent_tools(agent) == []
+
+    def test_tools_internas_nao_sao_expostas(self):
+        from orchestrator import _resolve_agent_tools
+        from tool_registry import INTERNAL_TOOL_IDS
+
+        tools = _resolve_agent_tools({"id": "jennifier"})
+        assert "group.resolve_mention" not in tools
+        assert "image_report.render" not in tools
+        assert set(INTERNAL_TOOL_IDS).isdisjoint(tools)
 
 
 class TestVerifyCalendarEvent:

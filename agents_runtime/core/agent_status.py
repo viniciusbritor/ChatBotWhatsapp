@@ -144,7 +144,7 @@ def build_agent_inventory(instance: str = "jennifer", phone: Optional[str] = Non
         instance_match = not instances or instance.lower() in instances
         mode = _execution_mode(agent)
         routable = mode == "reactive" and agent_id in routable_ids
-        declared_tools = list(agent.get("tools", []))
+        declared_tools = list(agent.get("tools") or [])
         missing_tools = sorted(tool for tool in declared_tools if tool not in executable_tools)
         tools_ready = not missing_tools
         provider_ready = _model_provider_ready(agent.get("model", ""))

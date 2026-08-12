@@ -2607,9 +2607,9 @@ def _resolve_agent_tools(agent: Dict[str, Any]) -> List[str]:
     """
     explicit = agent.get("tools")
     if explicit is None:
-        from tool_registry import list_tool_ids
+        from tool_registry import list_llm_tool_ids
 
-        return list_tool_ids()
+        return list_llm_tool_ids()
     return [str(t) for t in explicit]
 
 
