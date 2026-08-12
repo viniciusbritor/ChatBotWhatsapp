@@ -205,32 +205,50 @@ async def _finalize_orchestration(
 async def _user_groups_context(phone: str) -> str:
     """Gera contexto de grupos em comum (G3): 'você e X estão nos grupos Y, Z'.
 
-    Consulta a collection group_members (collection group query por
-    member_phones array_contains) e retorna uma string descritiva para o
-    prompt. Retorna "" quando nao ha grupos ou erro.
+    Le o indice denormalizado ``usuarios/{phone}.group_memberships`` (1
+    doc.get) com cache in-memory TTL (core.user_groups_cache). Retorna ""
+    quando nao ha grupos ou erro. Substitui a collection-group query legada
+    (group_members/member_phones array_contains), que nao tinha indice.
     """
     try:
-        from google.cloud import firestore
+        from core.message_ledger import _get_firestore
+        from core import user_groups_cache
+        from agent_loader import _canonical_phone
 
-        project = os.getenv("GCP_PROJECT") or os.getenv("GCLOUD_PROJECT")
-        if not project or os.getenv("FIRESTORE_EMULATOR_HOST"):
-            return ""
-        db = firestore.Client(project=project)
         digits = "".join(c for c in str(phone or "") if c.isdigit())
         if not digits:
             return ""
-        docs = (
-            db.collection_group("group_members")
-            .where("member_phones", "array_contains", digits)
-            .stream()
-        )
-        groups = []
-        for d in docs:
-            data = d.to_dict() or {}
-            groups.append(data.get("subject") or data.get("group_jid") or d.id)
-        if not groups:
+        canonical = _canonical_phone(digits) or digits
+
+        cached = user_groups_cache.get(canonical)
+        if cached is not None:
+            logger.debug("user_groups_context_cache_hit phone=%s", canonical)
+            return cached
+
+        db = _get_firestore()
+        if db is None:
             return ""
-        return f"Grupos em comum com o usuario: {', '.join(groups)}"
+
+        def fetch() -> list:
+            doc = db.collection("usuarios").document(canonical).get()
+            if not doc.exists:
+                return []
+            return (doc.to_dict() or {}).get("group_memberships") or []
+
+        memberships = await asyncio.to_thread(fetch)
+
+        groups = []
+        for m in memberships or []:
+            if isinstance(m, dict):
+                groups.append(m.get("subject") or m.get("gid") or "")
+
+        ctx = (
+            f"Grupos em comum com o usuario: {', '.join(g for g in groups if g)}"
+            if groups
+            else ""
+        )
+        user_groups_cache.set(canonical, ctx)
+        return ctx
     except Exception as exc:  # noqa: BLE001
         logger.debug("user_groups_context_skipped phone=%s exc=%s", phone, exc)
         return ""

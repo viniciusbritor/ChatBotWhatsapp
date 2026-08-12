@@ -556,6 +556,8 @@ def list_users() -> List[Dict[str, Any]]:
         seen: Dict[str, Dict[str, Any]] = {}
         for doc in db.collection("usuarios").stream():
             data = doc.to_dict() or {}
+            if not _user_doc_is_real(data):
+                continue
             phone = data.get("phone") or doc.id or ""
             canonical = _canonical_phone(phone)
             prev = seen.get(canonical)
@@ -568,6 +570,25 @@ def list_users() -> List[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"Failed to list users: {e}")
         return []
+
+
+_GHOST_ONLY_FIELDS = {"group_memberships", "group_memberships_updated_at"}
+
+
+def _user_doc_is_real(data: Dict[str, Any]) -> bool:
+    """True se o doc representa um usuario real (nao so o indice inverso).
+
+    O ``sync_group_members`` grava ``usuarios/{phone}.group_memberships`` via
+    ``set(merge=True)``, criando docs "fantasma" para membros de grupo que
+    nunca interagiram com a Jennifer. Esses docs tem apenas campos
+    ``group_memberships*`` e nao devem aparecer como usuarios no Portal.
+    """
+    for key, value in data.items():
+        if key in _GHOST_ONLY_FIELDS:
+            continue
+        if value:
+            return True
+    return False
 
 
 def _user_doc_scopes(data: Dict[str, Any]) -> int:

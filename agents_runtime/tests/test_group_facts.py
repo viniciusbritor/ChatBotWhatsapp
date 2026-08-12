@@ -49,15 +49,18 @@ class _FakeRef:
 
 
 class _FakeDb:
-    def __init__(self, group_members=None, group_facts=None):
+    def __init__(self, group_members=None, group_facts=None, users=None):
         self._gm = group_members or {}
         self._gf = group_facts or {}
+        self._users = users or {}
 
     def collection(self, name):
         if name == "group_members":
             return _FakeGroupMembersColl(self._gm)
         if name == "group_facts":
             return _FakeGroupFactsColl(self._gf)
+        if name == "usuarios":
+            return _FakeGroupMembersColl(self._users)
         return _FakeColl([])
 
 
@@ -142,6 +145,48 @@ async def test_sync_group_members_salva_snapshot():
     assert result["synced_groups"] == 1
     assert "120363@g.us" in fake_db._gm
     assert "5511997931324" in fake_db._gm["120363@g.us"]["member_phones"]
+
+
+async def test_sync_group_members_grava_indice_inverso():
+    from tools import group
+
+    fake_db = _FakeDb()
+    evo_groups = [{
+        "id": "120363@g.us",
+        "subject": "P&D",
+        "participants": [
+            {"id": "1@lid", "phoneNumber": "5511997931324@s.whatsapp.net", "admin": "superadmin"},
+            {"id": "2@lid", "phoneNumber": "5511966830020@s.whatsapp.net", "admin": "admin"},
+        ],
+    }]
+
+    class _Resp:
+        status_code = 200
+
+        def json(self):
+            return evo_groups
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return None
+
+        async def get(self, url, params=None, headers=None):
+            return _Resp()
+
+    with patch("tools.group._get_firestore", return_value=fake_db), \
+         patch("tools.group._evolution_headers", return_value={"apikey": "k"}), \
+         patch("httpx.AsyncClient", return_value=_Client()):
+        result = await group.sync_group_members()
+    assert result["memberships_updated"] == 2
+    assert fake_db._users["5511997931324"]["group_memberships"] == [
+        {"gid": "120363@g.us", "subject": "P&D"}
+    ]
+    assert fake_db._users["5511966830020"]["group_memberships"] == [
+        {"gid": "120363@g.us", "subject": "P&D"}
+    ]
 
 
 async def test_save_fact_grava_witnesses():

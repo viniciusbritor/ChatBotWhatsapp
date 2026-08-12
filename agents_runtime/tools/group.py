@@ -366,6 +366,10 @@ async def sync_group_members(instance: str = "Jennifer") -> Dict[str, Any]:
     Usa GET /group/fetchAllGroups/{instance}?getParticipants=true que retorna
     LID, phoneNumber e admin de cada participante. O nome (pushName) e
     enriquecido depois via mensagens (enrich_member_name).
+
+    Alem do snapshot forward (group_members/{gid}), grava o indice INVERSO
+    usuarios/{phone}.group_memberships = [{gid, subject}] para o read path
+    _user_groups_context virar 1 doc.get() (denormalizacao write-time).
     """
     import httpx
 
@@ -391,6 +395,7 @@ async def sync_group_members(instance: str = "Jennifer") -> Dict[str, Any]:
         return {"error": str(exc)[:200]}
 
     synced = 0
+    memberships: Dict[str, list] = {}
     for grp in groups:
         gid = str(grp.get("id") or "")
         if not gid:
@@ -426,7 +431,45 @@ async def sync_group_members(instance: str = "Jennifer") -> Dict[str, Any]:
             synced += 1
         except Exception as exc:
             logger.warning("sync_group_members save %s error: %s", gid, exc)
-    return {"synced_groups": synced, "groups": len(groups)}
+        for phone in phones:
+            memberships.setdefault(phone, []).append({"gid": gid, "subject": subject})
+
+    memberships_updated = _write_user_group_memberships(db, memberships)
+    return {
+        "synced_groups": synced,
+        "groups": len(groups),
+        "memberships_updated": memberships_updated,
+    }
+
+
+def _write_user_group_memberships(db, memberships: Dict[str, list]) -> int:
+    """Grava o indice inverso usuarios/{canonical}.group_memberships.
+
+    Denormaliza a relacao membro->grupos para o read path _user_groups_context
+    virar 1 doc.get() em vez de collection-group query. Usa set(merge=True)
+    para nunca sobrescrever google_oauth_token/email/role do doc do usuario.
+    """
+    from agent_loader import _canonical_phone
+    from core.user_groups_cache import invalidate
+
+    updated = 0
+    for phone, entries in memberships.items():
+        canonical = _canonical_phone(phone) or phone
+        if not canonical:
+            continue
+        try:
+            db.collection("usuarios").document(canonical).set(
+                {
+                    "group_memberships": entries,
+                    "group_memberships_updated_at": _now_iso(),
+                },
+                merge=True,
+            )
+            invalidate(canonical)
+            updated += 1
+        except Exception as exc:
+            logger.warning("sync_group_members membership %s error: %s", canonical, exc)
+    return updated
 
 
 def _cached_member_name(group_jid: str, phone: str) -> str:
