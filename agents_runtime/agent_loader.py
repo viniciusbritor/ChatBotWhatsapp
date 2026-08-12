@@ -181,6 +181,21 @@ def get_agent(agent_id: str) -> Optional[Dict[str, Any]]:
         return dict(agent) if agent else None
 
 
+def resolve_agent_for_instance(instance: str, agent_id: str) -> Optional[Dict[str, Any]]:
+    """Resolve o agente correto para uma instancia (multi-tenant, M2).
+
+    Busca primeiro {instance}__{agent_id} (instancia dedicada criada pelo
+    seed), e faz fallback para o agent_id base (ex: jennifier). Isso permite
+    que cada numero WhatsApp conectado tenha seus proprios agentes com
+    system_prompt customizado, mantendo a Jennifer intacta.
+    """
+    if instance:
+        prefixed = get_agent(f"{instance.lower()}__{agent_id}")
+        if prefixed:
+            return prefixed
+    return get_agent(agent_id)
+
+
 def get_skill(skill_id: str) -> Optional[Dict[str, Any]]:
     with _cache_lock:
         skill = _skills_cache.get(skill_id)

@@ -38,19 +38,20 @@ async def run_agent(
         {"reply": str, "delay_ms": int, "presence": str, "metadata": {...}}
     """
     try:
-        from agent_loader import get_agent
+        from agent_loader import resolve_agent_for_instance
         from orchestrator import (
             _execute_agent,
             _has_real_data,
         )
 
-        agent = get_agent(agent_id)
+        instance = str(payload.get("instance", "") or extra.get("instance", ""))
+        agent = resolve_agent_for_instance(instance, agent_id)
         if not agent or not agent.get("enabled", True):
             from agent_loader import _load_all
 
             try:
                 _load_all()
-                agent = get_agent(agent_id)
+                agent = resolve_agent_for_instance(instance, agent_id)
             except Exception:
                 pass
 

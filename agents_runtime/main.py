@@ -1066,6 +1066,95 @@ async def admin_accounts_delete(account_id: str):
     return JSONResponse(content={"status": "ok", "account_id": account_id, "deleted": True})
 
 
+@app.post("/admin/instances")
+async def admin_instances_create(request: Request):
+    """Cria uma nova instancia Evolution + registra conta no Firestore.
+
+    Body: {"name": "Maycon", "owner_phone": "5511999999999", "webhook_url": "..."}
+    1. Cria instancia na Evolution API (create_instance + get_qr_code)
+    2. Registra whatsapp_accounts/{id}
+    3. Nao faz seed automatico aqui — o portal chama /seed apos QR lido.
+    """
+    from core.evolution_admin import create_instance, get_qr_code
+
+    body = await request.json()
+    instance_name = str(body.get("name", "") or "").strip()
+    owner_phone = re.sub(r"\D", "", str(body.get("owner_phone", "") or ""))
+    if not instance_name or not owner_phone:
+        raise HTTPException(status_code=422, detail="name e owner_phone obrigatorios")
+    base_url = os.getenv("EVO_BASE_URL", "https://evolution.coherenceai.com.br").rstrip("/")
+    instance_base = base_url.replace("https://", "").replace("http://", "").replace(".", "-").replace("/", "")
+    webhook_url = (body.get("webhook_url") or "").strip() or f"https://{instance_base}/webhook"
+
+    created = await create_instance(instance_name, webhook_url=webhook_url)
+    if created.get("error"):
+        raise HTTPException(status_code=502, detail=created["error"])
+
+    account_id = f"{instance_name.lower()}"
+    await _write_account(account_id, {
+        "name": instance_name,
+        "instance": instance_name,
+        "owner_phone": owner_phone,
+        "owner_uid": owner_phone,
+        "status": "created",
+    })
+
+    qr = await get_qr_code(instance_name)
+    return JSONResponse(content={
+        "status": "created",
+        "account_id": account_id,
+        "instance": instance_name,
+        "qr_base64": qr.get("qr_base64", ""),
+        "qr_code": qr.get("code", ""),
+        "connected": False,
+    })
+
+
+@app.post("/admin/instances/{instance_id}/seed")
+async def admin_instances_seed(instance_id: str):
+    """Duplica a config da Jennifer (agentes/skills/tools) para a nova instancia.
+
+    Copia todos os agentes da Jennifer com instances=['{instance}'].
+    Skills e tools sao compartilhadas (mesma collection). O agente principal
+    assume o nome da instancia.
+    """
+    from agent_loader import _get_firestore_client, list_agents
+
+    db = _get_firestore_client()
+    if db is None:
+        raise HTTPException(status_code=503, detail="firestore_unavailable")
+    instance = instance_id.strip()
+    if not instance:
+        raise HTTPException(status_code=422, detail="instance_id required")
+
+    source_agents = list_agents()
+    jennifier_agents = [a for a in source_agents if "jennifer" in [str(i).lower() for i in a.get("instances", [])]]
+    if not jennifier_agents:
+        jennifier_agents = source_agents
+
+    copied = 0
+    for agent in jennifier_agents:
+        agent_id = agent.get("agent_id") or agent.get("id") or ""
+        if not agent_id:
+            continue
+        # agent_id unico por instancia: {instance}__{agent_id}
+        new_agent_id = f"{instance.lower()}__{agent_id}"
+        new_agent = dict(agent)
+        new_agent["agent_id"] = new_agent_id
+        new_agent["instances"] = [instance, instance.title()]
+        if new_agent.get("role") in ("orchestrator", "manager"):
+            new_agent["name"] = instance.title()
+        new_agent["updated_at"] = now_brt().isoformat()
+        db.collection("agents").document(new_agent_id).set(new_agent, merge=True)
+        copied += 1
+
+    account_ref = db.collection("whatsapp_accounts").document(instance)
+    if account_ref.get().exists:
+        account_ref.update({"status": "seeded", "seeded_at": now_brt().isoformat()})
+
+    return JSONResponse(content={"status": "ok", "instance": instance, "agents_copied": copied})
+
+
 @app.get("/admin/owners")
 async def admin_owners_list():
     from agent_loader import _get_firestore_client
