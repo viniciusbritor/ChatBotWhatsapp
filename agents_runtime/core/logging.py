@@ -48,6 +48,20 @@ class JsonFormatter(logging.Formatter):
 
 
 def configure_logging() -> None:
+    # Suprime UserWarning de DEPRECIACAO do SDK Firestore sobre
+    # ".where() posicional". O SDK ainda suporta; a migracao para
+    # FieldFilter e backlog (BACKLOG 12/08/2026). Filtro especifico,
+    # nao esconde outros warnings.
+    try:
+        import warnings as _warnings
+        _warnings.filterwarnings(
+            "ignore",
+            message="Detected filter using positional arguments. Prefer using the",
+            category=UserWarning,
+        )
+    except Exception:
+        pass
+
     handler = logging.StreamHandler()
     handler.setFormatter(JsonFormatter())
     root = logging.getLogger()

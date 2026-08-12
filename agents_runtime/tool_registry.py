@@ -1399,6 +1399,31 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
             "required": [],
         },
     },
+    "group.sync_names": {
+        "function": group.sync_member_names,
+        "implementation": "group",
+        "description": "Preenche nomes (pushName) dos membros nos snapshots de grupo via findContacts da Evolution.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "instance": {"type": "string", "description": "Nome da instancia (default Jennifer)"},
+            },
+            "required": [],
+        },
+    },
+    "group.resolve_mention": {
+        "function": group.resolve_mentioned,
+        "implementation": "group",
+        "description": "Resolve LIDs/phones mencionados numa mensagem de grupo para os NOMES dos membros. Use para identificar quem foi mencionado (@LID) sem expor telefone na resposta.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "group_jid": {"type": "string", "description": "JID do grupo"},
+                "mentioned_jids": {"type": "array", "items": {"type": "string"}, "description": "Lista de mentionedJid (LIDs) da mensagem"},
+            },
+            "required": ["group_jid", "mentioned_jids"],
+        },
+    },
     "group.save_fact": {
         "function": group.save_fact,
         "implementation": "group",

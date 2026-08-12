@@ -445,6 +445,104 @@ def _cached_member_name(group_jid: str, phone: str) -> str:
     return ""
 
 
+async def sync_member_names(instance: str = "Jennifer") -> Dict[str, Any]:
+    """Busca contatos na Evolution (findContacts) e preenche nomes no snapshot.
+
+    O fetchAllGroups NAO traz pushName. O endpoint findContacts retorna
+    remoteJid + pushName de todos os contatos da instancia. Este metodo
+    mapeia phone -> pushName e atualiza os nomes vazios em group_members.
+    """
+    import httpx
+
+    db = _get_firestore()
+    if db is None:
+        return {"error": "firestore_unavailable"}
+    base = os.getenv("EVO_BASE_URL", "https://evolution.coherenceai.com.br").rstrip("/")
+    headers = _evolution_headers()
+    if not headers.get("apikey"):
+        return {"error": "evolution_api_key_not_configured"}
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{base}/chat/findContacts/{instance}",
+                json={"query": ""},
+                headers=headers,
+            )
+            if resp.status_code >= 400:
+                return {"error": f"evolution_http_{resp.status_code}"}
+            contacts = resp.json() or []
+    except Exception as exc:
+        logger.warning("sync_member_names findContacts error: %s", exc)
+        return {"error": str(exc)[:200]}
+
+    phone_to_name: Dict[str, str] = {}
+    for c in contacts:
+        if not isinstance(c, dict):
+            continue
+        jid = str(c.get("remoteJid") or "")
+        name = str(c.get("pushName") or "").strip()
+        if "@s.whatsapp.net" in jid and name:
+            phone = jid.split("@")[0]
+            phone_to_name[phone] = name
+
+    if not phone_to_name:
+        return {"synced_names": 0}
+
+    updated = 0
+    for doc in db.collection("group_members").stream():
+        gid = doc.id
+        data = doc.to_dict() or {}
+        members = data.get("members", [])
+        changed = False
+        for m in members:
+            phone = m.get("phone", "")
+            if phone and not m.get("name") and phone in phone_to_name:
+                m["name"] = phone_to_name[phone]
+                changed = True
+        if changed:
+            db.collection("group_members").document(gid).update({
+                "members": members,
+                "updated_at": _now_iso(),
+            })
+            updated += 1
+    return {"synced_names": updated}
+
+
+def resolve_mentioned(group_jid: str, mentioned_jids: List[str]) -> List[Dict[str, Any]]:
+    """Resolve LIDs mencionados (ex: 210870093217996@lid) para membros do grupo.
+
+    Retorna [{lid, phone, name}] dos membros que correspondem aos jids
+    mencionados (por LID ou phone). Usado para a LLM identificar quem foi
+    mencionado sem expor telefone.
+    """
+    if not group_jid or not mentioned_jids:
+        return []
+    try:
+        db = _get_firestore()
+        if db is None:
+            return []
+        doc = db.collection("group_members").document(group_jid.replace("/", "_")).get()
+        if not doc.exists:
+            return []
+        members = doc.to_dict().get("members", [])
+        wanted = set()
+        for j in mentioned_jids:
+            jid = str(j)
+            # LID ex: 210870093217996@lid ; phone ex: 5511997931324@s.whatsapp.net
+            raw = jid.split("@")[0]
+            wanted.add(raw)
+        out = []
+        for m in members:
+            lid_raw = str(m.get("lid") or "").split("@")[0]
+            phone = str(m.get("phone") or "")
+            if lid_raw in wanted or phone in wanted:
+                out.append({"lid": m.get("lid"), "phone": phone, "name": m.get("name") or ""})
+        return out
+    except Exception as exc:
+        logger.warning("resolve_mentioned error: %s", exc)
+        return []
+
+
 def _group_member_phones(group_jid: str) -> List[str]:
     """Phone dos membros atuais do grupo (cache 300s)."""
     cached = _GROUP_MEMBERS_CACHE.get(group_jid)

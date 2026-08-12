@@ -224,6 +224,8 @@ ENVIRONMENT: "test"
 
 ### Secrets (Secret Manager `coherence-ominichannel-fs`)
 
+> ⚠️ **Injeção de Segredos e Isolamento:** Todas as credenciais residem exclusivamente no **GCP Secret Manager** (`coherence-ominichannel-fs`). No deploy via Cloud Build (`cloudbuild-test.yaml`), as chaves são injetadas no container via `--set-secrets` do Cloud Run para variáveis de ambiente (`os.environ`). Pastas locais de chaves (ex: `Keys/` ou `.env` no Windows) não são acessíveis por containers Cloud Run e são obsoletas.
+
 | Secret | Proposito |
 |---|---|
 | `deepseek-api-key` | LLM primario |

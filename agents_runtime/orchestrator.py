@@ -236,6 +236,34 @@ async def _user_groups_context(phone: str) -> str:
         return ""
 
 
+async def _resolve_group_mentions(payload: Dict[str, Any]) -> str:
+    """Resolve @LID mencionados numa mensagem de grupo para os NOMES.
+
+    Quando alguem digita '@Clarissa Pontual', o WhatsApp grava o LID
+    (ex: @210870093217996) no texto e em contextInfo.mentionedJid. Esta
+    funcao consulta o snapshot group_members e devolve os nomes reais,
+    para a Jennifer saber quem foi mencionado sem expor telefone.
+    """
+    try:
+        extra = payload.get("extra", {}) or {}
+        remote_jid = str(payload.get("remote_jid") or extra.get("remote_jid") or "")
+        if "@g.us" not in remote_jid:
+            return ""
+        mentioned = extra.get("mentioned_jids") or []
+        if not mentioned:
+            return ""
+        from tools.group import resolve_mentioned
+
+        resolved = resolve_mentioned(remote_jid, mentioned)
+        if not resolved:
+            return ""
+        names = [m["name"] or m["phone"] for m in resolved if m]
+        return "Pessoas mencionadas nesta mensagem: " + ", ".join(names)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("resolve_group_mentions_skipped exc=%s", exc)
+        return ""
+
+
 async def _user_has_any_connection(phone: str):
     """True se o user ja tem OAuth Google OU alguma conexao Composio.
 
@@ -2637,9 +2665,12 @@ async def _execute_agent(
         logger.warning("memory_facts_failed agent_id=%s exc=%s", agent_id, exc)
 
     group_ctx = ""
+    mention_ctx = ""
     try:
         if phone:
             group_ctx = await _user_groups_context(phone)
+        if extra.get("is_group"):
+            mention_ctx = await _resolve_group_mentions(payload)
     except Exception as exc:
         logger.warning("user_groups_context_failed agent_id=%s exc=%s", agent_id, exc)
 
@@ -2655,6 +2686,8 @@ async def _execute_agent(
         ctx_parts.insert(0, f"[FATOS DO USUARIO - NAO perguntar novamente]\n{facts}")
     if group_ctx:
         ctx_parts.append(group_ctx)
+    if mention_ctx:
+        ctx_parts.append(mention_ctx)
     if mem_rag:
         ctx_parts.append(f"[MEMORIA RAG - CONVERSAS RELEVANTES]\n{mem_rag}")
     if recent:
