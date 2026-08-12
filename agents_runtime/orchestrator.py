@@ -2386,6 +2386,25 @@ async def _execute_deep_agent(
     }
 
 
+def _resolve_agent_tools(agent: Dict[str, Any]) -> List[str]:
+    """Resolve as tools disponiveis para um agente (fix 12/08/2026).
+
+    Dinamico: se o agente NAO define uma lista explicita de tools, expoe
+    TODAS as tools registradas no tool_registry (inclui composio.*,
+    youtube.*, locomotion.*, weather.*, etc). Assim, conectar um app no
+    Composio libera a tool automaticamente, sem backfill/seed manual.
+    - tools: None/ausente -> todas as tools do registry
+    - tools: [...] -> apenas a lista explicita
+    - tools: [] -> nenhuma tool (bloqueio total)
+    """
+    explicit = agent.get("tools")
+    if explicit is None:
+        from tool_registry import list_tool_ids
+
+        return list_tool_ids()
+    return [str(t) for t in explicit]
+
+
 async def _execute_agent(
     agent: Dict[str, Any],
     text: str,
@@ -2505,7 +2524,7 @@ async def _execute_agent(
     dynamic_user_message = f"Mensagem: {text}"
     user_prompt = static_user_prefix + dynamic_user_message
 
-    available_tools = agent.get("tools", [])
+    available_tools = _resolve_agent_tools(agent)
 
     llm = LLMProvider()
     if not llm.is_available():

@@ -27,20 +27,25 @@ def main() -> int:
             created += 1
     print(f"tools criadas: {created}")
 
-    # 2) Atualizar o agente jennifier com tools + system_prompt
+    # 2) Atualizar o agente jennifier: tools DINAMICAS (campo removido =>
+    #    orchestrator usa todas as tools do tool_registry) + system_prompt
     jennifier = next(a for a in DEFAULT_AGENTS if a["id"] == "jennifier")
     ref = db.collection("agents").document("jennifier")
     doc = ref.get()
     if not doc.exists:
         print("ERRO: agents/jennifier nao existe")
         return 1
-    ref.set({
-        "tools": jennifier["tools"],
+    updates = {
         "system_prompt": jennifier["system_prompt"],
         "system_prompt_version": 4,
         "updated_at": __import__("core.timezone", fromlist=["now_brt"]).now_brt().isoformat(),
-    }, merge=True)
-    print("agents/jennifier atualizado (tools + system_prompt v4)")
+    }
+    if "tools" in (doc.to_dict() or {}):
+        ref.update({"tools": firestore.DELETE_FIELD, **updates})
+        print("agents/jennifier: campo tools REMOVIDO (dinamico) + system_prompt v4")
+    else:
+        ref.set(updates, merge=True)
+        print("agents/jennifier: system_prompt v4 (tools ja dinamico)")
 
     # 3) Forcar reload remoto via admin (force_reload e endpoint interno;
     # aqui apenas sinalizamos)

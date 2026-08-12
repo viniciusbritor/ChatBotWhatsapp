@@ -1,9 +1,8 @@
 ﻿"""Testes do novo orchestrator ÔÇö Tier 1 + Tier 2 + multi-intent."""
 from __future__ import annotations
 
-import os
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
 
 
 
@@ -183,7 +182,7 @@ class TestIdempotency:
     @pytest.mark.asyncio
     async def test_idempotency_cache_hit(self):
         import time
-        from orchestrator import _response_cache, _idempotency_key, orchestrate, CACHE_TTL_SEC
+        from orchestrator import _response_cache, _idempotency_key, orchestrate
 
         cache_key = _idempotency_key(self._payload())
         _response_cache[cache_key] = {"reply": "cached", "delay_ms": 0, "presence": "composing",
@@ -197,4 +196,40 @@ class TestIdempotency:
 class TestIntentClassifierKnowledge:
     # Tests removidos — categoria 'conhecimento' foi eliminada.
     # O agente (via knowledge.answer) decide como buscar, nao o classifier.
+    pass
+
+
+class TestResolveAgentTools:
+    """Fix 12/08/2026: tools DINAMICAS quando o agente nao define lista."""
+
+    def test_tools_ausente_usa_todas_do_registry(self):
+        from orchestrator import _resolve_agent_tools
+        from tool_registry import list_tool_ids
+
+        agent = {"id": "jennifier", "name": "Jennifer"}
+        tools = _resolve_agent_tools(agent)
+        assert tools == list_tool_ids()
+        assert "youtube.search_videos" in tools
+        assert "locomotion.find_place" in tools
+        assert "linkedin.my_profile" in tools
+        assert "weather.current" in tools
+
+    def test_tools_none_usa_todas(self):
+        from orchestrator import _resolve_agent_tools
+        from tool_registry import list_tool_ids
+
+        agent = {"id": "x", "tools": None}
+        assert _resolve_agent_tools(agent) == list_tool_ids()
+
+    def test_tools_explicito_respeita_lista(self):
+        from orchestrator import _resolve_agent_tools
+
+        agent = {"id": "x", "tools": ["calendar.list_events", "gmail.search_messages"]}
+        assert _resolve_agent_tools(agent) == ["calendar.list_events", "gmail.search_messages"]
+
+    def test_tools_vazio_bloqueia_tudo(self):
+        from orchestrator import _resolve_agent_tools
+
+        agent = {"id": "x", "tools": []}
+        assert _resolve_agent_tools(agent) == []
     pass
