@@ -1,0 +1,6 @@
+{
+  "name": "Coherence Control Plane",
+  "description": "Console de gerenciamento omnichannel para agentes de IA, conexões, ferramentas, conhecimentos, integrações e monitoramento de status.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -11,3 +11,14 @@ secret_*.txt
 logs/
 tests/
 whisper_models/
+portal/node_modules/
+portal/src/
+portal/public/
+portal/tsconfig.json
+portal/vite.config.ts
+portal/package.json
+portal/package-lock.json
+portal/index.html
+portal/.env.example
+portal/README.md
+portal/metadata.json

@@ -62,7 +62,11 @@ class TestDashboardAntiCache:
         self.headers = {"Authorization": "Bearer test-sa"}
 
     def test_dashboard_has_no_cache_headers(self):
-        resp = self.client.get("/admin/dashboard", headers=self.headers)
+        resp = self.client.get("/admin/dashboard", headers=self.headers, follow_redirects=False)
+        # Com o portal React montado, /admin/dashboard redireciona para /portal/.
+        if resp.status_code in (301, 302, 307, 308):
+            assert "/portal/" in resp.headers.get("location", "")
+            return
         if resp.status_code != 200:
             return  # auth path - skip
         cc = resp.headers.get("cache-control", "")

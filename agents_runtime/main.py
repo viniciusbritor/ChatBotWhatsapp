@@ -108,6 +108,27 @@ app = FastAPI(
 
 app.middleware("http")(auth_middleware)
 
+# ==========================================================================
+# Portal React (Google AI Studio / Stitch) — servido como static files.
+# Fallback: se o dist nao existir, o module_ui.py legado continua servindo.
+# ==========================================================================
+_PORTAL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "portal", "dist")
+
+
+def _portal_available() -> bool:
+    return os.path.isdir(_PORTAL_DIR) and os.path.isfile(os.path.join(_PORTAL_DIR, "index.html"))
+
+
+if _portal_available():
+    try:
+        from fastapi.staticfiles import StaticFiles
+
+        app.mount("/portal", StaticFiles(directory=_PORTAL_DIR, html=True), name="portal")
+        logger.info("portal_react_mounted dir=%s", _PORTAL_DIR)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("portal_react_mount_failed exc=%s", exc)
+
+
 
 @app.get("/healthz")
 async def healthz():  # alias for compatibility with previous deployments
@@ -764,13 +785,22 @@ def _require_self_or_admin(request: Request, phone: str) -> None:
 @app.get("/")
 @app.get("/admin/dashboard")
 async def admin_dashboard(request: Request):
-    """Render the Agentes Omnichannel control plane."""
+    """Render the Agentes Omnichannel control plane.
+
+    Se o portal React (Stitch) esta disponivel, redireciona para /portal/.
+    Caso contrario, usa o module_ui.py legado (fallback).
+    """
     from core.auth import resolve_caller
-    from core.module_ui import render_dashboard
 
     token = _bearer_token(request)
     if not token:
         token = request.query_params.get("token", "")
+    if _portal_available():
+        portal_url = "/portal/?token=" + token if token else "/portal/"
+        return RedirectResponse(url=portal_url)
+
+    from core.module_ui import render_dashboard
+
     role, caller_phone = resolve_caller(request)
     response = HTMLResponse(content=render_dashboard(COMMIT_SHA, DEPLOYED_AT, role=role or "admin", caller_phone=caller_phone))
     # Anti-cache headers para Portal sempre servir versao nova
