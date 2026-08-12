@@ -4393,3 +4393,27 @@ Tambem:
 
 E2E no ar: /admin/users retorna 6 servicos Google + 12 apps Composio.
 Suite: 1111 passed, 0 failures. Portal serve build novo.
+
+## 12/08/2026 (00:30 BRT) - Portal dados completos + OAuth fix + onboarding
+
+Commit 6662a66 (branch fix/portal-dados-completos).
+
+Abas antes vazias/mock agora com dados reais:
+- Proprietarios: /admin/owners (whatsapp_accounts) -> Jennifer/5511966830020
+- Integracoes: /admin/integrations novo (Google OAuth 8 scopes, Composio
+  9/12 apps, Evolution, Firestore)
+- Conhecimento: owner_phone resolvido via _build_owner_hash_map
+  (sha256->phone). Docs do Vinicius mostram 5511966830020.
+- Status: KPIs reais do /admin/status + detalhes (agents, llm, stt)
+- tools: 'Composio MCP' -> 'Composio'
+
+OAuth fix (itens 1/2 do usuario):
+- authorizeGoogle: polling /admin/users -> status atualiza sem perder conexao
+- authorizeComposio: abre 1 aba por vez (nao muitas)
+
+Onboarding (item 3):
+- _maybe_onboarding_nudge: user novo sem OAuth/Composio recebe link de
+  conexao na primeira conversa privada. _user_has_any_connection retorna
+  None quando nao verificavel (evita nudge falso em testes/usuarios conectados).
+
+Testes: 1115 passed, 0 failures. Fix flaky test_qual_compromissos.
