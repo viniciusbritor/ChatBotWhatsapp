@@ -65,7 +65,7 @@ MESSAGE_HISTORY_COLLECTION = os.getenv(
     "RAG_MESSAGE_HISTORY_COLLECTION", "message-history"
 )
 MESSAGE_HISTORY_RETENTION_DAYS = int(
-    os.getenv("RAG_MESSAGE_HISTORY_RETENTION_DAYS", "365")
+    os.getenv("RAG_MESSAGE_HISTORY_RETENTION_DAYS", "90")
 )
 
 ADAPTIVE_FLOOR = float(os.getenv("RAG_ADAPTIVE_FLOOR", "0.3"))
@@ -165,6 +165,7 @@ def _get_firestore():
 
 EMBEDDING_MAX_RETRIES = 3
 EMBEDDING_BACKOFF_SEC = [1, 2, 4]
+EMBED_QUERY_TIMEOUT_SEC = 30.0
 
 
 async def embed_query(text: str, attempt: int = 0) -> Optional[List[float]]:
@@ -175,12 +176,25 @@ async def embed_query(text: str, attempt: int = 0) -> Optional[List[float]]:
     - 2 retries: 2s
     - 3 retries: 4s
     - Exausted: log error + return None
+
+    PHASE B (loop pt2): asyncio.wait_for com timeout de 30s
+    evita deadlock se embed_best travar (ex: requests.post sem
+    timeout efetivo, network hung).
     """
     clean_text = clean_portuguese(mask_pii(str(text or "")).strip())
     if not clean_text:
         return None
     try:
-        return await asyncio.to_thread(embed_best, clean_text)
+        return await asyncio.wait_for(
+            asyncio.to_thread(embed_best, clean_text),
+            timeout=EMBED_QUERY_TIMEOUT_SEC,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "embed_query_timeout text_len=%d timeout_sec=%.1f",
+            len(text), EMBED_QUERY_TIMEOUT_SEC,
+        )
+        return None
     except Exception as exc:
         try:
             import openai
@@ -650,7 +664,10 @@ async def index_conversation_message(
         "text_masked": clean_text[:4000],
         "schema_version": SCHEMA_VERSION,
         "created_at": now.isoformat(),
-        "expires_at": (now + timedelta(days=MESSAGE_HISTORY_RETENTION_DAYS)).isoformat(),
+        # R2 (12/08/2026): expires_at como datetime (Timestamp nativo do
+        # Firestore) para habilitar TTL policy. Retencao = 90 dias default.
+        "expires_at": now + timedelta(days=MESSAGE_HISTORY_RETENTION_DAYS),
+        "expires_at_str": (now + timedelta(days=MESSAGE_HISTORY_RETENTION_DAYS)).isoformat(),
         "extra": extra or {},
     }
 
