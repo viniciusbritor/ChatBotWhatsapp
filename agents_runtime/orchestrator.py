@@ -2430,6 +2430,17 @@ async def _verify_calendar_event(phone: str, result: dict, tool_args: dict) -> d
         return result
 
 
+def _onboarding_url(phone: str) -> str:
+    """Gera URL publica de onboarding (P5) para o user conectar Google/Composio."""
+    import os as _os
+
+    base = (_os.getenv("BASE_URL") or _os.getenv("EVO_BASE_URL") or "").rstrip("/")
+    digits = "".join(c for c in str(phone) if c.isdigit())
+    if not base:
+        return f"/a/{digits}/conectar"
+    return f"{base}/a/{digits}/conectar"
+
+
 def _resolve_agent_tools(agent: Dict[str, Any]) -> List[str]:
     """Resolve as tools disponiveis para um agente (fix 12/08/2026).
 
@@ -2625,7 +2636,18 @@ async def _execute_agent(
             return json.dumps({"error": f"Tool '{tool_name}' timed out after 30s"})
         except Exception as e:
             logger.exception("tool_error tool=%s", tool_name)
-            return json.dumps({"error": f"{type(e).__name__}: {str(e)[:200]}"})
+            err_msg = f"{type(e).__name__}: {str(e)[:200]}"
+            # Onboarding (P5): quando a tool precisa de OAuth Google, devolve
+            # mensagem com link para o user autorizar de forma autonoma.
+            if "oauth_required" in err_msg or "user_google_oauth_required" in err_msg:
+                return json.dumps({
+                    "error": (
+                        "acao_requer_autorizacao",
+                        f"O usuario precisa conectar sua conta Google. "
+                        f"Envie: 'Conecte suas contas aqui: {_onboarding_url(phone)}'",
+                    ),
+                })
+            return json.dumps({"error": err_msg})
 
     try:
         if tool_schemas:

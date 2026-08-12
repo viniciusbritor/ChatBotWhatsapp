@@ -1788,6 +1788,81 @@ def _oauth_redirect_uri(request: Request) -> str:
     return f"{scheme}://{host}/oauth/callback"
 
 
+@app.get("/a/{phone}/conectar")
+async def onboarding_conectar(phone: str, request: Request):
+    """Página pública de onboarding: conecta Google + TODOS os apps Composio."""
+    from agent_loader import get_user
+
+    user = get_user(phone) or {}
+    has_google = bool(user.get("google_oauth_token"))
+    base = _oauth_redirect_uri(request).replace("/oauth/callback", "")
+    google_html = (
+        '<p style="color:#16a34a;font-weight:600">✅ Google já conectado</p>'
+        if has_google else
+        '<a href="' + base + '/oauth/google?phone=' + phone + '">'
+        '<button style="background:#4285F4;color:#fff;border:0;padding:14px 28px;border-radius:8px;'
+        'font-size:16px;font-weight:600;cursor:pointer">Conectar Google</button></a>'
+    )
+    html = """<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Conectar contas</title>
+    <style>body{font-family:Inter,system-ui,sans-serif;background:#f9fafb;margin:0;padding:40px 16px}
+    .card{max-width:520px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:32px}
+    h1{font-size:22px;color:#111827} .sec{margin:24px 0} .sec h2{font-size:15px;color:#374151;margin-bottom:12px}
+    .hint{font-size:13px;color:#6b7280;margin-top:10px;line-height:1.5}
+    #comp-status{font-size:13px;color:#6b7280;margin-top:12px}
+    .ok{color:#16a34a;font-weight:600}</style></head><body><div class="card">
+    <h1>Conectar suas contas</h1>
+    <p style="color:#6b7280;font-size:14px">Autorize o acesso para que a Jennifer consiga usar seus serviços. São 2 cliques.</p>
+    <div class="sec"><h2>🔵 Google</h2>{google_html}
+      <p class="hint">Calendário, Gmail e Drive — após autorizar, o browser volta para cá.</p></div>
+    <div class="sec"><h2>🟣 Apps (Composio)</h2>
+      <button onclick="conectarComposio()" style="background:#111827;color:#fff;border:0;padding:14px 28px;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer">Conectar TODOS os apps</button>
+      <div id="comp-status"></div>
+      <p class="hint">YouTube, LinkedIn, GitHub, Notion, GoogleDocs, OneDrive e mais. Cada app abre uma aba para autorizar.</p></div>
+    <p class="hint" style="margin-top:28px">Depois de conectar, volte ao WhatsApp e continue a conversa com a Jennifer. 🚀</p>
+    </div>
+    <script>
+    const BASE = {base_js};
+    const PHONE = {phone_js};
+    async function conectarComposio() {
+      const st = document.getElementById('comp-status');
+      st.innerHTML = 'Gerando links de conexão…';
+      try {
+        const res = await fetch(BASE + '/a/' + PHONE + '/composio', {method:'POST'});
+        const data = await res.json();
+        const links = data.links || [];
+        const pendentes = links.filter(l => l.url);
+        if (!pendentes.length) { st.innerHTML = '<span class="ok">Todos os apps já estão conectados! ✅</span>'; return; }
+        st.innerHTML = 'Abra ' + pendentes.length + ' aba(s) e autorize cada app. Depois volte aqui.';
+        pendentes.forEach(l => window.open(l.url, '_blank'));
+      } catch (e) { st.innerHTML = 'Erro: ' + e.message; }
+    }
+    </script></body></html>"""
+    html = (
+        html.replace("{google_html}", google_html)
+        .replace("{base_js}", json.dumps(base))
+        .replace("{phone_js}", json.dumps(phone))
+    )
+    return HTMLResponse(content=html)
+
+
+@app.post("/a/{phone}/composio")
+async def onboarding_composio(phone: str):
+    """Gera links de conexao para TODOS os apps Composio pendentes do user."""
+    from tools.composio_connect import connect_all
+
+    result = await connect_all(phone)
+    links = result.get("links", [])
+    out = [
+        {"toolkit": item.get("toolkit"), "url": item.get("connect_url") or item.get("url")}
+        for item in links
+        if item.get("connect_url") or item.get("url")
+    ]
+    already = sum(1 for item in links if item.get("status") == "connected")
+    return JSONResponse(content={"phone": phone, "links": out, "already_connected": already, "total": len(links)})
+
+
 @app.get("/oauth/google")
 async def oauth_google(request: Request):
     import urllib.parse

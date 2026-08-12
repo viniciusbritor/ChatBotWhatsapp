@@ -11,7 +11,7 @@ Cobre:
 from __future__ import annotations
 
 import os
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 
 os.environ.setdefault("GCP_PROJECT", "test-project")
@@ -333,10 +333,49 @@ class TestEnrichUserConnections:
             "apps": {"youtube": {"connected": True}, "linkedin": {"connected": False}},
         }
         import asyncio
-        from unittest.mock import AsyncMock
 
         with patch("tools.composio_connect.get_status", AsyncMock(return_value=fake_status)):
             user = {"phone": "5511966830020"}
             asyncio.run(_enrich_user_connections(user))
         assert user["composio"]["youtube"] is True
         assert user["composio"]["linkedin"] is False
+
+
+class TestOnboardingEndpoints(_AuthFixture):
+    def setup_method(self):
+        super().setup_method(None)
+        from main import app
+
+        self.client = __import__("fastapi.testclient", fromlist=["TestClient"]).TestClient(app)
+
+    def test_conectar_page_public(self):
+        with patch("agent_loader.get_user", return_value=None):
+            resp = self.client.get("/a/5511966830020/conectar")
+        assert resp.status_code == 200, resp.text
+        assert "Conectar suas contas" in resp.text
+        assert "Conectar Google" in resp.text
+        assert "Conectar TODOS os apps" in resp.text
+
+    def test_composio_endpoint_public_returns_links(self):
+        fake_result = {
+            "links": [
+                {"toolkit": "youtube", "status": "pending", "connect_url": "https://composio/youtube"},
+                {"toolkit": "linkedin", "status": "connected", "connect_url": None},
+            ],
+            "already_connected": 1,
+            "total": 2,
+        }
+        with patch("tools.composio_connect.connect_all", AsyncMock(return_value=fake_result)):
+            resp = self.client.post("/a/5511966830020/composio")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert len(body["links"]) == 1
+        assert body["links"][0]["toolkit"] == "youtube"
+        assert body["links"][0]["url"] == "https://composio/youtube"
+        assert body["already_connected"] == 1
+
+    def test_onboarding_url_helper(self):
+        from orchestrator import _onboarding_url
+
+        url = _onboarding_url("+5511966830020")
+        assert "/a/5511966830020/conectar" in url
