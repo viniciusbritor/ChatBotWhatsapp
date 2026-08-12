@@ -1,6 +1,7 @@
 """Tests for new Google API tools (M3): translate, vision, sheets, tasks, people, photos."""
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -19,6 +20,15 @@ class _Resp:
 
     def json(self):
         return self._payload
+
+
+def _fake_resolution(phone: str = "5511966830020"):
+    return SimpleNamespace(
+        instance="Jennifer",
+        owner_phone=phone,
+        owner_uid=phone,
+        is_owner=True,
+    )
 
 
 class _FakeClient:
@@ -117,7 +127,7 @@ class TestTasks:
             "items": [{"id": "t1", "title": "Comprar pão", "status": "needsAction"}]
         }
         with patch("tools.google_tasks._get_service", return_value=fake_service), \
-             patch("core.owner.resolve_owner", return_value=MagicMock()), \
+             patch("core.owner.resolve_owner", return_value=_fake_resolution()), \
              patch("core.owner.deny_if_not_owner", return_value=None), \
              patch("core.owner_guard.check_folder_permission", return_value=None), \
              patch("core.owner_guard.post_filter_tool_result", new_async_pass):
@@ -136,7 +146,7 @@ class TestPeople:
             "results": [{"person": {"names": [{"displayName": "João"}], "emailAddresses": [{"value": "joao@x.com"}]}}]
         }
         with patch("tools.google_people._get_service", return_value=fake_service), \
-             patch("core.owner.resolve_owner", return_value=MagicMock()), \
+             patch("core.owner.resolve_owner", return_value=_fake_resolution()), \
              patch("core.owner.deny_if_not_owner", return_value=None), \
              patch("core.owner_guard.check_folder_permission", return_value=None), \
              patch("core.owner_guard.post_filter_tool_result", new_async_pass):
@@ -150,8 +160,8 @@ class TestPhotos:
     async def test_search_photos_sem_token(self):
         from tools import google_photos
 
-        with patch("tools.google_photos._get_access_token", AsyncMock(side_effect=RuntimeError("user_google_oauth_required"))), \
-             patch("core.owner.resolve_owner", return_value=MagicMock()), \
+        with patch("tools.google_photos._api", AsyncMock(return_value={"error": "user_google_oauth_required"})), \
+             patch("core.owner.resolve_owner", return_value=_fake_resolution()), \
              patch("core.owner.deny_if_not_owner", return_value=None), \
              patch("core.owner_guard.check_folder_permission", return_value=None), \
              patch("core.owner_guard.post_filter_tool_result", new_async_pass):

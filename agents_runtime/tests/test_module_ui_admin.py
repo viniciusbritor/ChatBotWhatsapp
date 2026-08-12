@@ -312,9 +312,11 @@ class TestEnrichUserConnections:
         asyncio.run(_enrich_user_connections(user))
         assert user["google"]["connected"] is True
         assert user["google"]["email"] == "viniciusbritor@gmail.com"
-        assert user["google"]["services"]["calendar"] is True
-        assert user["google"]["services"]["gmail"] is True
-        assert user["google"]["services"]["drive"] is True
+        svc_by_id = {s["id"]: s["connected"] for s in user["google"]["services"]}
+        assert svc_by_id["calendar"] is True
+        assert svc_by_id["gmail"] is True
+        assert svc_by_id["drive"] is True
+        assert svc_by_id["tasks"] is False  # nao autorizado ainda
 
     def test_google_sem_token(self):
         from main import _enrich_user_connections
@@ -324,21 +326,23 @@ class TestEnrichUserConnections:
 
         asyncio.run(_enrich_user_connections(user))
         assert user["google"]["connected"] is False
+        assert len(user["google"]["services"]) >= 6  # lista dinâmica completa
 
     def test_composio_status_merged(self):
         from main import _enrich_user_connections
 
         fake_status = {
             "phone": "5511966830020",
-            "apps": {"youtube": {"connected": True}, "linkedin": {"connected": False}},
+            "apps": {"youtube": {"connected": True, "name": "YouTube"}, "linkedin": {"connected": False, "name": "LinkedIn"}},
         }
         import asyncio
 
         with patch("tools.composio_connect.get_status", AsyncMock(return_value=fake_status)):
             user = {"phone": "5511966830020"}
             asyncio.run(_enrich_user_connections(user))
-        assert user["composio"]["youtube"] is True
-        assert user["composio"]["linkedin"] is False
+        svc_by_id = {s["id"]: s["connected"] for s in user["composio"]["services"]}
+        assert svc_by_id["youtube"] is True
+        assert svc_by_id["linkedin"] is False
 
 
 class TestOnboardingEndpoints(_AuthFixture):

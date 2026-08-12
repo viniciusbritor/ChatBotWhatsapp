@@ -4,12 +4,16 @@ import { ServiceConnection } from '../../types';
 interface ConnectionsViewProps {
   connections: ServiceConnection[];
   onToggleConnection: (id: string) => void;
+  onAuthorizeGoogle: (phone: string) => void;
+  onAuthorizeComposio: (phone: string) => void;
   searchQuery: string;
 }
 
 export const ConnectionsView: React.FC<ConnectionsViewProps> = ({
   connections,
   onToggleConnection,
+  onAuthorizeGoogle,
+  onAuthorizeComposio,
   searchQuery
 }) => {
   const [selectedUser, setSelectedUser] = useState('+5511966830020');
@@ -58,9 +62,17 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({
 
       {/* Conta Google Section */}
       <div className="space-y-3">
-        <h3 className="text-[20px] font-bold text-[#191b23] dark:text-white">
-          Conta Google
-        </h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-[20px] font-bold text-[#191b23] dark:text-white">
+            Conta Google
+          </h3>
+          <button
+            onClick={() => onAuthorizeGoogle(selectedUser.replace('+', ''))}
+            className="text-[#0058be] font-semibold text-[12px] hover:bg-[#d8e2ff]/30 px-3 py-1 rounded-lg transition-colors border border-[#0058be]/20"
+          >
+            Atualizar permissões
+          </button>
+        </div>
         <div className="flex flex-col gap-3">
           {googleConns.map((conn) => (
             <div
@@ -86,7 +98,16 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({
                   <span className="text-[11px] font-semibold text-[#196b52] tracking-wider">OK</span>
                 </div>
               ) : (
-                <button className="text-[#0058be] font-semibold text-[12px] hover:bg-[#d8e2ff]/30 px-3 py-1 rounded-lg transition-colors border border-[#0058be]/20">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const parts = conn.id.split('__');
+                    const phone = parts[0] || '';
+                    if (conn.category === 'Conta Google') onAuthorizeGoogle(phone);
+                    else onAuthorizeComposio(phone);
+                  }}
+                  className="text-[#0058be] font-semibold text-[12px] hover:bg-[#d8e2ff]/30 px-3 py-1 rounded-lg transition-colors border border-[#0058be]/20"
+                >
                   Conectar
                 </button>
               )}
@@ -125,7 +146,16 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({
                   <span className="text-[11px] font-semibold text-[#196b52] tracking-wider">OK</span>
                 </div>
               ) : (
-                <button className="text-[#0058be] font-semibold text-[12px] hover:bg-[#d8e2ff]/30 px-3 py-1 rounded-lg transition-colors border border-[#0058be]/20 shrink-0">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const parts = conn.id.split('__');
+                    const phone = parts[0] || '';
+                    if (conn.category === 'Conta Google') onAuthorizeGoogle(phone);
+                    else onAuthorizeComposio(phone);
+                  }}
+                  className="text-[#0058be] font-semibold text-[12px] hover:bg-[#d8e2ff]/30 px-3 py-1 rounded-lg transition-colors border border-[#0058be]/20 shrink-0"
+                >
                   Conectar
                 </button>
               )}

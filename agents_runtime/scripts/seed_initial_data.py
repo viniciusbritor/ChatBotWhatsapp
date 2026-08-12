@@ -50,7 +50,15 @@ DEFAULT_AGENTS = [
             "- 'rota/ate/como chegar de A ate B' -> locomotion.calc_route\n"
             "- 'lugares/restaurantes/farmacias perto de X' -> locomotion.search_places\n"
             "- 'clima/tempo/previsao em X' -> weather.current ou weather.forecast\n"
-            "- NAO diga 'nao tenho busca integrada ao Google' — voce TEM o Google Maps via locomotion.*"
+            "- NAO diga 'nao tenho busca integrada ao Google' — voce TEM o Google Maps via locomotion.*\n\n"
+            "## PT11 — Planilhas, Traducao, Contatos, Tarefas, Fotos, OCR (M3)\n"
+            "- 'planilha/Google Sheets/organize em planilha/tabela' -> googlesheets.create_spreadsheet ou googlesheets.write_cells\n"
+            "- 'traduza/traduzir/translate/email em ingles' -> translate.text\n"
+            "- 'contatos/dados de X/telefone de Y/nome na minha agenda' -> people.search\n"
+            "- 'tarefa/lembrete/me lembre/to-do' -> tasks.create\n"
+            "- 'o que esta escrito/leia essa imagem/OCR' -> vision.ocr\n"
+            "- 'fotos/buscar foto/imagem minha' -> photos.search\n"
+            "- Se a tool retornar erro de autorizacao (user_google_oauth_required), diga ao usuario para autorizar em: 'Conecte suas contas aqui: /a/<phone>/conectar'"
         ),
         "skills": [
             "skill-motivacao-pre-reuniao",
@@ -599,6 +607,276 @@ DEFAULT_TOOLS = [
             }
         },
         "implementation": "youtube",
+        "config": {},
+        "enabled": True,
+        "updated_at": _now_iso(),
+    },
+    {
+        "id": "translate.text",
+        "name": "Traduzir texto",
+        "description": "Traduz um texto para outro idioma (default pt).",
+        "function_schema": {
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string"},
+                    "target_lang": {"type": "string"},
+                    "source_lang": {"type": "string"},
+                },
+                "required": ["text"],
+            }
+        },
+        "implementation": "translate",
+        "config": {},
+        "enabled": True,
+        "updated_at": _now_iso(),
+    },
+    {
+        "id": "translate.detect",
+        "name": "Detectar idioma",
+        "description": "Detecta o idioma de um texto.",
+        "function_schema": {
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string"},
+                },
+                "required": ["text"],
+            }
+        },
+        "implementation": "translate",
+        "config": {},
+        "enabled": True,
+        "updated_at": _now_iso(),
+    },
+    {
+        "id": "vision.ocr",
+        "name": "OCR imagem",
+        "description": "Extrai texto de uma imagem via OCR.",
+        "function_schema": {
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "image": {"type": "string"},
+                },
+                "required": ["image"],
+            }
+        },
+        "implementation": "vision",
+        "config": {},
+        "enabled": True,
+        "updated_at": _now_iso(),
+    },
+    {
+        "id": "vision.detect_labels",
+        "name": "Identificar objetos em imagem",
+        "description": "Identifica objetos e categorias em uma imagem.",
+        "function_schema": {
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "image": {"type": "string"},
+                    "max_results": {"type": "integer"},
+                },
+                "required": ["image"],
+            }
+        },
+        "implementation": "vision",
+        "config": {},
+        "enabled": True,
+        "updated_at": _now_iso(),
+    },
+    {
+        "id": "tasks.list",
+        "name": "Listar tarefas",
+        "description": "Lista as tarefas do usuario no Google Tasks.",
+        "function_schema": {
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "phone": {"type": "string"},
+                    "max_results": {"type": "integer"},
+                },
+                "required": ["phone"],
+            }
+        },
+        "implementation": "google_tasks",
+        "config": {},
+        "enabled": True,
+        "updated_at": _now_iso(),
+    },
+    {
+        "id": "tasks.create",
+        "name": "Criar tarefa",
+        "description": "Cria uma nova tarefa no Google Tasks.",
+        "function_schema": {
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "phone": {"type": "string"},
+                    "title": {"type": "string"},
+                    "notes": {"type": "string"},
+                    "due": {"type": "string"},
+                },
+                "required": ["phone", "title"],
+            }
+        },
+        "implementation": "google_tasks",
+        "config": {},
+        "enabled": True,
+        "updated_at": _now_iso(),
+    },
+    {
+        "id": "tasks.update",
+        "name": "Atualizar tarefa",
+        "description": "Atualiza uma tarefa (marca concluida ou renomeia).",
+        "function_schema": {
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "phone": {"type": "string"},
+                    "task_id": {"type": "string"},
+                    "completed": {"type": "boolean"},
+                    "title": {"type": "string"},
+                },
+                "required": ["phone", "task_id"],
+            }
+        },
+        "implementation": "google_tasks",
+        "config": {},
+        "enabled": True,
+        "updated_at": _now_iso(),
+    },
+    {
+        "id": "people.search",
+        "name": "Buscar contatos",
+        "description": "Busca contatos do usuario no Google.",
+        "function_schema": {
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "phone": {"type": "string"},
+                    "query": {"type": "string"},
+                    "page_size": {"type": "integer"},
+                },
+                "required": ["phone", "query"],
+            }
+        },
+        "implementation": "google_people",
+        "config": {},
+        "enabled": True,
+        "updated_at": _now_iso(),
+    },
+    {
+        "id": "people.get_profile",
+        "name": "Perfil do usuario",
+        "description": "Retorna o perfil do proprio usuario autenticado.",
+        "function_schema": {
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "phone": {"type": "string"},
+                },
+                "required": ["phone"],
+            }
+        },
+        "implementation": "google_people",
+        "config": {},
+        "enabled": True,
+        "updated_at": _now_iso(),
+    },
+    {
+        "id": "photos.search",
+        "name": "Buscar fotos",
+        "description": "Busca fotos do usuario no Google Photos.",
+        "function_schema": {
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "phone": {"type": "string"},
+                    "query": {"type": "string"},
+                    "max_results": {"type": "integer"},
+                },
+                "required": ["phone"],
+            }
+        },
+        "implementation": "google_photos",
+        "config": {},
+        "enabled": True,
+        "updated_at": _now_iso(),
+    },
+    {
+        "id": "photos.get_media",
+        "name": "Obter foto",
+        "description": "Retorna uma foto do Google Photos em base64.",
+        "function_schema": {
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "phone": {"type": "string"},
+                    "media_id": {"type": "string"},
+                },
+                "required": ["phone", "media_id"],
+            }
+        },
+        "implementation": "google_photos",
+        "config": {},
+        "enabled": True,
+        "updated_at": _now_iso(),
+    },
+    {
+        "id": "googlesheets.read_cells",
+        "name": "Ler celulas planilha",
+        "description": "Le celulas de uma planilha Google Sheets.",
+        "function_schema": {
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "spreadsheet_id": {"type": "string"},
+                    "range_": {"type": "string"},
+                },
+                "required": ["spreadsheet_id"],
+            }
+        },
+        "implementation": "googlesheets_composio",
+        "config": {},
+        "enabled": True,
+        "updated_at": _now_iso(),
+    },
+    {
+        "id": "googlesheets.write_cells",
+        "name": "Escrever celulas planilha",
+        "description": "Escreve valores em celulas de uma planilha Google Sheets.",
+        "function_schema": {
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "spreadsheet_id": {"type": "string"},
+                    "range_": {"type": "string"},
+                    "values": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}},
+                },
+                "required": ["spreadsheet_id", "range_", "values"],
+            }
+        },
+        "implementation": "googlesheets_composio",
+        "config": {},
+        "enabled": True,
+        "updated_at": _now_iso(),
+    },
+    {
+        "id": "googlesheets.create_spreadsheet",
+        "name": "Criar planilha",
+        "description": "Cria uma nova planilha Google Sheets.",
+        "function_schema": {
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                },
+                "required": ["title"],
+            }
+        },
+        "implementation": "googlesheets_composio",
         "config": {},
         "enabled": True,
         "updated_at": _now_iso(),

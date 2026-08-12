@@ -1509,12 +1509,25 @@ async def admin_users_list(request: Request):
     return JSONResponse(content={"users": users})
 
 
-async def _enrich_user_connections(user: Dict[str, Any]) -> None:
-    """Adiciona google_scopes + composio_apps ao dict do user (P4).
+# Mapa scope-prefixo -> label/icon de servico Google (D1: dinamico).
+# O portal renderiza exatamente o que este mapa gera; adicionar um novo
+# scope em OAUTH_SCOPES + entrada aqui faz o servico aparecer automaticamente.
+_GOOGLE_SERVICE_MAP = [
+    ("calendar", "Google Calendar", "calendar_month"),
+    ("gmail", "Gmail", "mail"),
+    ("drive", "Google Drive", "folder"),
+    ("tasks", "Google Tasks", "checklist"),
+    ("people", "Google Contacts", "people"),
+    ("photos", "Google Photos", "photo_library"),
+]
 
-    - google: conectado, email (do token), e services (calendar/gmail/drive)
-      derivados dos scopes do google_oauth_token no Firestore.
-    - composio: resultado do get_status(phone) com cada app + connected.
+
+async def _enrich_user_connections(user: Dict[str, Any]) -> None:
+    """Adiciona google_scopes + composio_apps ao dict do user (D1).
+
+    - google.services: lista TODOS os servicos Google conhecidos, com
+      status connected/pending baseado nos scopes do token.
+    - composio.services: lista todos os apps Composio (connected ou nao).
     """
     try:
         token = (user.get("google_oauth_token") or {})
@@ -1523,15 +1536,22 @@ async def _enrich_user_connections(user: Dict[str, Any]) -> None:
         user["google"] = {
             "connected": bool(token),
             "email": token.get("email") or user.get("email") or "",
-            "services": {
-                "calendar": "calendar" in scope_str,
-                "gmail": "gmail" in scope_str,
-                "drive": "drive" in scope_str,
-            },
+            "scopes_total": len(OAUTH_SCOPES),
+            "scopes_loaded": len(scopes),
+            "services": [
+                {
+                    "id": svc_id,
+                    "label": label,
+                    "icon": icon,
+                    "connected": svc_id in scope_str,
+                    "needs_scope": True,
+                }
+                for svc_id, label, icon in _GOOGLE_SERVICE_MAP
+            ],
             "scopes": [str(s) for s in scopes],
         }
     except Exception as exc:  # noqa: BLE001
-        user["google"] = {"connected": False, "email": "", "services": {}, "scopes": []}
+        user["google"] = {"connected": False, "email": "", "services": [], "scopes": []}
         logger.debug("enrich_google_skipped phone=%s exc=%s", user.get("phone"), exc)
     try:
         from tools.composio_connect import get_status
@@ -1539,11 +1559,19 @@ async def _enrich_user_connections(user: Dict[str, Any]) -> None:
         status = await get_status(str(user.get("phone") or ""))
         apps = (status or {}).get("apps") or {}
         user["composio"] = {
-            slug: (data or {}).get("connected", False)
-            for slug, data in apps.items()
+            "services": [
+                {
+                    "id": slug,
+                    "label": (data or {}).get("name") or slug,
+                    "icon": "hub",
+                    "connected": bool((data or {}).get("connected")),
+                    "needs_connect": True,
+                }
+                for slug, data in apps.items()
+            ]
         }
     except Exception as exc:  # noqa: BLE001
-        user["composio"] = {}
+        user["composio"] = {"services": []}
         logger.debug("enrich_composio_skipped phone=%s exc=%s", user.get("phone"), exc)
 
 

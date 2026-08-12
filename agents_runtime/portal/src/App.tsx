@@ -87,31 +87,32 @@ function mapConnections(users: any[]): ServiceConnection[] {
   const out: ServiceConnection[] = [];
   users.forEach((u) => {
     const phone = u.phone || u.id || '';
+    // Google — itera a lista dinâmica retornada pelo backend
     const g = u.google || {};
-    const googleSvcs: { key: string; name: string; desc: string; icon: string }[] = [
-      { key: 'calendar', name: 'Agenda (Google Calendar)', desc: 'Ver e criar compromissos', icon: 'calendar_month' },
-      { key: 'gmail', name: 'Email (Gmail)', desc: 'Ler e enviar emails', icon: 'mail' },
-      { key: 'drive', name: 'Arquivos (Google Drive)', desc: 'Buscar e ler documentos', icon: 'folder' },
-    ];
-    googleSvcs.forEach((svc) => {
+    (g.services || []).forEach((svc: any) => {
       out.push({
-        id: `${phone}__google__${svc.key}`,
-        name: svc.name,
+        id: `${phone}__google__${svc.id}`,
+        name: svc.label || svc.id,
         category: 'Conta Google',
-        description: `${svc.desc} · ${phone}`,
-        status: g.services && g.services[svc.key] ? 'OK' : 'Desconectado',
-        icon: svc.icon,
+        description: svc.connected
+          ? `Conectado · ${phone}`
+          : `Pendente — clique para autorizar · ${phone}`,
+        status: svc.connected ? 'OK' : 'Desconectado',
+        icon: svc.icon || 'cloud',
       });
     });
+    // Composio — itera a lista dinâmica retornada pelo backend
     const comp = u.composio || {};
-    Object.entries(comp).forEach(([slug, connected]) => {
+    (comp.services || []).forEach((svc: any) => {
       out.push({
-        id: `${phone}__composio__${slug}`,
-        name: slug,
+        id: `${phone}__composio__${svc.id}`,
+        name: svc.label || svc.id,
         category: 'Outros serviços',
-        description: `${slug} · ${phone}`,
-        status: connected ? 'OK' : 'Desconectado',
-        icon: 'hub',
+        description: svc.connected
+          ? `Conectado · ${phone}`
+          : `Pendente — clique para autorizar · ${phone}`,
+        status: svc.connected ? 'OK' : 'Desconectado',
+        icon: svc.icon || 'hub',
       });
     });
   });
@@ -203,6 +204,28 @@ export default function App() {
     setConnections((prev) =>
       prev.map((c) => (c.id === id ? { ...c, status: c.status === 'OK' ? 'Desconectado' : 'OK' } : c))
     );
+  };
+
+  const authorizeGoogle = (phone: string) => {
+    const base = window.location.origin;
+    window.open(`${base}/oauth/google?phone=${encodeURIComponent(phone)}`, '_blank');
+  };
+
+  const authorizeComposio = async (phone: string) => {
+    try {
+      const base = window.location.origin;
+      const res: any = await api(`${base}/a/${encodeURIComponent(phone)}/composio`, { method: 'POST' });
+      const links = (res && res.links) || [];
+      const pendentes = links.filter((l: any) => l.url);
+      if (pendentes.length) {
+        alert(`Abra ${pendentes.length} aba(s) para autorizar cada app.`);
+        pendentes.forEach((l: any) => window.open(l.url, '_blank'));
+      } else {
+        alert('Todos os apps já estão conectados! ✅');
+      }
+    } catch (e: any) {
+      alert('Erro ao iniciar Composio: ' + e.message);
+    }
   };
 
   const handleReindexCategory = (catId: string) => {
@@ -322,6 +345,8 @@ export default function App() {
             <ConnectionsView
               connections={connections}
               onToggleConnection={handleToggleConnection}
+              onAuthorizeGoogle={authorizeGoogle}
+              onAuthorizeComposio={authorizeComposio}
               searchQuery={searchQuery}
             />
           )}
