@@ -1375,6 +1375,59 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
             "required": ["group_jid"],
         },
     },
+    "group.list_members": {
+        "function": group.list_members,
+        "implementation": "group",
+        "description": "Lista membros do grupo (nome, telefone, papel) para identificar pessoas. USO INTERNO - nunca exponha telefone/LID/papel na resposta ao usuario.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "group_jid": {"type": "string", "description": "JID do grupo WhatsApp"},
+            },
+            "required": ["group_jid"],
+        },
+    },
+    "group.sync_members": {
+        "function": group.sync_group_members,
+        "implementation": "group",
+        "description": "Sincroniza o snapshot de membros de todos os grupos da instancia via Evolution API.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "instance": {"type": "string", "description": "Nome da instancia (default Jennifer)"},
+            },
+            "required": [],
+        },
+    },
+    "group.save_fact": {
+        "function": group.save_fact,
+        "implementation": "group",
+        "description": "Salva um fato que um membro revelou PUBLICAMENTE no grupo. So membros presentes viram witness. Use quando um membro compartilhar info pessoal no grupo.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "revealer_phone": {"type": "string", "description": "Telefone de quem revelou o fato"},
+                "group_jid": {"type": "string", "description": "JID do grupo"},
+                "fact": {"type": "string", "description": "O fato revelado publicamente"},
+                "revealer_name": {"type": "string", "description": "Nome de quem revelou (opcional)"},
+            },
+            "required": ["revealer_phone", "group_jid", "fact"],
+        },
+    },
+    "group.search_facts": {
+        "function": group.search_facts,
+        "implementation": "group",
+        "description": "Busca fatos publicos de grupos onde o usuario presenciou a revelacao. Use para responder perguntas sobre membros com info ja compartilhada no grupo.",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string", "description": "Telefone do usuario"},
+                "query": {"type": "string", "description": "Termo de busca (opcional)"},
+                "limit": {"type": "integer", "description": "Maximo de fatos (default 10)"},
+            },
+            "required": ["phone"],
+        },
+    },
     "rag.search_knowledge": {
         "function": _rag_search_knowledge,
         "implementation": "rag",

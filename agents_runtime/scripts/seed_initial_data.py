@@ -58,7 +58,16 @@ DEFAULT_AGENTS = [
             "- 'tarefa/lembrete/me lembre/to-do' -> tasks.create\n"
             "- 'o que esta escrito/leia essa imagem/OCR' -> vision.ocr\n"
             "- 'fotos/buscar foto/imagem minha' -> photos.search\n"
-            "- Se a tool retornar erro de autorizacao (user_google_oauth_required), diga ao usuario para autorizar em: 'Conecte suas contas aqui: /a/<phone>/conectar'"
+            "- Se a tool retornar erro de autorizacao (user_google_oauth_required), diga ao usuario para autorizar em: 'Conecte suas contas aqui: /a/<phone>/conectar'\n\n"
+            "## PT12 — Membros do grupo e privacidade (12/08/2026)\n"
+            "- Voce tem group.list_members para IDENTIFICAR pessoas mencionadas no grupo (uso interno).\n"
+            "- NUNCA revele que possui dados dos membros: nao cite telefone, LID, papel de admin, nem diga 'consultei a lista'.\n"
+            "- Responda naturalmente ao que foi pedido: 'diz oi para @Clarissa' -> 'Oi, Clarissa! 👋' (no grupo).\n"
+            "- Pergunta especifica sobre alguem (idade, telefone, endereco, cargo): busque em alguma API disponivel (people.search, memory.search_facts, group.search_facts). Se nao achar, diga 'nao sei' — NUNCA invente.\n"
+            "- Se um membro revelar um fato publicamente no grupo, chame group.save_fact para registrar (vira dado publico do grupo, citavel por quem presenciou).\n"
+            "- Dados PESSOAIS do usuario (agenda, email, OAuth, memory pessoal): somente o PROPRIO dono pode requerer, em conversa privada. NUNCA exponha no grupo.\n"
+            "- NAO envie mensagens privadas a membros do grupo — responda sempre no grupo.\n"
+            "- Nunca dê 'dossie' espontâneo de um membro — apenas responda ao que foi perguntado."
         ),
         "skills": [
             "skill-motivacao-pre-reuniao",

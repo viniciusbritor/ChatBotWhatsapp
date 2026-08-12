@@ -202,6 +202,40 @@ async def _finalize_orchestration(
     return result
 
 
+async def _user_groups_context(phone: str) -> str:
+    """Gera contexto de grupos em comum (G3): 'você e X estão nos grupos Y, Z'.
+
+    Consulta a collection group_members (collection group query por
+    member_phones array_contains) e retorna uma string descritiva para o
+    prompt. Retorna "" quando nao ha grupos ou erro.
+    """
+    try:
+        from google.cloud import firestore
+
+        project = os.getenv("GCP_PROJECT") or os.getenv("GCLOUD_PROJECT")
+        if not project or os.getenv("FIRESTORE_EMULATOR_HOST"):
+            return ""
+        db = firestore.Client(project=project)
+        digits = "".join(c for c in str(phone or "") if c.isdigit())
+        if not digits:
+            return ""
+        docs = (
+            db.collection_group("group_members")
+            .where("member_phones", "array_contains", digits)
+            .stream()
+        )
+        groups = []
+        for d in docs:
+            data = d.to_dict() or {}
+            groups.append(data.get("subject") or data.get("group_jid") or d.id)
+        if not groups:
+            return ""
+        return f"Grupos em comum com o usuario: {', '.join(groups)}"
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("user_groups_context_skipped phone=%s exc=%s", phone, exc)
+        return ""
+
+
 async def _user_has_any_connection(phone: str):
     """True se o user ja tem OAuth Google OU alguma conexao Composio.
 
@@ -1957,12 +1991,26 @@ async def _setup_nickname_consent(payload: dict, first_name: str, phone: str) ->
 
 
 async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
+    _orchestrate_started = time.monotonic()
     instance = payload.get("instance", "jennifer")
     phone = payload.get("phone", "")
     text = payload.get("text", "")
     sender_name = payload.get("sender_name", "user")
     extra = payload.get("extra", {}) or {}
 
+    try:
+        result = await _orchestrate_inner(payload, instance, phone, text, sender_name, extra)
+    finally:
+        _elapsed = round((time.monotonic() - _orchestrate_started) * 1000, 2)
+        logger.info(
+            "orchestration_timing instance=%s phone=%s total_ms=%d",
+            instance, phone, _elapsed,
+        )
+    return result
+
+
+async def _orchestrate_inner(payload: Dict[str, Any], instance: str, phone: str,
+                             text: str, sender_name: str, extra: Dict[str, Any]) -> Dict[str, Any]:
     _tracker = new_tracker()
     set_current_tracker(_tracker)
     _tracker.add_costs(deepseek_input_tokens=0, deepseek_output_tokens=0)
@@ -2588,6 +2636,13 @@ async def _execute_agent(
     except Exception as exc:
         logger.warning("memory_facts_failed agent_id=%s exc=%s", agent_id, exc)
 
+    group_ctx = ""
+    try:
+        if phone:
+            group_ctx = await _user_groups_context(phone)
+    except Exception as exc:
+        logger.warning("user_groups_context_failed agent_id=%s exc=%s", agent_id, exc)
+
     mem_rag = ""
     try:
         mem_rag = await _search_memory(phone, text, limit=5) or ""
@@ -2597,7 +2652,9 @@ async def _execute_agent(
     recent = [i for i in _interaction_history[-4:] if i.get("phone") == phone]
     ctx_parts = []
     if facts:
-        ctx_parts.insert(0, f"[FATOS DO USUARIO - NAO pergunte novamente]\n{facts}")
+        ctx_parts.insert(0, f"[FATOS DO USUARIO - NAO perguntar novamente]\n{facts}")
+    if group_ctx:
+        ctx_parts.append(group_ctx)
     if mem_rag:
         ctx_parts.append(f"[MEMORIA RAG - CONVERSAS RELEVANTES]\n{mem_rag}")
     if recent:

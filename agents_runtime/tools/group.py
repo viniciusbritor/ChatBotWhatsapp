@@ -334,6 +334,258 @@ async def get_group_info(group_jid: str) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Snapshot de membros (G1/G5): group_members/{group_jid} com dados completos
+# ---------------------------------------------------------------------------
+
+_GROUP_MEMBERS_CACHE: Dict[str, tuple] = {}
+_GROUP_MEMBERS_TTL_SEC = 300
+
+
+def _owner_hash(phone: str) -> str:
+    digits = "".join(c for c in str(phone or "") if c.isdigit())
+    return hashlib.sha256(digits.encode("utf-8")).hexdigest()[:32]
+
+
+def _evolution_headers() -> Dict[str, str]:
+    import os as _os
+    from google.cloud import secretmanager
+    key = _os.getenv("EVOLUTION_API_KEY", "").strip()
+    if not key:
+        try:
+            name = f"projects/{_os.getenv('GCP_PROJECT', 'coherence-ominichannel-fs')}/secrets/evolution-api-key/versions/latest"
+            resp = secretmanager.SecretManagerServiceClient().access_secret_version(request={"name": name})
+            key = resp.payload.data.decode("utf-8-sig").strip()
+        except Exception as exc:
+            logger.warning("evolution key load failed: %s", exc)
+    return {"apikey": key, "Content-Type": "application/json"}
+
+
+async def sync_group_members(instance: str = "Jennifer") -> Dict[str, Any]:
+    """Busca todos os grupos na Evolution e salva snapshot em group_members.
+
+    Usa GET /group/fetchAllGroups/{instance}?getParticipants=true que retorna
+    LID, phoneNumber e admin de cada participante. O nome (pushName) e
+    enriquecido depois via mensagens (enrich_member_name).
+    """
+    import httpx
+
+    db = _get_firestore()
+    if db is None:
+        return {"error": "firestore_unavailable"}
+    base = os.getenv("EVO_BASE_URL", "https://evolution.coherenceai.com.br").rstrip("/")
+    headers = _evolution_headers()
+    if not headers.get("apikey"):
+        return {"error": "evolution_api_key_not_configured"}
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.get(
+                f"{base}/group/fetchAllGroups/{instance}",
+                params={"getParticipants": "true"},
+                headers=headers,
+            )
+            if resp.status_code >= 400:
+                return {"error": f"evolution_http_{resp.status_code}"}
+            groups = resp.json() or []
+    except Exception as exc:
+        logger.warning("sync_group_members evolution error: %s", exc)
+        return {"error": str(exc)[:200]}
+
+    synced = 0
+    for grp in groups:
+        gid = str(grp.get("id") or "")
+        if not gid:
+            continue
+        subject = str(grp.get("subject") or "")
+        participants = grp.get("participants") or []
+        members = []
+        phones = []
+        for p in participants:
+            phone = str((p.get("phoneNumber") or "").split("@")[0])
+            lid = str(p.get("id") or "")
+            admin = str(p.get("admin") or "") or None
+            if not phone and not lid:
+                continue
+            members.append({
+                "lid": lid,
+                "phone": phone,
+                "name": _cached_member_name(gid, phone),
+                "admin": admin,
+            })
+            if phone:
+                phones.append(phone)
+        try:
+            ref = db.collection("group_members").document(gid.replace("/", "_"))
+            ref.set({
+                "group_jid": gid,
+                "subject": subject,
+                "member_phones": phones,
+                "members": members,
+                "updated_at": _now_iso(),
+            }, merge=True)
+            _GROUP_MEMBERS_CACHE[gid] = (phones, _now_iso())
+            synced += 1
+        except Exception as exc:
+            logger.warning("sync_group_members save %s error: %s", gid, exc)
+    return {"synced_groups": synced, "groups": len(groups)}
+
+
+def _cached_member_name(group_jid: str, phone: str) -> str:
+    """Retorna nome cached (se houver) de um membro num grupo."""
+    try:
+        db = _get_firestore()
+        if db is None:
+            return ""
+        doc = db.collection("group_members").document(group_jid.replace("/", "_")).get()
+        if doc.exists:
+            for m in doc.to_dict().get("members", []):
+                if m.get("phone") == phone and m.get("name"):
+                    return m.get("name", "")
+    except Exception:
+        pass
+    return ""
+
+
+def _group_member_phones(group_jid: str) -> List[str]:
+    """Phone dos membros atuais do grupo (cache 300s)."""
+    cached = _GROUP_MEMBERS_CACHE.get(group_jid)
+    if cached and cached[1]:
+        return cached[0]
+    try:
+        db = _get_firestore()
+        if db is None:
+            return []
+        doc = db.collection("group_members").document(group_jid.replace("/", "_")).get()
+        if doc.exists:
+            phones = doc.to_dict().get("member_phones", [])
+            _GROUP_MEMBERS_CACHE[group_jid] = (phones, _now_iso())
+            return phones
+    except Exception:
+        pass
+    return []
+
+
+async def list_members(group_jid: str) -> List[Dict[str, Any]]:
+    """Lista membros do grupo com dados disponiveis (uso interno da LLM)."""
+    try:
+        db = _get_firestore()
+        if db is None:
+            return []
+        doc = db.collection("group_members").document(group_jid.replace("/", "_")).get()
+        if doc.exists:
+            return doc.to_dict().get("members", [])
+    except Exception as exc:
+        logger.warning("list_members error: %s", exc)
+    return []
+
+
+async def enrich_member_name(group_jid: str, phone: str, name: str) -> bool:
+    """Atualiza o nome (pushName) de um membro no snapshot do grupo."""
+    if not group_jid or not phone or not name:
+        return False
+    db = _get_firestore()
+    if db is None:
+        return False
+    try:
+        ref = db.collection("group_members").document(group_jid.replace("/", "_"))
+        doc = ref.get()
+        if not doc.exists:
+            return False
+        members = doc.to_dict().get("members", [])
+        updated = False
+        for m in members:
+            if m.get("phone") == phone and m.get("name") != name:
+                m["name"] = name
+                updated = True
+        if updated:
+            ref.update({"members": members, "updated_at": _now_iso()})
+        return updated
+    except Exception as exc:
+        logger.warning("enrich_member_name error: %s", exc)
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Fatos publicos do grupo (G7): group_facts com witness_hashes (so quem viu)
+# ---------------------------------------------------------------------------
+
+def _group_facts_collection():
+    return "group_facts"
+
+
+async def save_fact(revealer_phone: str, group_jid: str, fact: str, revealer_name: str = "") -> Dict[str, Any]:
+    """Salva um fato revelado PUBLICAMENTE num grupo.
+
+    Apenas membros ATUAIS do grupo ficam como witness (presentes no momento).
+    O fato e consultavel apenas por quem tem o owner_hash em witness_hashes.
+    """
+    fact = str(fact or "").strip()
+    if not fact or not group_jid or not revealer_phone:
+        return {"error": "fact_group_and_revealer_required"}
+    db = _get_firestore()
+    if db is None:
+        return {"error": "firestore_unavailable"}
+    try:
+        phones = _group_member_phones(group_jid)
+        if not phones:
+            await sync_group_members()
+            phones = _group_member_phones(group_jid)
+        witness_hashes = [_owner_hash(p) for p in phones] if phones else [_owner_hash(revealer_phone)]
+        doc_id = hashlib.sha256(
+            f"fact:{group_jid}:{fact[:100]}:{_now_iso()}".encode("utf-8")
+        ).hexdigest()[:32]
+        db.collection(_group_facts_collection()).document(doc_id).set({
+            "fact": fact[:2000],
+            "group_jid": group_jid,
+            "revealed_by": _owner_hash(revealer_phone),
+            "revealed_by_name": revealer_name,
+            "witness_hashes": witness_hashes,
+            "created_at": _now_iso(),
+        })
+        return {"fact_id": doc_id, "witnesses": len(witness_hashes)}
+    except Exception as exc:
+        logger.warning("save_fact error: %s", exc)
+        return {"error": str(exc)[:200]}
+
+
+async def search_facts(phone: str, query: str = "", limit: int = 10) -> Dict[str, Any]:
+    """Busca fatos publicos de grupos onde o user PRESENCIOU a revelacao.
+
+    1 query: group_facts WHERE witness_hashes ARRAY_CONTAINS hash(phone).
+    """
+    if not phone:
+        return {"facts": [], "count": 0}
+    db = _get_firestore()
+    if db is None:
+        return {"facts": [], "count": 0}
+    try:
+        h = _owner_hash(phone)
+        docs = (
+            db.collection(_group_facts_collection())
+            .where("witness_hashes", "array_contains", h)
+            .limit(limit)
+            .stream()
+        )
+        facts = []
+        for d in docs:
+            data = d.to_dict()
+            txt = data.get("fact", "")
+            if query:
+                ql = query.lower()
+                if ql not in txt.lower() and ql not in (data.get("revealed_by_name") or "").lower():
+                    continue
+            facts.append({
+                "fact": txt,
+                "group_jid": data.get("group_jid", ""),
+                "revealed_by": data.get("revealed_by_name") or data.get("revealed_by", ""),
+                "created_at": data.get("created_at", ""),
+            })
+        return {"facts": facts, "count": len(facts)}
+    except Exception as exc:
+        logger.warning("search_facts error: %s", exc)
+        return {"facts": [], "count": 0, "error": str(exc)[:120]}
+
+
+# ---------------------------------------------------------------------------
 # Group RAG (F4): index/search knowledge per group with OpenAI embeddings
 # ---------------------------------------------------------------------------
 
