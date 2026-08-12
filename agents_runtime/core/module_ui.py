@@ -863,7 +863,8 @@ function errHtml(msg, status) {
   const icon   = isAuth ? 'lock' : 'error';
   const color  = isAuth ? 'var(--bad)' : 'var(--warn)';
   const extra  = isAuth
-    ? '<p style="margin-top:8px"><a href="' + location.origin + '/" style="font-weight:600">Clique aqui para fazer login novamente</a></p>'
+    ? '<p style="margin-top:8px;font-size:13px">Sua sessão expirou. Volte à página inicial '
+      + 'do Portal Coherence, faça login novamente e abra este painel.</p>'
     : '';
   return (
     '<div class="empty-state">'
@@ -1088,7 +1089,7 @@ function renderConexoes(root) {
 function refreshComposioState(phone) {
   api('/api/v1/composio/status?phone=' + encodeURIComponent(phone))
     .then(data => {
-      const el = document.getElementById('composio-state-' + escapeHtml(phone));
+      const el = document.getElementById('composio-state-' + esc(phone));
       if (!el) return;
       const apps = (data && data.apps) || {};
       const slugs = Object.keys(apps);
@@ -1096,15 +1097,9 @@ function refreshComposioState(phone) {
       el.textContent = connected + '/' + slugs.length + ' apps conectados';
     })
     .catch(() => {
-      const el = document.getElementById('composio-state-' + escapeHtml(phone));
+      const el = document.getElementById('composio-state-' + esc(phone));
       if (el) el.textContent = 'erro ao consultar';
     });
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
-  );
 }
 
 async function conectarComposio(phone) {
@@ -1133,15 +1128,37 @@ function renderPermissoes(root) {
   root.innerHTML = panelHtml('Permissões', 'Configuração de acesso aos serviços Google', null, skel(1));
   const phone = CALLER_PHONE;
   if (!phone) { setTabBody(errHtml('Sem telefone de usuário identificado.', null)); return; }
-  api('/admin/users/' + encodeURIComponent(phone)).then(data => {
-    const fp = data.folder_permissions || {};
+  api('/admin/users/' + encodeURIComponent(phone) + '/folder-permissions').then(data => {
+    const perms = data.permissions || [];
+    if (!perms.length) {
+      setTabBody(emptyHtml('Nenhuma permissão', 'Nenhuma permissão de pasta configurada para ' + phone + '.'));
+      return;
+    }
     setTabBody(
-      '<div class="card">'
-      + '<h3>Permissões de Pasta — Google Drive</h3>'
-      + '<pre class="json-view">' + esc(JSON.stringify(fp, null, 2)) + '</pre>'
+      '<div id="list">'
+      + perms.map(p => (
+        '<div class="card">'
+        + '<h3>' + esc(p.pattern || p.folder_id || p.id || '*') + '</h3>'
+        + '<div class="meta">'
+        + '<span class="tag ' + (String(p.scope).toLowerCase() === 'whitelist' ? 'good' : 'warn') + '">' + esc(p.scope || 'whitelist') + '</span>'
+        + '<span>' + esc(p.description || '') + '</span>'
+        + '</div>'
+        + '<div class="actions-inline" style="margin-top:12px">'
+        + '<button class="secondary danger" onclick="revokePermission(' + JSON.stringify(esc(phone)) + ',' + JSON.stringify(esc(p.id)) + ')">Revogar</button>'
+        + '</div>'
+        + '</div>'
+      )).join('')
       + '</div>'
     );
   }).catch(e => setTabBody(errHtml(e.message, e.status)));
+}
+
+function revokePermission(phone, permissionId) {
+  if (!permissionId) return;
+  if (!confirm('Revogar permissão ' + permissionId + '?')) return;
+  api('/admin/users/' + encodeURIComponent(phone) + '/folder-permissions/' + encodeURIComponent(permissionId), { method: 'DELETE' })
+    .then(() => { toast('Permissão revogada', 'good'); _reloadCurrentTab(); })
+    .catch(e => toast('Erro ao revogar: ' + e.message, 'warn'));
 }
 
 /* -- Knowledge -- */
@@ -1156,24 +1173,44 @@ function renderKnowledge(root) {
     if (!list.length) { setTabBody(emptyHtml('Base vazia', 'Nenhum documento indexado.', CALLER_ROLE === 'admin' ? '+ Upload' : null, 'uploadKnowledge()')); return; }
     setTabBody(
       '<div id="knowledge-list">'
-      + list.map(d => (
-        '<div class="card">'
-        + '<h3>' + esc(d.source_title || d.title || d.id) + '</h3>'
+      + list.map(d => {
+        const title = d.source_title || d.title || d.id;
+        return (
+        '<div class="card clickable" onclick="viewKnowledgeDetail(' + JSON.stringify(esc(title)) + ')">'
+        + '<div class="card-title-row"><h3>' + esc(title) + '</h3>'
+        + '<span class="tag">' + (d.chunk_count || 0) + ' chunks</span></div>'
         + '<div class="meta">'
         + (d.class ? '<span class="tag">' + esc(d.class) + '</span>' : '')
         + (d.group ? '<span class="tag">' + esc(d.group) + '</span>' : '')
-        + (d.chunk_count ? '<span>' + d.chunk_count + ' chunks</span>' : '')
+        + (d.text ? '<span>' + esc(String(d.text).substring(0, 80)) + '…</span>' : '')
         + '</div>'
         + (CALLER_ROLE === 'admin'
             ? '<div class="actions-inline" style="margin-top:12px">'
-              + '<button class="secondary danger" onclick="delKnowledge(' + JSON.stringify(esc(d.id || d.source_title)) + ')">Excluir</button>'
+              + '<button class="secondary" onclick="event.stopPropagation();viewKnowledgeDetail(' + JSON.stringify(esc(title)) + ')">Ver</button>'
+              + '<button class="secondary danger" onclick="event.stopPropagation();delKnowledge(' + JSON.stringify(esc(title)) + ')">Excluir</button>'
               + '</div>'
             : '')
         + '</div>'
-      )).join('')
+        );
+      }).join('')
       + '</div>'
     );
   }).catch(e => setTabBody(errHtml(e.message, e.status)));
+}
+
+function viewKnowledgeDetail(sourceTitle) {
+  if (!sourceTitle) return;
+  openDrawer('Documento — ' + sourceTitle, [
+    { name: 'chunks', label: 'Conteúdo (chunks)', type: 'textarea', rows: 20, value: 'Carregando…' },
+  ], async () => { closeDrawer(); return true; });
+  api('/admin/knowledge/' + encodeURIComponent(sourceTitle)).then(data => {
+    const doc = data.document || {};
+    const chunks = (doc.chunks || []).map(c =>
+      '[' + c.chunk_index + '] ' + (c.text || '')
+    ).join('\n\n---\n\n');
+    const el = document.getElementById('fld-chunks');
+    if (el) el.value = chunks || '(vazio)';
+  }).catch(e => { toast('Erro ao carregar doc: ' + e.message, 'warn'); closeDrawer(); });
 }
 
 /* -- Status -- */
@@ -1454,7 +1491,7 @@ function toolEdit(id) {
       { name: 'name', label: 'Nome', value: t.name },
       { name: 'description', label: 'Descrição', type: 'textarea', rows: 3, value: t.description },
       { name: 'implementation', label: 'Implementação (módulo)', value: t.implementation },
-      { name: 'function_schema', label: 'Function Schema (JSON)', type: 'textarea', rows: 10, value: JSON.stringify(t.function_schema || t.function_schema || {}, null, 2) },
+      { name: 'function_schema', label: 'Function Schema (JSON)', type: 'textarea', rows: 10, value: JSON.stringify(t.function_schema || t.schema || {}, null, 2) },
       { name: 'config', label: 'Config (JSON)', type: 'textarea', rows: 6, value: JSON.stringify(t.config || {}, null, 2) },
     ], async payload => {
       try {
