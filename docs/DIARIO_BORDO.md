@@ -4314,3 +4314,29 @@ Correcoes (commit 958cb31):
 
 Resolve o caso 'Emporio Alto Pinheiro': agora a Jennifer tem a tool
 locomotion.find_place disponivel e o prompt a instrui a usala.
+
+## 11/08/2026 (23:00 BRT) - Reconstrucao completa modulo agents (loop fases)
+
+Plano unico executado em 6 fases com testes em cada uma (commit f048b5d):
+
+P1 - Tools DINAMICAS: agent sem 'tools' usa todas do tool_registry.
+     _resolve_agent_tools() - conectar app no Composio libera a tool
+     automaticamente, sem backfill/seed manual. Seed jennifier omite
+     'tools'. Backfill removeu o campo do Firestore.
+P2 - Anti-alucinacao: _verify_calendar_event() apos create_event consulta
+     a agenda e confirma presenca. Prompt manager-calendar ANTI-
+     ALUCINACAO. Log tool_invocation_result com status/duration.
+P3 - Portal 7 bugs: renderPermissoes (endpoint correto), errHtml link
+     morto, knowledge cards clicaveis + view chunks, esc unificado,
+     toolEdit fallback, delKnowledge source_title.
+P4 - Conexoes detalhada: /admin/users enriquecido com google.services
+     (calendar/gmail/drive) + composio.{slug:connected}. Cards por user.
+P5 - Onboarding: GET /a/{phone}/conectar (pagina 2 botoes) +
+     POST /a/{phone}/composio (links todos pendentes). PUBLIC_PATHS /a.
+     orchestrator injeta link quando tool exige OAuth.
+P6 - Limpeza.
+
+Suite: 1093 passed, 0 failures. E2E validado no ar:
+- /a/5511966830020/conectar: 'Google ja conectado' + 'Conectar TODOS'
+- /a/5511966830020/composio: 3 links pendentes, 10 ja conectados
+- /admin/ping sem token: HTTP 403 (auth preservada)
