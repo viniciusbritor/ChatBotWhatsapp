@@ -4370,3 +4370,26 @@ M4 - Portal React (Google AI Studio Stitch) servido no Cloud Run:
 - cloudbuild-test.yaml builda o React (node:22-slim) antes do docker
 
 Suite: 1111 passed, 0 failures. E2E no ar: /portal/ 200, redirect 307.
+
+## 11/08/2026 (23:00 BRT) - Portal dinamico + backfill 14 tools + acks contextualizados
+
+Commit 4ef9084 (branch fix/dynamic-portal).
+
+Problema: novas APIs (M3) nao apareciam no portal Conexoes e o LLM nao
+as usava. 3 causas:
+1. Tools nao registradas no Firestore (DEFAULT_TOOLS so tinha 11; faltavam
+   14 do M3). Backfill rodado: total 53 tools no Firestore.
+2. _enrich_user_connections hardcoded com 3 servicos Google. Agora deriva
+   de _GOOGLE_SERVICE_MAP (6 servicos: calendar/gmail/drive/tasks/people/
+   photos) - dinamico, novo scope aparece automaticamente.
+3. LLM nao instruido: seed ganhou PT11 (planilhas/traducao/contatos/
+   tarefas/fotos/OCR + link de autorizacao).
+
+Tambem:
+- Portal React: mapConnections itera listas dinamicas; botao 'Conectar'
+  real (Google OAuth / Composio) + 'Atualizar permissoes'.
+- _ack.py: acks contextualizados (sheets/translate/tasks/people/photos/
+  vision/places/youtube/docs/maps/weather).
+
+E2E no ar: /admin/users retorna 6 servicos Google + 12 apps Composio.
+Suite: 1111 passed, 0 failures. Portal serve build novo.
