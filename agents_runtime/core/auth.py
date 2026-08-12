@@ -28,8 +28,14 @@ def get_sa_token() -> str:
 
 def is_path_protected(path: str) -> bool:
     """Check if path requires Bearer SA token."""
-    if any(path.startswith(p) for p in PUBLIC_PATHS):
-        return False
+    for p in PUBLIC_PATHS:
+        if p == "/a":
+            # /a e prefixo de onboarding; nao pode capturar /admin
+            if path == "/a" or path.startswith("/a/"):
+                return False
+            continue
+        if path.startswith(p):
+            return False
     return any(path.startswith(p) for p in PROTECTED_PATHS)
 
 
