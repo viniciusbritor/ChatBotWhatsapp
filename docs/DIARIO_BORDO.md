@@ -1,5 +1,62 @@
 # Diario de Bordo — ChatBotWhatsapp
 
+## 12/08/2026 (16:00 BRT) — Otimização Jennifer: denormalização group_memberships + cache TTL + limpeza de coleções mortas
+
+### Contexto
+Otimização de latência do `_user_groups_context` (contexto de "grupos em
+comum", G3). Diagnóstico: a collection-group query legada
+(`group_members/member_phones array_contains`) **não tinha índice composto**
+(nem no firestore.indexes.json nem em prod) — ou seja, falhava
+silenciosamente em toda mensagem, pagando latência de query + `firestore.Client()`
+inline por chamada sem funcionalidade nenhuma.
+
+### Camada 1 — Denormalização write-time (inverte o índice)
+- `tools/group.py::sync_group_members` agora, além do snapshot forward
+  `group_members/{gid}`, grava o índice inverso
+  `usuarios/{phone}.group_memberships = [{gid, subject}]` via
+  `set(merge=True)` (nunca sobrescreve OAuth). Helper
+  `_write_user_group_memberships`.
+- `orchestrator._user_groups_context` vira 1 `doc.get()` em
+  `usuarios/{canonical}` (fallback legado **removido de vez**). Usa
+  `core.message_ledger._get_firestore` (zero `Client()` inline) +
+  `asyncio.to_thread`.
+- `agent_loader.list_users` filtra docs "fantasma" (só `group_memberships`)
+  para o Portal não listar membros de grupo que nunca interagiram.
+- Backfill `scripts/backfill_group_memberships.py` (padrão backfill_*,
+  `--dry-run`).
+
+### Camada 2 — Cache in-memory TTL
+- Novo `core/user_groups_cache.py`: dict `{phone: (ts, ctx)}`, TTL 300s
+  (`USER_GROUPS_CACHE_TTL_SEC`), `time.monotonic()`, cacheia inclusive `""`
+  (win do DM). Invalidação só no sync (sem circular import).
+
+### Camada 3 — Limpeza de referências mortas
+Estado real do Firestore: só `knowledge-database` (320) e `message-history`
+(1000+) têm dados. Removidas as referências às coleções mortas:
+- `tool_registry._delete_knowledge` apagava `agent-knowledge-v2`/`-plain`
+  (mortas) → agora apaga `knowledge-database` (scope=private).
+- `core/lgpd.py` `RAG_MEMORY_COLLECTION` → `message-history` e
+  `RAG_PRIVATE_COLLECTION` → `knowledge-database` (+ filtro `scope=="private"`).
+  LGPD export/erase passa a cobrir os dados reais. Retenção de memória
+  manual removida (message-history usa TTL nativo).
+- `cloudbuild-test.yaml`: removidos 8 steps de índices mortos
+  (agent-knowledge-v2/sections) + env `RAG_PRIVATE_COLLECTION=knowledge-database`.
+- `firestore.indexes.json`: removidos 9 índices mortos; `tests/test_firestore_indexes.py`
+  reescrito para knowledge-database + guardrail contra coleções mortas.
+- Docstrings/prompts corrigidos (rag.py, main.py, pdf_handler,
+  seed_initial_data, jennifier.yaml, smoke_e2e/smoke_access_rule).
+- Scripts mortos deletados: `populate_sections.py`, `reindex_golden_set.py`,
+  `backfill_owner_embeddings.py` (+ teste de existência removido).
+
+### Validação
+- Suite completa verde: 1130 passed, 5 skipped, 1 xpassed.
+- Novos testes: `test_user_groups_context.py` (7) + `test_sync_group_members_grava_indice_inverso`.
+- `check_lgpd_compliance.py` passa.
+- Deploy: push em `test` → trigger 2nd-gen `deploy-agents-runtime-test` (us-central1).
+
+### Pendência
+- Rodar backfill pós-deploy: `python scripts/backfill_group_memberships.py --dry-run` → real.
+
 ## 10/08/2026 (21:30 BRT) — calendar.move_event + memory per-user no grupo (FASE 1+2 do plano geral)
 
 ### Contexto
