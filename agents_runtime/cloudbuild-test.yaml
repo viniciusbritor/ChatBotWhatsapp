@@ -9,62 +9,6 @@ steps:
       - "-c"
       - "export REPO_ROOT=/workspace && cd agents_runtime && pip install --prefer-binary -q uv && uv pip install --system -q -r requirements.txt -r requirements-dev.txt && DEEPSEEK_MODEL=deepseek-v4-flash DEEPSEEK_BASE_URL=https://api.deepseek.com pytest -q tests/ && python scripts/check_lgpd_compliance.py && python scripts/sync_agents_to_firestore.py"
 
-  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
-    id: "deploy-firestore-index-source-title-chunk"
-    entrypoint: "bash"
-    args:
-      - "-c"
-      - "gcloud firestore indexes composite create --project=coherence-ominichannel-fs --collection-group=agent-knowledge-v2 --query-scope=COLLECTION --field-config=field-path=owner_hash,order=ascending --field-config=field-path=source_title,order=ascending --field-config=field-path=chunk_index,order=ascending --async || (echo 'index already exists, skipping'; exit 0)"
-
-  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
-    id: "deploy-firestore-index-class-group"
-    entrypoint: "bash"
-    args:
-      - "-c"
-      - "gcloud firestore indexes composite create --project=coherence-ominichannel-fs --collection-group=agent-knowledge-v2 --query-scope=COLLECTION --field-config=field-path=owner_hash,order=ascending --field-config=field-path=class,order=ascending --field-config=field-path=group,order=ascending --async || (echo 'index already exists, skipping'; exit 0)"
-
-  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
-    id: "deploy-firestore-index-source-title"
-    entrypoint: "bash"
-    args:
-      - "-c"
-      - "gcloud firestore indexes composite create --project=coherence-ominichannel-fs --collection-group=agent-knowledge-v2 --query-scope=COLLECTION --field-config=field-path=owner_hash,order=ascending --field-config=field-path=source_title,order=ascending --async || (echo 'index already exists, skipping'; exit 0)"
-
-  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
-    id: "deploy-firestore-vector-index-agent-knowledge"
-    entrypoint: "bash"
-    args:
-      - "-c"
-      - "gcloud firestore indexes composite create --project=coherence-ominichannel-fs --collection-group=agent-knowledge-v2 --query-scope=COLLECTION --field-config=order=ASCENDING,field-path=embedding_model --field-config=order=ASCENDING,field-path=embedding_dim --field-config=order=ASCENDING,field-path=schema_version --field-config=order=ASCENDING,field-path=__name__ --field-config=field-path=vector_embedding,vector-config={dimension=1536,flat} --async || (echo 'vector index agent-knowledge-v2 already exists, skipping'; exit 0)"
-
-  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
-    id: "deploy-firestore-vector-index-agent-knowledge-private"
-    entrypoint: "bash"
-    args:
-      - "-c"
-      - "gcloud firestore indexes composite create --project=coherence-ominichannel-fs --collection-group=agent-knowledge-v2 --query-scope=COLLECTION --field-config=order=ASCENDING,field-path=owner_hash --field-config=order=ASCENDING,field-path=embedding_model --field-config=order=ASCENDING,field-path=embedding_dim --field-config=order=ASCENDING,field-path=schema_version --field-config=order=ASCENDING,field-path=__name__ --field-config=field-path=vector_embedding,vector-config={dimension=1536,flat} --async || (echo 'vector index agent-knowledge-v2 owner_hash already exists, skipping'; exit 0)"
-
-  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
-    id: "deploy-firestore-vector-index-agent-knowledge-filename-class"
-    entrypoint: "bash"
-    args:
-      - "-c"
-      - "gcloud firestore indexes composite create --project=coherence-ominichannel-fs --collection-group=agent-knowledge-v2 --query-scope=COLLECTION --field-config=order=ASCENDING,field-path=owner_hash --field-config=order=ASCENDING,field-path=source_title --field-config=order=ASCENDING,field-path=class --field-config=order=ASCENDING,field-path=__name__ --field-config=field-path=vector_embedding,vector-config={dimension=1536,flat} --async || (echo 'vector index agent-knowledge-v2 owner_hash+source_title+class already exists, skipping'; exit 0)"
-
-  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
-    id: "deploy-firestore-vector-index-agent-knowledge-source-title-full"
-    entrypoint: "bash"
-    args:
-      - "-c"
-      - "gcloud firestore indexes composite create --project=coherence-ominichannel-fs --collection-group=agent-knowledge-v2 --query-scope=COLLECTION --field-config=order=ASCENDING,field-path=owner_hash --field-config=order=ASCENDING,field-path=embedding_model --field-config=order=ASCENDING,field-path=embedding_dim --field-config=order=ASCENDING,field-path=schema_version --field-config=order=ASCENDING,field-path=source_title --field-config=order=ASCENDING,field-path=__name__ --field-config=field-path=vector_embedding,vector-config={dimension=1536,flat} --async || (echo 'vector index agent-knowledge-v2 source_title_full already exists, skipping'; exit 0)"
-
-  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
-    id: "deploy-firestore-vector-index-sections"
-    entrypoint: "bash"
-    args:
-      - "-c"
-      - "gcloud firestore indexes composite create --project=coherence-ominichannel-fs --collection-group=agent-knowledge-sections --query-scope=COLLECTION --field-config=order=ASCENDING,field-path=owner_hash --field-config=order=ASCENDING,field-path=embedding_model --field-config=order=ASCENDING,field-path=embedding_dim --field-config=order=ASCENDING,field-path=schema_version --field-config=order=ASCENDING,field-path=__name__ --field-config=field-path=vector_embedding,vector-config={dimension=1536,flat} --async || (echo 'vector index agent-knowledge-sections already exists, skipping'; exit 0)"
-
   - name: "node:22-slim"
     id: "build-portal-react"
     entrypoint: "bash"
@@ -119,7 +63,7 @@ steps:
       - "--cpu-boost"
       - "--port=8080"
       - "--timeout=300"
-      - "--set-env-vars=ENVIRONMENT=test,LOG_LEVEL=INFO,INSTANCE=Jennifer,DEEPSEEK_MODEL=deepseek-v4-flash,DEEPSEEK_BASE_URL=https://api.deepseek.com/v1,GEMINI_MODEL=gemini-2.5-flash,GEMINI_BASE_URL=https://generativelanguage.googleapis.com,AGENT_RELOAD_INTERVAL_SEC=120,AGENT_HEALTH_WINDOW_SEC=86400,PENDING_ACTION_TTL_SEC=300,RESPONSE_IDEMPOTENCY_TTL_SEC=86400,COMMIT_SHA=$SHORT_SHA,DEPLOYED_AT=$_DEPLOYED_AT,GCP_PROJECT=coherence-ominichannel-fs,PUBSUB_PUSH_SERVICE_ACCOUNT=admin-omnichannel@coherence-ominichannel-fs.iam.gserviceaccount.com,PUBSUB_TOKEN_AUDIENCE=https://agents-runtime-test-c5nbfc5meq-uc.a.run.app/pubsub/push,WHISPER_MODEL=base,WHISPER_DEVICE=cpu,WHISPER_COMPUTE_TYPE=int8,WHISPER_DOWNLOAD_ROOT=/app/whisper_models,AUDIO_MAX_BYTES=26214400,AUDIO_MAX_DURATION_SEC=300,AUDIO_DOWNLOAD_TIMEOUT_SEC=30,AUDIO_URL_ALLOWED_HOSTS=evolution.coherenceai.com.br,RAG_EMBEDDING_MODEL=text-embedding-3-small,RAG_EMBEDDING_DIM=1536,RAG_EMBEDDING_BASE_URL=https://api.openai.com/v1/embeddings,RAG_SCHEMA_VERSION=2,RAG_MESSAGE_HISTORY_COLLECTION=message-history,RAG_MESSAGE_HISTORY_RETENTION_DAYS=90,RAG_PRIVATE_COLLECTION=agent-knowledge-v2,RAG_COLLECTIVE_COLLECTION=collective-knowledge-v2,RAG_SHARED_COLLECTION=public-knowledge-v2,RAG_RETENTION_DAYS=90,RAG_RETRIEVE_MIN_SCORE=0.7,RAG_RETRIEVE_K=10,OAUTH_CLIENT_ID=894828119087-goo6lcl6vgm5bdq5qgafscb8qbr4ueet.apps.googleusercontent.com,OAUTH_REDIRECT_URI=https://agents-runtime-test-c5nbfc5meq-uc.a.run.app/oauth/callback,JENNIFER_MODEL_ID=deepseek-v4-flash,JENNIFER_FALLBACK_MODEL_ID=gemini-2.5-flash,AGENTS_RUNTIME_PUBLIC_URL=https://agents-runtime-test-c5nbfc5meq-uc.a.run.app"
+      - "--set-env-vars=ENVIRONMENT=test,LOG_LEVEL=INFO,INSTANCE=Jennifer,DEEPSEEK_MODEL=deepseek-v4-flash,DEEPSEEK_BASE_URL=https://api.deepseek.com/v1,GEMINI_MODEL=gemini-2.5-flash,GEMINI_BASE_URL=https://generativelanguage.googleapis.com,AGENT_RELOAD_INTERVAL_SEC=120,AGENT_HEALTH_WINDOW_SEC=86400,PENDING_ACTION_TTL_SEC=300,RESPONSE_IDEMPOTENCY_TTL_SEC=86400,COMMIT_SHA=$SHORT_SHA,DEPLOYED_AT=$_DEPLOYED_AT,GCP_PROJECT=coherence-ominichannel-fs,PUBSUB_PUSH_SERVICE_ACCOUNT=admin-omnichannel@coherence-ominichannel-fs.iam.gserviceaccount.com,PUBSUB_TOKEN_AUDIENCE=https://agents-runtime-test-c5nbfc5meq-uc.a.run.app/pubsub/push,WHISPER_MODEL=base,WHISPER_DEVICE=cpu,WHISPER_COMPUTE_TYPE=int8,WHISPER_DOWNLOAD_ROOT=/app/whisper_models,AUDIO_MAX_BYTES=26214400,AUDIO_MAX_DURATION_SEC=300,AUDIO_DOWNLOAD_TIMEOUT_SEC=30,AUDIO_URL_ALLOWED_HOSTS=evolution.coherenceai.com.br,RAG_EMBEDDING_MODEL=text-embedding-3-small,RAG_EMBEDDING_DIM=1536,RAG_EMBEDDING_BASE_URL=https://api.openai.com/v1/embeddings,RAG_SCHEMA_VERSION=2,RAG_MESSAGE_HISTORY_COLLECTION=message-history,RAG_MESSAGE_HISTORY_RETENTION_DAYS=90,RAG_MEMORY_COLLECTION=message-history,RAG_PRIVATE_COLLECTION=knowledge-database,RAG_RETENTION_DAYS=90,RAG_RETRIEVE_MIN_SCORE=0.7,RAG_RETRIEVE_K=10,OAUTH_CLIENT_ID=894828119087-goo6lcl6vgm5bdq5qgafscb8qbr4ueet.apps.googleusercontent.com,OAUTH_REDIRECT_URI=https://agents-runtime-test-c5nbfc5meq-uc.a.run.app/oauth/callback,JENNIFER_MODEL_ID=deepseek-v4-flash,JENNIFER_FALLBACK_MODEL_ID=gemini-2.5-flash,AGENTS_RUNTIME_PUBLIC_URL=https://agents-runtime-test-c5nbfc5meq-uc.a.run.app"
       - "--set-secrets=DEEPSEEK_API_KEY=DEEPSEEK_API_KEY:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,SERPER_API_KEY=serper-api-key:latest,AGENTS_RUNTIME_SA_TOKEN_SECRET=agents-runtime-sa-token:latest,GOOGLE_MAPS_API_KEY=google-maps-api-key:latest,YOUTUBE_API_KEY=youtube-api-key:latest,OAUTH_CLIENT_SECRET=oauth-client-secret:latest,OAUTH_STATE_SECRET=oauth-client-secret:latest,EVOLUTION_API_KEY=evolution-api-key:latest,OPENAI_API_KEY=OPENAI_API_KEY:latest,COMPOSIO_API_KEY=COMPOSIO_API_KEY:latest"
 
 images:

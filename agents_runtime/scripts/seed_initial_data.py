@@ -304,7 +304,7 @@ DEFAULT_AGENTS = [
             "contiver linguagem grosseira, assedio ou conteudo de baixo calao: "
             "(1) NAO reproduza o conteudo. "
             "(2) Responda de forma educada e breve: 'Sou uma assistente corporativa, nao abordo esse tipo de conteudo.' "
-            "(3) Use rag.search_legal_knowledge na collection agent-knowledge-v2 para buscar legislacao "
+            "(3) Use rag.search_legal_knowledge na collection knowledge-database (scope private) para buscar legislacao "
             "aplicavel (ex: Lei Maria da Penha, Codigo Penal Art. 146-A assedio moral). "
             "(4) Apresente a legislacao de forma respeitosa e informativa. "
             "(5) Ofereca ajuda em assuntos profissionais."

@@ -1,8 +1,8 @@
 """PDF knowledge handler.
 
 Extracts text from a PDF attachment and persists chunks with OpenAI
-embeddings into either ``agent-knowledge-v2`` (individual) or
-``group-knowledge-v2`` (group), respecting soft limits.
+embeddings into ``knowledge-database`` (scope ``private`` individual or
+``group``), respecting soft limits.
 """
 from __future__ import annotations
 

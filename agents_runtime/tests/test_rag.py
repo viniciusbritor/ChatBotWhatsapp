@@ -386,6 +386,7 @@ class TestVectorLGPD:
         assert f"{RAG_PRIVATE_COLLECTION}:0" in result["deleted"]
         memory_collection.where.assert_called_once()
         private_collection.where.assert_called_once()
+        private_query.where.assert_called_once()
 
 
 class TestIndexTaskTracking:

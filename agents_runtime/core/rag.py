@@ -6,11 +6,10 @@ Architecture (post 23/07/2026):
   Firestore) keyed by ``owner_hash`` + ``message_id``. Firestore Vector
   is **not** used for interactions; the conversation log is durable even
   when OpenAI / embeddings fail.
-- **Firestore Vector** (``agent-knowledge-v2``,
-  ``collective-knowledge-v2`` and ``public-knowledge-v2``) is reserved
-  for documents that benefit from semantic search: laws, editais, books
-  and publicly distributed knowledge. ``scripts/ingest_*.py`` provide
-  the loader; runtime only reads.
+- **Firestore Vector** (``knowledge-database``, scope ``private``/``group``)
+  is reserved for documents that benefit from semantic search: laws,
+  editais, books and distributed knowledge. ``scripts/ingest_*.py``
+  provide the loader; runtime only reads.
 - The OpenAI embedding call is only used in the document ingestion
   pipelines (``index_shared_document``, ``index_private_document`` and
   ``ingest_collective_memory``). It is never used on the chat hot path.
@@ -837,7 +836,7 @@ async def index_private_document(
     group: Optional[str] = None,
     theme: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Index a private document (book/edital) into ``agent-knowledge-v2``.
+    """Index a private document (book/edital) into ``knowledge-database`` (scope=private).
 
     Soft limits mirror the group pipeline (F4d.5). When the input exceeds
     the configured thresholds, the document is still indexed end-to-end

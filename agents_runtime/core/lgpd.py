@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 
 RETENTION_DAYS = int(os.getenv("RETENTION_DAYS", "90"))
 AUDIT_RETENTION_DAYS = int(os.getenv("AUDIT_RETENTION_DAYS", str(365 * 5)))
-RAG_MEMORY_COLLECTION = os.getenv("RAG_MEMORY_COLLECTION", "conversation-memory-v2")
-RAG_PRIVATE_COLLECTION = os.getenv("RAG_PRIVATE_COLLECTION", "agent-knowledge-v2")
+RAG_MEMORY_COLLECTION = os.getenv("RAG_MEMORY_COLLECTION", "message-history")
+RAG_PRIVATE_COLLECTION = os.getenv("RAG_PRIVATE_COLLECTION", "knowledge-database")
 PENDING_ACTION_COLLECTION = os.getenv("PENDING_ACTION_COLLECTION", "pending-actions")
 
 
@@ -47,6 +47,17 @@ def _delete_query_documents(db, query, batch_limit: int = 500) -> int:
         batch.delete(document.reference)
     batch.commit()
     return len(documents)
+
+
+def _private_knowledge_query(db, owner_hash: str):
+    """Query de conhecimento privado (knowledge-database scope=private)."""
+    from google.cloud.firestore_v1.base_query import FieldFilter
+
+    return (
+        db.collection(RAG_PRIVATE_COLLECTION)
+        .where(filter=FieldFilter("scope", "==", "private"))
+        .where(filter=FieldFilter("owner_hash", "==", owner_hash))
+    )
 
 
 def cleanup_old_history(batch_limit: int = 500) -> Dict[str, Any]:
@@ -84,16 +95,8 @@ def cleanup_old_history(batch_limit: int = 500) -> Dict[str, Any]:
                 batch.commit()
             scanned += batch_count
 
-        expires_at = now_brt().isoformat()
-        memory_query = _filtered_query(
-            db.collection(RAG_MEMORY_COLLECTION),
-            "expires_at",
-            "<=",
-            expires_at,
-        )
-        vector_deleted = _delete_query_documents(db, memory_query, batch_limit)
-        deleted += vector_deleted
-        scanned += vector_deleted
+        # message-history usa TTL nativo do Firestore (expires_at datetime);
+        # nao ha mais colecao vector de memoria para limpar manualmente.
     except Exception as e:
         logger.exception(f"cleanup_old_history error: {e}")
         return {"deleted": deleted, "scanned": scanned, "error": str(e)}
@@ -184,11 +187,14 @@ def export_user_data(phone: str) -> Dict[str, Any]:
             result["corrections"].append(corr.to_dict())
 
     owner_hash = _owner_hash(phone)
-    for collection_name, result_key in [
-        (RAG_MEMORY_COLLECTION, "vector_memory"),
-        (RAG_PRIVATE_COLLECTION, "private_knowledge"),
+    memory_query = _filtered_query(
+        db.collection(RAG_MEMORY_COLLECTION), "owner_hash", "==", owner_hash
+    )
+    private_query = _private_knowledge_query(db, owner_hash)
+    for query, result_key in [
+        (memory_query, "vector_memory"),
+        (private_query, "private_knowledge"),
     ]:
-        query = _filtered_query(db.collection(collection_name), "owner_hash", "==", owner_hash)
         for document in query.stream():
             data = document.to_dict()
             data.pop("vector_embedding", None)
@@ -236,8 +242,15 @@ def delete_user_data(phone: str) -> Dict[str, Any]:
             pass
 
         owner_hash = _owner_hash(phone)
-        for collection_name in [RAG_MEMORY_COLLECTION, RAG_PRIVATE_COLLECTION]:
-            query = _filtered_query(db.collection(collection_name), "owner_hash", "==", owner_hash)
+        for collection_name, query in [
+            (
+                RAG_MEMORY_COLLECTION,
+                _filtered_query(
+                    db.collection(RAG_MEMORY_COLLECTION), "owner_hash", "==", owner_hash
+                ),
+            ),
+            (RAG_PRIVATE_COLLECTION, _private_knowledge_query(db, owner_hash)),
+        ]:
             count = _delete_query_documents(db, query)
             deleted.append(f"{collection_name}:{count}")
 

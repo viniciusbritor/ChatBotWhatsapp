@@ -163,7 +163,7 @@ class TestAdminAgentsEndpoints(_AuthFixture):
 
         fake_result = {
             "doc_ids": ["sha-abc"], "chunks": 2, "chunks_indexed": 2,
-            "truncated": False, "collection": "agent-knowledge-v2",
+            "truncated": False, "collection": "knowledge-database",
         }
         with patch("core.rag.index_private_document", AsyncMock(return_value=fake_result)) as mock_index:
             resp = self.client.post(

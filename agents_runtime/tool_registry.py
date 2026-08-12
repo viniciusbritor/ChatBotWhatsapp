@@ -102,7 +102,9 @@ async def _categorize(**kwargs):
 
 async def _delete_knowledge(**kwargs):
     import hashlib
-    from google.cloud import firestore
+
+    from core.message_ledger import _get_firestore
+    from core.rag import KNOWLEDGE_DATABASE
 
     source_title = kwargs.get("source_title", "")
     phone = kwargs.get("phone", "")
@@ -112,23 +114,26 @@ async def _delete_knowledge(**kwargs):
     normalized = "".join(c for c in str(phone) if c.isdigit())
     owner_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:32]
 
-    db = firestore.Client(project="coherence-ominichannel-fs")
+    db = _get_firestore()
+    if db is None:
+        return {"error": "firestore_unavailable", "deleted": 0}
+
     total = 0
-    for collection in ("agent-knowledge-v2", "agent-knowledge-v2-plain"):
-        docs = list(
-            db.collection(collection)
-            .where("owner_hash", "==", owner_hash)
-            .where("source_title", "==", source_title)
-            .stream()
-        )
-        for doc in docs:
-            doc.reference.delete()
-            total += 1
+    docs = list(
+        db.collection(KNOWLEDGE_DATABASE)
+        .where("scope", "==", "private")
+        .where("owner_hash", "==", owner_hash)
+        .where("source_title", "==", source_title)
+        .stream()
+    )
+    for doc in docs:
+        doc.reference.delete()
+        total += 1
 
     return {
         "deleted": total,
         "source_title": source_title,
-        "collections_cleared": ["agent-knowledge-v2", "agent-knowledge-v2-plain"],
+        "collections_cleared": [KNOWLEDGE_DATABASE],
     }
 
 
@@ -844,7 +849,7 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
         "implementation": "knowledge_retriever",
         "description": (
             "Recupera trechos previamente armazenados na base de conhecimento "
-            "do user (agent-knowledge-v2) ou do grupo (group-knowledge-v2). "
+            "do user (knowledge-database, scope private) ou do grupo (scope group). "
             "Quando a pergunta vem em grupo e ha match apenas em RAG privado, "
             "cria pending_action share_private_knowledge_in_group para pedir "
             "consentimento antes de compartilhar."
@@ -921,7 +926,7 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
         "implementation": "knowledge_lister",
         "description": (
             "Lista todos os documentos indexados na base de conhecimento "
-            "do usuario (agent-knowledge-v2). Retorna source_title, "
+            "do usuario (knowledge-database, scope private). Retorna source_title, "
             "document_title, class, group, theme e total de chunks por doc. "
             "Use quando o usuario perguntar 'quais documentos tenho?' ou "
             "'o que esta na minha base?'."

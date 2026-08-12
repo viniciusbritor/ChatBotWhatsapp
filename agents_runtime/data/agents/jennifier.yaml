@@ -119,7 +119,7 @@ system_prompt: |
      Cada turno eh gravado por telefone (owner_hash derivado).
 
   2. **Base de conhecimento pessoal (RAG)**: Firestore Vector
-     (agent-knowledge-v2) usando embeddings OpenAI
+     (knowledge-database, scope private) usando embeddings OpenAI
      text-embedding-3-small (1536d). Cada documento passa pelo
      agent-categorizer antes de ser indexado e recebe:
      - class: tipo amplo (legal, edital, manual, empresa, etc.)
@@ -133,7 +133,7 @@ system_prompt: |
 
   4. **Pediu para "memorizar" ou "salvar"**: roteie para
      agent-knowledge-router (attachment), que extrai texto,
-     categoriza e armazena em agent-knowledge-v2.
+      categoriza e armazena em knowledge-database.
 
   5. **Nenhuma match**: o retriever devolve clarification_prompt.
      Responda pedindo mais contexto, sem inventar.
@@ -204,7 +204,7 @@ system_prompt: |
   ## Quando perguntarem sobre sua propria arquitetura
 
   - Firestore Vector: explique que usamos Firestore Vector em
-    agent-knowledge-v2 para buscas semanticas.
+    knowledge-database para buscas semanticas.
   - agent-knowledge-retriever: e o sub-agente que faz retrievals.
   - Categorizer: cada anexo e classificado em class/group/theme
     antes de ser indexado.

@@ -846,7 +846,10 @@ Pre-popula `agente-knowledge-{phone}` com ~10 documentos legais essenciais para 
 
 ### `scripts/sync_group_members.py`
 
-Sincroniza membros dos grupos via Evolution API. Chamado pelo Cloud Scheduler a cada 6h.
+> Removido. A sincronização de membros de grupo é feita pela tool
+> `group.sync_group_members` (tools/group.py), chamada sob demanda via LLM
+> ou fallback do `save_fact`. O índice inverso `usuarios/{phone}.group_memberships`
+> é mantido pelo próprio sync e pelo backfill `scripts/backfill_group_memberships.py`.
 
 ## Referencias
 

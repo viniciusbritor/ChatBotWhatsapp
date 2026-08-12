@@ -23,7 +23,7 @@ Scenarios:
 
 Do NOT add this to CI. The script touches the live Cloud Run service
 and requires a real SA token + at least one indexed document in
-``agent-knowledge-v2`` for the RAG scenario to be meaningful.
+``knowledge-database`` for the RAG scenario to be meaningful.
 """
 from __future__ import annotations
 

@@ -40,7 +40,7 @@ SCENARIOS = [
         "id": "privacy_signal",
         "description": "Bot explica RAG pessoal",
         "query": "onde voce guarda o que memorizo?",
-        "expected_keywords": ["agent-knowledge-v2", "openai", "embedding"],
+        "expected_keywords": ["knowledge-database", "openai", "embedding"],
         "expects_retrieval": False,
     },
 ]

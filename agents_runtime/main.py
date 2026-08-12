@@ -1819,10 +1819,10 @@ async def admin_knowledge_post(request: Request):
 
 @app.post("/admin/knowledge/user")
 async def admin_knowledge_user_post(request: Request):
-    """Index a document into the USER's private Firestore Vector (agent-knowledge-v2).
+    """Index a document into the USER's private Firestore Vector (knowledge-database).
 
     Mesmo pipeline que a Jennifer usa para conhecimento individual: chunking
-    semantico + embedding OpenAI + armazenamento em agent-knowledge-v2.
+    semantico + embedding OpenAI + armazenamento em knowledge-database (scope=private).
     Body: {"phone": "...", "titulo": "...", "conteudo": "...", "categoria": "..."}
     """
     body = await request.json()
@@ -1856,7 +1856,7 @@ async def admin_knowledge_user_post(request: Request):
             "embedding_dim": EMBEDDING_DIM,
             "schema_version": SCHEMA_VERSION,
             "truncated": result.get("truncated", False),
-            "collection": result.get("collection", "agent-knowledge-v2"),
+            "collection": result.get("collection", "knowledge-database"),
         })
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
