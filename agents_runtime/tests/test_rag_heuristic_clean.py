@@ -22,7 +22,10 @@ async def test_quais_emails_is_not_rag():
 
 @pytest.mark.asyncio
 async def test_qual_compromissos_is_not_rag():
-    assert await is_rag_query("qual meus compromissos de hoje") is False
+    # Sem DEEPSEEK_API_KEY, o tie-breaker LLM nao roda -> determinismo
+    from unittest.mock import patch
+    with patch.dict("os.environ", {"DEEPSEEK_API_KEY": ""}, clear=False):
+        assert await is_rag_query("qual meus compromissos de hoje") is False
 
 
 @pytest.mark.asyncio
@@ -33,7 +36,6 @@ async def test_como_listar_arquivos_is_not_rag():
 @pytest.mark.asyncio
 async def test_quando_reuniao_is_not_rag():
     # Sem DEEPSEEK_API_KEY, o tie-breaker LLM nao roda -> determinismo
-    import os
     from unittest.mock import patch
     with patch.dict("os.environ", {"DEEPSEEK_API_KEY": ""}, clear=False):
         assert await is_rag_query("quando é a proxima reuniao") is False
