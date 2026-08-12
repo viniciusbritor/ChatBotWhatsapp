@@ -2166,11 +2166,16 @@ async def oauth_callback(request: Request):
             return HTMLResponse(content="<h2>Erro ao obter autorizacao</h2>", status_code=502)
 
         now_brt_dt = now_brt()
+        # F4 (12/08/2026): salvar os scopes REALMENTE concedidos pelo Google.
+        # O token_response traz "scope" (separado por espaco) com o que foi
+        # aprovado na tela de consentimento. Fallback para OAUTH_SCOPES.
+        granted_raw = token_response.get("scope", "")
+        granted_scopes = [s.strip() for s in granted_raw.split() if s.strip()] if granted_raw else list(OAUTH_SCOPES)
         token_data = {
             "token": token_response["access_token"],
             "refresh_token": token_response.get("refresh_token", ""),
             "token_uri": "https://oauth2.googleapis.com/token",
-            "scopes": OAUTH_SCOPES,
+            "scopes": granted_scopes,
             "expiry": str(time.time() + token_response.get("expires_in", 3600)),
             "linked_at": now_brt_dt.isoformat(),
         }
@@ -2178,7 +2183,7 @@ async def oauth_callback(request: Request):
         saved = save_user(phone, {
             "phone": phone,
             "google_oauth_token": token_data,
-            "scopes": OAUTH_SCOPES,
+            "scopes": granted_scopes,
             "google_oauth_linked_at": now_brt_dt.isoformat(),
         })
         if not saved:

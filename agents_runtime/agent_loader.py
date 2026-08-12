@@ -505,14 +505,19 @@ def has_nickname(phone: str) -> bool:
 
 
 def save_user(phone: str, data: Dict[str, Any]) -> bool:
-    """Create or update a user in Firestore."""
+    """Create or update a user in Firestore.
+
+    O doc ID e sempre o phone canonical (E.164 BR, ex: 5511966830020) para
+    evitar documentos orfaos duplicados (ex: 11966830020 sem o prefixo 55).
+    """
     db = _get_firestore_client()
     if db is None:
         return False
     try:
         data["updated_at"] = _now_iso()
-        data["phone"] = phone
-        db.collection("usuarios").document(phone).set(data, merge=True)
+        canonical = _canonical_phone(phone) or phone
+        data["phone"] = canonical
+        db.collection("usuarios").document(canonical).set(data, merge=True)
         return True
     except Exception as e:
         logger.error(f"Failed to save user '{phone}': {e}")
@@ -536,7 +541,14 @@ def _canonical_phone(phone: str) -> str:
 
 
 def list_users() -> List[Dict[str, Any]]:
-    """List all registered users, deduplicated by canonical phone."""
+    """List all registered users, deduplicated by canonical phone.
+
+    Quando existem docs duplicados (ex: ``usuarios/11966830020`` e
+    ``usuarios/5511966830020``), o merge prefere o documento com o token
+    OAuth MAIS completo (mais scopes); em empate, o com
+    ``google_oauth_linked_at``/``updated_at`` mais recente. Isso evita que
+    um doc antigo com menos scopes "sombre" o token reautorizado.
+    """
     db = _get_firestore_client()
     if db is None:
         return []
@@ -546,18 +558,48 @@ def list_users() -> List[Dict[str, Any]]:
             data = doc.to_dict() or {}
             phone = data.get("phone") or doc.id or ""
             canonical = _canonical_phone(phone)
-            # Prefere o doc com google_oauth_token (mais completo)
             prev = seen.get(canonical)
-            if prev is None or (not prev.get("google_oauth_token") and data.get("google_oauth_token")):
-                merged = dict(prev or {})
-                merged.update({k: v for k, v in data.items() if v})
-                merged["phone"] = canonical
-                merged["phone_canonical"] = canonical
-                seen[canonical] = merged
+            if prev is None:
+                seen[canonical] = _merge_user_docs({}, data, canonical)
+                continue
+            if _user_doc_is_better(data, prev):
+                seen[canonical] = _merge_user_docs(prev, data, canonical)
         return list(seen.values())
     except Exception as e:
         logger.error(f"Failed to list users: {e}")
         return []
+
+
+def _user_doc_scopes(data: Dict[str, Any]) -> int:
+    token = data.get("google_oauth_token") or {}
+    return len(token.get("scopes") or data.get("scopes") or [])
+
+
+def _user_doc_timestamp(data: Dict[str, Any]) -> str:
+    return str(
+        data.get("google_oauth_linked_at")
+        or data.get("updated_at")
+        or ""
+    )
+
+
+def _user_doc_is_better(candidate: Dict[str, Any], current: Dict[str, Any]) -> bool:
+    """True se ``candidate`` deve substituir ``current`` (mais scopes ou mais recente)."""
+    if _user_doc_scopes(candidate) > _user_doc_scopes(current):
+        return True
+    if _user_doc_scopes(candidate) == _user_doc_scopes(current):
+        if _user_doc_timestamp(candidate) > _user_doc_timestamp(current):
+            return True
+    return False
+
+
+def _merge_user_docs(base: Dict[str, Any], data: Dict[str, Any], canonical: str) -> Dict[str, Any]:
+    """Faz merge preservando o token mais completo do doc que esta entrando."""
+    merged = dict(base)
+    merged.update({k: v for k, v in data.items() if v})
+    merged["phone"] = canonical
+    merged["phone_canonical"] = canonical
+    return merged
 
 
 def get_config(section: str) -> Optional[Dict[str, Any]]:
