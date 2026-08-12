@@ -1,5 +1,51 @@
 # Diario de Bordo — ChatBotWhatsapp
 
+## 12/08/2026 (16:30 BRT) — Auto-exposição de tools + STT real no caminho de produção
+
+### Contexto
+Teste das 7 frases no WhatsApp revelou 5 falhas + 1 transcrição de áudio
+fake. Duas causas raiz distintas:
+
+1. **Tools "não expostas"**: `people.*`, `tasks.*`, `photos.*`,
+   `googlesheets.*`, `locomotion.search_places/find_place` existiam no
+   TOOL_REGISTRY mas NÃO estavam na lista `tools:` do jennifier. A LLM
+   respondia "não está no escopo" / "não está conectada" (alucinação).
+   Logs confirmaram ZERO chamadas a essas tools.
+2. **Áudio**: a transcrição só existia em `main.py /chat` (endpoint de
+   debug que o Evolution NÃO usa). O caminho real (/webhook → Pub/Sub →
+   `orchestrate`) entregava `text="[audio]"` direto ao DeepSeek (texto puro,
+   não transcreve). Prova: ZERO logs de STT o dia inteiro; a 1ª
+   "transcrição" foi o LLM reconstruindo a frase do contexto.
+
+### Solução
+
+**Auto-exposição (Passo 1):**
+- `tool_registry.py`: novo `INTERNAL_TOOL_IDS` (denylist: `image_report.render`,
+  `group.resolve_mention`) + `list_llm_tool_ids()`.
+- `orchestrator._resolve_agent_tools`: ramo dinâmico usa `list_llm_tool_ids()`.
+- `jennifier.yaml`: `tools: null` + `system_prompt_version: 10` + seções
+  PT19 (Contacts/Tasks/Photos), PT20 (Maps Places), PT21 (Sheets), PT22
+  (Onboarding renumerado). Regra "NUNCA diga que não tem integração".
+- `agent_status.py`: `list(agent.get("tools") or [])` (fix crash com None).
+- Efeito: qualquer tool nova no registry fica exposta no próximo deploy,
+  sem editar YAML (o "trigger automático").
+
+**STT real (Passo 4):**
+- `core/audio_pipeline.py`: helper `transcribe_envelope_audio(payload)` —
+  MiniMax STT primário + Gemini 2.5 Flash fallback (motor já existente em
+  `core.audio_transcribe`), com máscara PII.
+- `main.py /pubsub/push`: transcreve ANTES de `orchestrate(p)`; falha →
+  resposta graceful + `index_audio_failure_for_audit`, sem chamar o LLM.
+- `main.py /chat`: refatorado para reusar o mesmo helper.
+- `check_lgpd_compliance.py`: snippet `mask_pii(transcript)` agora verificado
+  em `core/audio_pipeline.py` (máscara moveu-se para o helper).
+
+### Validação
+- Suite completa verde: 1138 passed, 5 skipped, 1 xpassed.
+- Novos testes: `test_audio_pipeline.py` (6), `test_tools_internas_nao_sao_expostas`,
+  `test_tools_dinamicas_explicitadas_no_prompt`.
+- `check_lgpd_compliance.py` passa.
+
 ## 12/08/2026 (16:00 BRT) — Otimização Jennifer: denormalização group_memberships + cache TTL + limpeza de coleções mortas
 
 ### Contexto
