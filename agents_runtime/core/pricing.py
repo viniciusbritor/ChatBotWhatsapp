@@ -44,10 +44,22 @@ OPENAI_EMBEDDING_SMALL = {
 }
 
 
+GROQ_WHISPER_FREE = {
+    "second_rate": 0.0,
+}
+
+
+GEMINI_FLASH_FREE = {
+    "request_rate": 0.0,
+}
+
+
 PROVIDERS: Dict[str, Dict[str, float]] = {
     "deepseek_v4_flash": DEEPSEEK_V4_FLASH,
     "deepseek_v4_pro": DEEPSEEK_V4_PRO,
     "openai_embedding_small": OPENAI_EMBEDDING_SMALL,
+    "groq_whisper_free": GROQ_WHISPER_FREE,
+    "gemini_flash_free": GEMINI_FLASH_FREE,
 }
 
 
@@ -56,6 +68,8 @@ _KEY_RATE_MAP = {
     "deepseek_output_tokens": ("deepseek_v4_flash", "output_per_1m"),
     "deepseek_cache_hit_tokens": ("deepseek_v4_flash", "cache_hit_per_1m"),
     "openai_embedding_input_tokens": ("openai_embedding_small", "input_per_1m"),
+    "groq_stt_seconds": ("groq_whisper_free", "second_rate"),
+    "gemini_vision_requests": ("gemini_flash_free", "request_rate"),
 }
 
 
