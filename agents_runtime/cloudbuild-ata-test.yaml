@@ -41,7 +41,7 @@ steps:
       - "--parallelism=1"
       - "--task-timeout=600"
       - "--set-env-vars=ENVIRONMENT=test,LOG_LEVEL=INFO,GCP_PROJECT=coherence-ominichannel-fs"
-      - "--set-secrets=DEEPSEEK_API_KEY=DEEPSEEK_API_KEY:latest,GOOGLE_OAUTH_TOKEN=google-oauth-token:latest"
+      - "--set-secrets=DEEPSEEK_API_KEY=DEEPSEEK_API_KEY:latest"
 
 images:
   - "gcr.io/$PROJECT_ID/ata-worker:$BUILD_ID"
