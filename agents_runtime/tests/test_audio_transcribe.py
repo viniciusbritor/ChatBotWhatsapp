@@ -1,4 +1,4 @@
-"""Tests for the audio transcription cascade (MiniMax -> Gemini fallback)."""
+"""Tests for the audio transcription cascade (OpenAI Whisper-1 -> Gemini fallback)."""
 import base64
 import socket
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -180,61 +180,45 @@ class TestPublicHostCheck:
 
 
 class TestCascadeTranscribe:
-    def test_returns_minimax_result_when_successful(self):
+    def test_returns_openai_result_when_successful(self):
         from core.audio_transcribe import _transcribe
 
-        def fake_minimax(*args, **kwargs):
-            return "hello world"
+        def fake_openai(*args, **kwargs):
+            return "whisper transcript"
 
-        with patch("core.audio_transcribe._transcribe_with_minimax", side_effect=fake_minimax):
+        with patch("core.audio_transcribe._transcribe_with_openai", side_effect=fake_openai):
             result = _transcribe(b"audio", "audio/ogg", "Jennifer")
-        assert result["transcript"] == "hello world"
-        assert result["provider"].startswith("minimax:")
-        assert result["reason"] == ""
+        assert result["transcript"] == "whisper transcript"
+        assert result["provider"] == "openai:whisper-1"
 
-    def test_falls_back_to_gemini_when_minimax_fails(self):
+    def test_returns_gemini_result_when_openai_fails(self):
         from core.audio_transcribe import _transcribe
 
-        def fake_minimax(*args, **kwargs):
-            raise RuntimeError("minimax_stt_failed")
+        def fake_openai(*args, **kwargs):
+            raise RuntimeError("openai_stt_failed")
 
         def fake_gemini(*args, **kwargs):
-            return "fallback transcript"
+            return "hello world"
 
-        with patch("core.audio_transcribe._transcribe_with_minimax", side_effect=fake_minimax):
+        with patch("core.audio_transcribe._transcribe_with_openai", side_effect=fake_openai):
             with patch("core.audio_transcribe._transcribe_with_gemini", side_effect=fake_gemini):
                 result = _transcribe(b"audio", "audio/ogg", "Jennifer")
-        assert result["transcript"] == "fallback transcript"
+        assert result["transcript"] == "hello world"
         assert result["provider"].startswith("gemini:")
-        assert "minimax_" in result["reason"]
 
-    def test_raises_when_both_providers_fail(self):
+    def test_raises_when_all_providers_fail(self):
         from core.audio_transcribe import _transcribe
 
-        def fake_minimax(*args, **kwargs):
-            raise RuntimeError("minimax_stt_failed")
+        def fake_openai(*args, **kwargs):
+            raise RuntimeError("openai_stt_failed")
 
         def fake_gemini(*args, **kwargs):
             raise RuntimeError("gemini_stt_failed")
 
-        with patch("core.audio_transcribe._transcribe_with_minimax", side_effect=fake_minimax):
+        with patch("core.audio_transcribe._transcribe_with_openai", side_effect=fake_openai):
             with patch("core.audio_transcribe._transcribe_with_gemini", side_effect=fake_gemini):
-                with pytest.raises(RuntimeError, match="minimax_stt_failed"):
+                with pytest.raises(RuntimeError, match="openai_stt_failed"):
                     _transcribe(b"audio", "audio/ogg", "Jennifer")
-
-    def test_falls_back_to_gemini_when_minimax_returns_empty(self):
-        from core.audio_transcribe import _transcribe
-
-        def fake_minimax(*args, **kwargs):
-            raise RuntimeError("minimax_empty_response")
-
-        def fake_gemini(*args, **kwargs):
-            return "recovered transcript"
-
-        with patch("core.audio_transcribe._transcribe_with_minimax", side_effect=fake_minimax):
-            with patch("core.audio_transcribe._transcribe_with_gemini", side_effect=fake_gemini):
-                result = _transcribe(b"audio", "audio/ogg", "Jennifer")
-        assert result["transcript"] == "recovered transcript"
 
 
 class TestGeminiFallbackConfiguration:
@@ -251,7 +235,7 @@ class TestGeminiFallbackConfiguration:
         from core.audio_transcribe import fallback_stats
 
         stats = fallback_stats()
-        assert stats["primary"] == "MiniMax-M3"
+        assert stats["primary"] == "openai:whisper-1"
         assert stats["fallback"] == "gemini-2.5-flash"
         assert stats["max_bytes"] >= 1024 * 1024
         assert stats["max_duration_sec"] >= 60

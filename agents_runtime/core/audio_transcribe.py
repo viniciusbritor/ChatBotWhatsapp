@@ -1,10 +1,9 @@
-"""Audio transcription with MiniMax M3 -> Gemini 2.5 Flash cascade.
+"""Audio transcription: OpenAI Whisper-1 -> Gemini 2.5 Flash cascade.
 
-The runtime no longer uses local Whisper. Audio is forwarded to the
-MiniMax ``/v1/audio/transcriptions`` endpoint (OpenAI-compatible)
-and, when that fails, to Gemini 2.5 Flash's generateContent audio
-input. Raw audio bytes are never persisted; downloads are streamed and
-expire on the Evolution CDN within minutes.
+Audio is forwarded to OpenAI's ``/v1/audio/transcriptions`` (whisper-1)
+and, when that fails, to Gemini 2.5 Flash's generateContent audio input.
+Raw audio bytes are never persisted; downloads are streamed and expire on
+the Evolution CDN within minutes.
 
 Public API:
 - ``transcribe_bytes(audio_bytes, mimetype, instance=...)``
@@ -28,10 +27,6 @@ import httpx
 from core.secrets import get_secret
 
 logger = logging.getLogger(__name__)
-
-MINIMAX_STT_MODEL = os.getenv("MINIMAX_STT_MODEL", "MiniMax-M3")
-MINIMAX_BASE_URL = os.getenv("MINIMAX_BASE_URL", "https://api.minimax.io/v1")
-MINIMAX_AUDIO_TRANSCRIPTIONS_PATH = "/audio/transcriptions"
 
 GEMINI_STT_MODEL = os.getenv("GEMINI_STT_MODEL", "gemini-2.5-flash")
 GEMINI_BASE_URL = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com")
@@ -142,18 +137,14 @@ async def _download_audio(audio_url: str) -> bytes:
     return audio_bytes
 
 
-def _transcribe_with_minimax(
-    audio_bytes: bytes,
-    mimetype: str,
-    instance: str,
-) -> str:
-    """Call MiniMax /v1/audio/transcriptions (OpenAI-compatible)."""
-    api_key = os.getenv("MINIMAX_API_KEY") or get_secret("MINIMAX_API_KEY")
+def _transcribe_with_openai(audio_bytes: bytes, mimetype: str) -> str:
+    """Primary STT via OpenAI Whisper-1."""
+    api_key = os.getenv("OPENAI_API_KEY") or get_secret("OPENAI_API_KEY")
     if not api_key:
-        raise RuntimeError("minimax_stt_key_not_configured")
-    url = f"{MINIMAX_BASE_URL.rstrip('/')}{MINIMAX_AUDIO_TRANSCRIPTIONS_PATH}"
+        raise RuntimeError("openai_stt_key_not_configured")
+    url = "https://api.openai.com/v1/audio/transcriptions"
     headers = {
-        "Authorization": f"Bearer {api_key}",
+        "Authorization": f"Bearer {api_key.strip().lstrip('\ufeff')}",
     }
     files = {
         "file": (
@@ -163,33 +154,30 @@ def _transcribe_with_minimax(
         ),
     }
     data = {
-        "model": MINIMAX_STT_MODEL,
+        "model": "whisper-1",
         "response_format": "json",
     }
-    response = httpx.post(
-        url,
-        headers=headers,
-        files=files,
-        data=data,
-        timeout=120,
-    )
+    response = httpx.post(url, headers=headers, files=files, data=data, timeout=60)
     if response.status_code == 429:
-        raise RuntimeError("minimax_stt_quota_exceeded")
+        raise RuntimeError("openai_stt_quota_exceeded")
     if response.status_code == 401:
-        raise RuntimeError("minimax_stt_auth_failed")
-    if response.status_code >= 500:
-        raise RuntimeError(f"minimax_stt_server_error_{response.status_code}")
+        raise RuntimeError("openai_stt_auth_failed")
+    if response.status_code != 200:
+        logger.error(
+            "openai_stt_http_error status=%d response=%s",
+            response.status_code,
+            response.text[:500],
+        )
     response.raise_for_status()
     payload = response.json()
-    if "text" in payload:
-        return str(payload["text"])
-    if "data" in payload and payload["data"]:
-        return str(payload["data"][0].get("text", ""))
-    raise RuntimeError("minimax_stt_empty_response")
+    text = payload.get("text") or ""
+    if not text:
+        raise RuntimeError("openai_stt_empty_response")
+    return str(text).strip()
 
 
 def _transcribe_with_gemini(audio_bytes: bytes, mimetype: str) -> str:
-    """Fallback STT via Gemini 2.5 Flash (only when MiniMax fails)."""
+    """Fallback STT via Gemini 2.5 Flash."""
     api_key = os.getenv("GEMINI_API_KEY") or get_secret("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("gemini_stt_key_not_configured")
@@ -204,8 +192,8 @@ def _transcribe_with_gemini(audio_bytes: bytes, mimetype: str) -> str:
                 "role": "user",
                 "parts": [
                     {
-                        "inline_data": {
-                            "mime_type": mimetype,
+                        "inlineData": {
+                            "mimeType": mimetype,
                             "data": base64.b64encode(audio_bytes).decode("ascii"),
                         }
                     },
@@ -222,6 +210,12 @@ def _transcribe_with_gemini(audio_bytes: bytes, mimetype: str) -> str:
         raise RuntimeError("gemini_stt_quota_exceeded")
     if response.status_code == 401:
         raise RuntimeError("gemini_stt_auth_failed")
+    if response.status_code != 200:
+        logger.error(
+            "gemini_stt_http_error status=%d response=%s",
+            response.status_code,
+            response.text[:500],
+        )
     response.raise_for_status()
     payload = response.json()
     candidates = payload.get("candidates") or []
@@ -235,37 +229,38 @@ def _transcribe_with_gemini(audio_bytes: bytes, mimetype: str) -> str:
 
 
 def _transcribe(audio_bytes: bytes, mimetype: str, instance: str) -> Dict[str, Any]:
-    """Try MiniMax M3 first; fall back to Gemini 2.5 Flash on failure."""
+    """Try OpenAI Whisper-1 first; fall back to Gemini 2.5 Flash."""
+    errors = []
     primary_error = None
+
+    # 1. Primary: OpenAI Whisper-1.
     try:
-        text = _transcribe_with_minimax(audio_bytes, mimetype, instance)
+        text = _transcribe_with_openai(audio_bytes, mimetype)
         return {
             "transcript": text,
-            "provider": f"minimax:{MINIMAX_STT_MODEL}",
+            "provider": "openai:whisper-1",
             "reason": "",
         }
     except Exception as exc:  # noqa: BLE001
         primary_error = exc
-        logger.warning(
-            "minimax_stt_failed fallback_to_gemini error=%s",
-            type(exc).__name__,
-        )
+        errors.append(f"openai_{type(exc).__name__}")
+        logger.warning("openai_stt_failed error=%s", type(exc).__name__)
 
+    # 2. Fallback: Gemini 2.5 Flash.
     try:
         text = _transcribe_with_gemini(audio_bytes, mimetype)
+        return {
+            "transcript": text,
+            "provider": f"gemini:{GEMINI_STT_MODEL}",
+            "reason": ";".join(errors),
+        }
     except Exception as exc:  # noqa: BLE001
         logger.error(
-            "audio_stt_all_failed minimax=%s gemini=%s",
-            type(primary_error).__name__,
+            "audio_stt_all_failed errors=%s gemini=%s",
+            errors,
             type(exc).__name__,
         )
-        raise primary_error
-
-    return {
-        "transcript": text,
-        "provider": f"gemini:{GEMINI_STT_MODEL}",
-        "reason": f"minimax_{type(primary_error).__name__}",
-    }
+        raise primary_error or exc
 
 
 async def transcribe_bytes(
@@ -273,7 +268,7 @@ async def transcribe_bytes(
     mimetype: str = "audio/ogg",
     instance: str = "",
 ) -> Dict[str, Any]:
-    """Transcribe raw audio bytes. Cascade: MiniMax M3 -> Gemini 2.5 Flash."""
+    """Transcribe raw audio bytes. Cascade: OpenAI Whisper-1 -> Gemini 2.5 Flash."""
     if not audio_bytes:
         return {"transcript": "", "provider": "none", "reason": "empty"}
     if len(audio_bytes) > AUDIO_MAX_BYTES:
@@ -304,7 +299,7 @@ async def transcribe_url(
 
 def fallback_stats() -> Dict[str, Any]:
     return {
-        "primary": MINIMAX_STT_MODEL,
+        "primary": "openai:whisper-1",
         "fallback": GEMINI_STT_MODEL,
         "max_bytes": AUDIO_MAX_BYTES,
         "max_duration_sec": AUDIO_MAX_DURATION_SEC,
