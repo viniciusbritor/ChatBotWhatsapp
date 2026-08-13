@@ -2280,9 +2280,33 @@ def _normalize_response_identity(text: str) -> str:
 def _bind_tool_args(tool_name: str, tool_args: Dict[str, Any], phone: str, instance: str = "") -> Dict[str, Any]:
     effective_args = dict(tool_args)
     if is_user_scoped_tool(tool_name):
-        effective_args["phone"] = phone
-        effective_args["instance"] = instance
+        fn = get_tool(tool_name)
+        if _fn_accepts_kwarg(fn, "phone"):
+            effective_args["phone"] = phone
+        if _fn_accepts_kwarg(fn, "instance"):
+            effective_args["instance"] = instance
     return effective_args
+
+
+def _fn_accepts_kwarg(fn, name: str) -> bool:
+    """True se ``fn`` aceita o kwarg ``name`` (parametro explicito ou **kwargs).
+
+    Desacopla o binding de tools da assinatura de cada implementacao: tools
+    user-scoped com assinatura estrita (ex: people.search, tasks.list) NAO
+    recebem ``instance``, evitando TypeError. Fallback conservador: se nao
+    for possivel inspecionar a assinatura, injeta (comportamento antigo).
+    """
+    if fn is None:
+        return True
+    import inspect
+
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return True
+    if name in params:
+        return True
+    return any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
 
 
 def _is_ai_message(message: Any) -> bool:

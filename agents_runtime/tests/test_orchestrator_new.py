@@ -245,6 +245,24 @@ class TestResolveAgentTools:
         assert set(INTERNAL_TOOL_IDS).isdisjoint(tools)
 
 
+class TestBindToolArgs:
+    """Fix 12/08/2026: binding assinatura-aware (desacoplado)."""
+
+    def test_nao_injeta_instance_em_funcao_sem_instance(self):
+        from orchestrator import _bind_tool_args
+
+        args = _bind_tool_args("people.search", {"query": "Radakian"}, "5511966830020", "Jennifer")
+        assert args["phone"] == "5511966830020"
+        assert "instance" not in args
+
+    def test_injeta_instance_quando_funcao_aceita(self):
+        from orchestrator import _bind_tool_args
+
+        args = _bind_tool_args("gmail.search_messages", {"query": "x"}, "5511966830020", "Jennifer")
+        assert args["phone"] == "5511966830020"
+        assert args["instance"] == "Jennifer"
+
+
 class TestVerifyCalendarEvent:
     """Fix 12/08/2026: anti-alucinacao apos calendar.create_event."""
 
