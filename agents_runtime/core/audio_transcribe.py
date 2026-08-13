@@ -280,6 +280,7 @@ def _transcribe(audio_bytes: bytes, mimetype: str, instance: str) -> Dict[str, A
     # 1. Groq Whisper (100% Free Tier)
     try:
         text = _transcribe_with_groq(audio_bytes, mimetype)
+        logger.info("groq_stt_success_finops_zero_cost model=%s bytes=%d", GROQ_STT_MODEL, len(audio_bytes))
         return {
             "transcript": text,
             "provider": f"groq:{GROQ_STT_MODEL}",
