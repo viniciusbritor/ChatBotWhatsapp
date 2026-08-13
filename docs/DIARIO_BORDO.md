@@ -4546,3 +4546,27 @@ Onboarding (item 3):
   None quando nao verificavel (evita nudge falso em testes/usuarios conectados).
 
 Testes: 1115 passed, 0 failures. Fix flaky test_qual_compromissos.
+
+## 13/08/2026 (02:50–14:20 BRT) - Groq Whisper STT 100% Free + Comandos por Voz em Grupos + Fixes de LID e Contexto de Grupo
+
+Commits `85a2b14` ao `12d43b8` (branch `test`).
+
+1. **Transcrição de Áudio (Groq Whisper v3 Turbo 100% Grátis)**:
+   - Adicionada integração nativa em `core/audio_transcribe.py` para o modelo `whisper-large-v3-turbo` via Groq Cloud API (`GROQ_API_KEY`).
+   - Nova cascata STT: `Groq Whisper Large v3 Turbo` (Grátis, ~300ms) -> `OpenAI Whisper-1` -> `Gemini 2.5 Flash`.
+   - Unwrap de containers aninhados (`ephemeralMessage`/`viewOnceMessage`) para extração perfeita de áudios no WhatsApp.
+
+2. **Ativação por Comando de Voz em Grupos**:
+   - Quando um áudio é enviado num grupo sem menção nativa do WhatsApp, o sistema transcreve o áudio via Whisper e verifica se a fala contém o nome "Jennifer" ou "Jenni".
+   - Se falou "Jennifer..." (ex: *"Jennifer, quais minhas tarefas?"*), ativa e responde no grupo! Se não falou, silencia sem incomodar o grupo.
+
+3. **ACKs e Frases de Apoio Expansíveis (`_ack.py`)**:
+   - Mensagens de typing indicator e confirmações intermediárias imediatas expandidas para chamadas externas (`contacts`, `tasks`, `drive`, `calendar`, `photos`, `youtube`, `gmail`, `linkedin`, `github`, etc.).
+
+4. **Higienização de LID do Bot e Injeção de Contexto de Grupo**:
+   - Menções cruas do WhatsApp com o LID do Bot (`@75793925419076`) são higienizadas para `@Jennifer` na entrada do webhook, evitando que o LLM veja números soltos e os confunda com IDs de grupo.
+   - Injeção explícita de `[GRUPO ATUAL DO WHATSAPP]` no `system_prompt` (`"Você está respondendo DENTRO do grupo 'testes jen'"`), eliminando respostas técnicas de banco de dados.
+   - Fallback de `group_jid`: `_bind_tool_args` injeta automaticamente o `remote_jid` do grupo em execuções de ferramentas de grupo (`group.*`).
+   - `enrich_member_name`: enriquecimento automático do nome de exibição (`pushName`) de integrantes no documento `group_members/{group_jid}` no Firestore conforme enviam mensagens no grupo.
+
+Suite: 1.148 passed, 0 failures. E2E e builds de CI/CD validados com sucesso no Cloud Run.
