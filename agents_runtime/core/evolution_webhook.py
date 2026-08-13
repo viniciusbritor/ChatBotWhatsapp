@@ -407,6 +407,12 @@ def extract_envelope(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             return None
     extra["was_mentioned"] = was_mentioned
 
+    if is_group and text:
+        bot_lid = _resolve_bot_lid(instance, remote_jid) or ""
+        bot_lid_digits = "".join(c for c in bot_lid.split("@", 1)[0] if c.isdigit())
+        if bot_lid_digits and f"@{bot_lid_digits}" in text:
+            text = text.replace(f"@{bot_lid_digits}", "@Jennifer")
+
     from core.message_ledger import deterministic_request_id
 
     request_id = message_id or deterministic_request_id(

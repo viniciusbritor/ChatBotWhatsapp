@@ -254,6 +254,29 @@ async def _user_groups_context(phone: str) -> str:
         return ""
 
 
+def _get_group_name_by_jid(phone: str, group_jid: str) -> str:
+    """Busca o nome (subject) de um grupo a partir de group_jid e phone."""
+    if not group_jid or "@g.us" not in group_jid:
+        return ""
+    try:
+        from agent_loader import get_user, _canonical_phone
+        canonical = _canonical_phone(phone) or phone
+        user = get_user(canonical) or {}
+        memberships = user.get("group_memberships") or []
+        for m in memberships:
+            if isinstance(m, dict) and m.get("gid") == group_jid:
+                return m.get("subject") or ""
+        from core.message_ledger import _get_firestore
+        db = _get_firestore()
+        if db is not None:
+            doc = db.collection("group_members").document(group_jid.replace("/", "_")).get()
+            if doc.exists:
+                return doc.to_dict().get("subject") or ""
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("get_group_name_by_jid error: %s", exc)
+    return ""
+
+
 async def _resolve_group_mentions(payload: Dict[str, Any]) -> str:
     """Resolve @LID mencionados numa mensagem de grupo para os NOMES.
 
@@ -275,8 +298,27 @@ async def _resolve_group_mentions(payload: Dict[str, Any]) -> str:
         resolved = resolve_mentioned(remote_jid, mentioned)
         if not resolved:
             return ""
-        names = [m["name"] or m["phone"] for m in resolved if m]
-        return "Pessoas mencionadas nesta mensagem: " + ", ".join(names)
+
+        instance = payload.get("instance") or extra.get("instance") or "Jennifer"
+        from core.evolution_webhook import _resolve_bot_lid, _resolve_bot_jid
+        bot_lid = _resolve_bot_lid(instance, remote_jid) or ""
+        bot_jid = _resolve_bot_jid(instance) or ""
+        bot_lid_raw = bot_lid.split("@")[0] if bot_lid else ""
+        bot_jid_raw = bot_jid.split("@")[0] if bot_jid else ""
+
+        names = []
+        for m in resolved:
+            if not m:
+                continue
+            lid_raw = str(m.get("lid") or "").split("@")[0]
+            phone_raw = str(m.get("phone") or "").split("@")[0]
+            if (bot_lid_raw and lid_raw == bot_lid_raw) or (bot_jid_raw and phone_raw == bot_jid_raw):
+                continue  # Pula o proprio bot (Jennifer)
+            names.append(m["name"] or m["phone"])
+
+        if not names:
+            return ""
+        return "Pessoas mencionadas nesta mensagem (alem de voce): " + ", ".join(names)
     except Exception as exc:  # noqa: BLE001
         logger.debug("resolve_group_mentions_skipped exc=%s", exc)
         return ""
@@ -2277,7 +2319,7 @@ def _normalize_response_identity(text: str) -> str:
     return normalized
 
 
-def _bind_tool_args(tool_name: str, tool_args: Dict[str, Any], phone: str, instance: str = "") -> Dict[str, Any]:
+def _bind_tool_args(tool_name: str, tool_args: Dict[str, Any], phone: str, instance: str = "", remote_jid: str = "") -> Dict[str, Any]:
     effective_args = dict(tool_args)
     if is_user_scoped_tool(tool_name):
         fn = get_tool(tool_name)
@@ -2285,6 +2327,11 @@ def _bind_tool_args(tool_name: str, tool_args: Dict[str, Any], phone: str, insta
             effective_args["phone"] = phone
         if _fn_accepts_kwarg(fn, "instance"):
             effective_args["instance"] = instance
+
+    if tool_name.startswith("group."):
+        current_gjid = effective_args.get("group_jid") or ""
+        if ("@g.us" not in str(current_gjid)) and ("@g.us" in str(remote_jid)):
+            effective_args["group_jid"] = remote_jid
     return effective_args
 
 
@@ -2708,22 +2755,38 @@ async def _execute_agent(
 
     group_ctx = ""
     mention_ctx = ""
+    current_group_ctx = ""
     try:
         if phone:
             group_ctx = await _user_groups_context(phone)
         if extra.get("is_group"):
             mention_ctx = await _resolve_group_mentions(payload)
-    except Exception as exc:
+            remote_jid = str(payload.get("remote_jid") or extra.get("remote_jid") or "")
+            group_name = extra.get("group_name") or ""
+            if not group_name and remote_jid:
+                group_name = _get_group_name_by_jid(phone, remote_jid)
+            g_name_str = group_name or "Grupo Atual"
+            current_group_ctx = (
+                f"[GRUPO ATUAL DO WHATSAPP]\n"
+                f"Voce esta respondendo DENTRO do grupo do WhatsApp: '{g_name_str}' (JID: {remote_jid}).\n"
+                f"- Quando o usuario perguntar 'qual grupo voce esta', 'onde estou mandando mensagem' ou pedir acoes/cumprimentos no grupo atual, "
+                f"responda que voce esta no grupo '{g_name_str}'.\n"
+                f"- NUNCA confunda o ID de um usuario/bot (ex: 75793925419076) com o ID do grupo.\n"
+                f"- NUNCA responda com relatorios tecnicos de banco de dados (ex: 'sincronizacao foi concluida para X grupos'). Responda em tom amigavel, humano e natural."
+            )
+    except Exception as exc:  # noqa: BLE001
         logger.warning("user_groups_context_failed agent_id=%s exc=%s", agent_id, exc)
 
     mem_rag = ""
     try:
         mem_rag = await _search_memory(phone, text, limit=5) or ""
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.warning("memory_rag_failed agent_id=%s exc=%s", agent_id, exc)
 
     recent = [i for i in _interaction_history[-4:] if i.get("phone") == phone]
     ctx_parts = []
+    if current_group_ctx:
+        ctx_parts.append(current_group_ctx)
     if facts:
         ctx_parts.insert(0, f"[FATOS DO USUARIO - NAO perguntar novamente]\n{facts}")
     if group_ctx:
