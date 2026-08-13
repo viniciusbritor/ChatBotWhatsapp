@@ -121,6 +121,7 @@ def test_extract_audio_message():
     assert envelope["extra"]["audio_ptt"] is True
     assert "evolution.coherenceai.com.br" in envelope["extra"]["audio_url"]
     assert "AUDIO_MSG_003" in envelope["extra"]["audio_url"]
+    assert envelope["extra"]["audio_message_id"] == "AUDIO_MSG_003"
 
 
 def test_extract_group_message():

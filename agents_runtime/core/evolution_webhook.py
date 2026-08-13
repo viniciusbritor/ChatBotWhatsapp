@@ -298,6 +298,7 @@ def extract_envelope(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         extra["audio_mimetype"] = str(audio_msg.get("mimetype") or "audio/ogg")
         extra["audio_ptt"] = bool(audio_msg.get("ptt", False))
         if message_id:
+            extra["audio_message_id"] = message_id
             extra["audio_url"] = (
                 f"{EVOLUTION_BASE_URL.rstrip('/')}/chat/getMedia/{instance}"
                 f"?messageId={message_id}"

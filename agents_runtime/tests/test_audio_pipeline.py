@@ -70,3 +70,51 @@ async def test_falha_generica_retorna_unavailable():
     with patch("core.audio_transcribe.transcribe_url", side_effect=fake_transcribe):
         result = await transcribe_envelope_audio(payload)
     assert result == {"error": "unavailable:ConnectionError"}
+
+
+@pytest.mark.asyncio
+async def test_baixa_base64_via_evolution_quando_tem_message_id():
+    async def fake_get_base64(instance, message_id, remote_jid):
+        return {"base64": "QUFBQQ==", "mimetype": "audio/ogg"}
+
+    async def fake_transcribe_base64(b64, mime, instance=None):
+        return {"transcript": "ola", "provider": "minimax:MiniMax-M3", "reason": ""}
+
+    payload = {
+        "instance": "Jennifer",
+        "extra": {
+            "has_audio": True,
+            "audio_message_id": "ABC",
+            "remote_jid": "5511@s.whatsapp.net",
+            "audio_url": "https://evolution.coherenceai.com.br/chat/getMedia/Jennifer?messageId=ABC",
+        },
+    }
+    with patch("core.evolution_client.get_base64_from_media_message", side_effect=fake_get_base64), \
+         patch("core.audio_transcribe.transcribe_base64", side_effect=fake_transcribe_base64):
+        result = await transcribe_envelope_audio(payload)
+    assert result["source"] == "base64_media"
+    assert result["transcript"] == "ola"
+
+
+@pytest.mark.asyncio
+async def test_fallback_getmedia_quando_base64_media_falha():
+    async def fake_get_base64(instance, message_id, remote_jid):
+        raise RuntimeError("evolution_get_base64_http_404")
+
+    async def fake_transcribe_url(url, mime, instance=None):
+        return {"transcript": "fallback", "provider": "gemini:gemini-2.5-flash", "reason": "fallback"}
+
+    payload = {
+        "instance": "Jennifer",
+        "extra": {
+            "has_audio": True,
+            "audio_message_id": "ABC",
+            "remote_jid": "5511@s.whatsapp.net",
+            "audio_url": "https://evolution.coherenceai.com.br/chat/getMedia/Jennifer?messageId=ABC",
+        },
+    }
+    with patch("core.evolution_client.get_base64_from_media_message", side_effect=fake_get_base64), \
+         patch("core.audio_transcribe.transcribe_url", side_effect=fake_transcribe_url):
+        result = await transcribe_envelope_audio(payload)
+    assert result["source"] == "url"
+    assert result["transcript"] == "fallback"
