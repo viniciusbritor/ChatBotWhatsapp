@@ -508,10 +508,9 @@ em `agents_runtime/docs/` foram removidas em 22/07/2026.
   `user_id` no `tools.execute()`, `toolkit_versions` em
   `tools/_composio_common.py` (11 apps). `COMPOSIO_API_KEY` no Secret Manager.
   Endpoints Connect: `/api/v1/composio/{status,connect-all,authorize-owner}`.
-- **LLM**: DeepSeek V4 Flash (único provedor desde Fase N).
-- **STT**: Whisper local (`faster-whisper`, `base/int8`). Fallback
-  controlado para Gemini 2.5 Flash apenas em falha técnica do Whisper
-  **e** com consentimento explícito.
+- **LLM / Classificação**: Groq `llama-3.1-8b-instant` (classificador zero custo, ~100ms) com fallback para DeepSeek V4 Flash. Execução principal de agentes via DeepSeek V4 Flash (provedor principal único).
+- **STT**: Cascata Groq Whisper Large v3 Turbo (Grátis, ~300ms) → OpenAI Whisper-1 → Gemini 2.5 Flash.
+- **Workers**: `proactive_worker` ativo. Job em lote `ata_worker` foi removido (substituído por fluxo síncrono sob demanda).
 - **Chunking**: `_chunk_text_semantic()` com detecção de hierarquia
   jurídica brasileira — Lei, Título, Capítulo, Seção, Art., §, Inciso.
 - **TTS / tick azul**: `markMessagesAsRead` (Evolution v2) automático

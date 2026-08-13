@@ -4570,3 +4570,22 @@ Commits `85a2b14` ao `12d43b8` (branch `test`).
    - `enrich_member_name`: enriquecimento automático do nome de exibição (`pushName`) de integrantes no documento `group_members/{group_jid}` no Firestore conforme enviam mensagens no grupo.
 
 Suite: 1.148 passed, 0 failures. E2E e builds de CI/CD validados com sucesso no Cloud Run.
+
+## 13/08/2026 (20:40 BRT) - Remoção do ata_worker + Classificador de Intenção Zero-Custo Groq + Alinhamento CI/CD
+
+1. **Remoção do Job `ata_worker` Obsoleto**:
+   - Apagada a pasta `agents_runtime/ata_worker/` e os testes `test_ata_worker.py`.
+   - Apagada a esteira `cloudbuild-ata-test.yaml`.
+   - Removido o agente `ata-generator` de `scripts/seed_initial_data.py`.
+   - Atualizados `check_lgpd_compliance.py` e `test_lgpd_compliance.py` (gate LGPD mantido e aprovado sem o Dockerfile do ata_worker).
+
+2. **Classificador de Intenção Zero Custo (Groq `llama-3.1-8b-instant`)**:
+   - Função `_classify_intent_llm()` em `orchestrator.py` atualizada para invocar `llama-3.1-8b-instant` via Groq Cloud API (`GROQ_API_KEY`) com timeout de 3s.
+   - Custo do classificador reduzido a R$ 0,00 com resposta ultra-rápida (~100ms), mantendo o DeepSeek V4 Flash como fallback automático.
+
+3. **Limpeza da Esteira CI/CD e Documentação**:
+   - Limpeza das env vars inativas (`JENNIFER_MODEL_ID`, `JENNIFER_FALLBACK_MODEL_ID`) no `cloudbuild-test.yaml`.
+   - Garantida injeção do `GROQ_API_KEY` em `--set-secrets` do Cloud Run.
+   - Sincronização dos 4 arquivos canônicos (`ARQUITETURA.md`, `HARNESS.md`, `GUARDRAILS.md`, `DIARIO_BORDO.md`) e `AGENTS.md`.
+
+Suite: Suíte de testes aprovada. Script `check_lgpd_compliance.py` executado com status `LGPD compliance checks passed`.

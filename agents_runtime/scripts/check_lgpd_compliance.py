@@ -9,7 +9,6 @@ REQUIRED_FILES = [
     REPO_ROOT / "docs" / "PRIVACIDADE.md",
     REPO_ROOT / "docs" / "TERMOS.md",
     ROOT / "Dockerfile",
-    ROOT / "ata_worker" / "Dockerfile",
     ROOT / "proactive_worker" / "Dockerfile",
 ]
 REQUIRED_SNIPPETS = {

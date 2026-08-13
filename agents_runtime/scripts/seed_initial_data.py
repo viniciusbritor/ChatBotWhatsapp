@@ -320,39 +320,6 @@ DEFAULT_AGENTS = [
         "created_at": _now_iso(),
         "updated_at": _now_iso(),
     },
-    {
-        "id": "ata-generator",
-        "name": "Ata Generator",
-        "role": "specialist",
-        "parent_id": "jennifier",
-        "model": "deepseek-v4-flash",
-        "model_escalation": None,
-        "escalation_threshold": -2,
-        "no_escalation": True,
-        "thinking": "enabled",
-        "system_prompt": (
-            "Voce gera atas de reuniao. Recebe dados do Calendar (titulo, participantes, horario) "
-            "e dados do Gmail (thread da reuniao). Gera documento markdown estruturado com: "
-            "titulo, data, participantes, pauta, decisoes, proximos passos. "
-            "Use tools Drive para upload em Omnichannel/Atas/. "
-            "Use Gmail para notificar organizador com link do Drive."
-        ),
-        "skills": [],
-        "delegates_to": [],
-        "tools": [
-            "calendar.list_events",
-            "gmail.get_thread",
-            "gmail.search_messages",
-            "drive.find_omnichannel_atas_folder",
-            "drive.upload_file",
-            "gmail.send_message",
-        ],
-        "instances": ["jennifer"],
-        "enabled": True,
-        "system_prompt_version": 1,
-        "created_at": _now_iso(),
-        "updated_at": _now_iso(),
-    },
 ]
 
 

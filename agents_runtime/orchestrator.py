@@ -2045,23 +2045,50 @@ _CLASSIFIER_PROMPT = (
 
 async def _classify_intent_llm(text: str) -> str:
     from langchain_openai import ChatOpenAI
+    from core.secrets import get_secret
 
-    base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
-    llm = ChatOpenAI(
-        model="deepseek-v4-flash",
-        api_key=os.getenv("DEEPSEEK_API_KEY", ""),
-        base_url=base_url,
-        temperature=0,
-        max_tokens=5,
-        timeout=5,
-        extra_body={"cache_mode": "default"},
-    )
-    prompt = _CLASSIFIER_PROMPT.format(text=text[:500])
-    result = await asyncio.to_thread(llm.invoke, prompt)
-    raw = getattr(result, "content", str(result)).strip().lower()
     valid = {"juridicas", "editais", "academica", "anotacoes", "ferramentas", "conversa"}
-    if raw in valid:
-        return raw
+    prompt = _CLASSIFIER_PROMPT.format(text=text[:500])
+
+    # 1. Groq (Zero-cost, Ultra-fast Llama-3.1-8b-instant)
+    groq_key = get_secret("GROQ_API_KEY") or os.getenv("GROQ_API_KEY", "")
+    if groq_key:
+        try:
+            llm_groq = ChatOpenAI(
+                model="llama-3.1-8b-instant",
+                api_key=groq_key,
+                base_url="https://api.groq.com/openai/v1",
+                temperature=0,
+                max_tokens=5,
+                timeout=3,
+            )
+            result = await asyncio.to_thread(llm_groq.invoke, prompt)
+            raw = getattr(result, "content", str(result)).strip().lower()
+            if raw in valid:
+                return raw
+        except Exception as exc:
+            logger.warning("groq_intent_classifier_failed, falling back to DeepSeek: %s", exc)
+
+    # 2. Fallback: DeepSeek V4 Flash
+    try:
+        base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
+        deepseek_key = get_secret("DEEPSEEK_API_KEY") or os.getenv("DEEPSEEK_API_KEY", "")
+        llm = ChatOpenAI(
+            model="deepseek-v4-flash",
+            api_key=deepseek_key,
+            base_url=base_url,
+            temperature=0,
+            max_tokens=5,
+            timeout=5,
+            extra_body={"cache_mode": "default"},
+        )
+        result = await asyncio.to_thread(llm.invoke, prompt)
+        raw = getattr(result, "content", str(result)).strip().lower()
+        if raw in valid:
+            return raw
+    except Exception as exc:
+        logger.warning("deepseek_intent_classifier_failed: %s", exc)
+
     return "conversa"
 
 
