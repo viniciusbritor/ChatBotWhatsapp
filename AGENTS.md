@@ -91,9 +91,9 @@ gcloud --project=coherence-ominichannel-fs logging read "resource.type=cloud_run
 
 ## Pendências externas (Fase F)
 
-1. Deletar secrets órfãos (`whatsapp-agente-url`, `agents-runtime-sa-token-clean`, `google-oauth-token`).
-2. Deletar pasta local `WhatsappAgente/` e repo `viniciusbritor/WhatsappAgente`.
-3. Configurar OAuth Client no Google Cloud Console (Authorized redirect URIs) — `docs/fases/fase_F/oauth_setup.md`.
+1. ~~Deletar secrets órfãos~~ — **concluído (12/08/2026)**: `whatsapp-agente-url`, `agents-runtime-sa-token-clean`, `google-oauth-token` removidos; injeção morta `GOOGLE_OAUTH_TOKEN` removida do `cloudbuild-ata-test.yaml`.
+2. ~~Deletar pasta local `WhatsappAgente/` e repo `viniciusbritor/WhatsappAgente`~~ — **concluído (12/08/2026)**: repo arquivado no GitHub.
+3. Configurar OAuth Client no Google Cloud Console (Authorized redirect URIs) — `docs/fases/fase_F/oauth_setup.md` (fluxo validado funcional em test: token per-user salvo com os 8 escopos).
 
 ## Onde **NÃO** mexer
 
