@@ -386,6 +386,12 @@ def extract_envelope(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                     lid_digits = "".join(c for c in bot_lid.split("@", 1)[0] if c.isdigit())
                     if lid_digits and lid_digits in mentioned_digits:
                         was_mentioned = True
+        extra["was_mentioned_native"] = was_mentioned
+        # Em grupo, se a mensagem for audio, permite passar para transcrição
+        # para verificar se a pessoa FALOU "Jennifer" no audio.
+        if not was_mentioned and extra.get("has_audio"):
+            was_mentioned = True
+
         if not was_mentioned:
             logger.info(
                 "webhook_group_mention_skipped instance=%s group=%s phone=%s mentioned=%s bot_jid=%s",

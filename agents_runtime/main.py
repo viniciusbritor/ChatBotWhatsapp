@@ -583,6 +583,8 @@ async def pubsub_push(request: Request):
         if (p.get("extra") or {}).get("has_audio"):
             audio = await transcribe_envelope_audio(p)
             if "error" in audio:
+                if (p.get("extra") or {}).get("is_group") and not (p.get("extra") or {}).get("was_mentioned_native"):
+                    return {"reply": "", "delay_ms": 0, "presence": "paused"}
                 await index_audio_failure_for_audit(p, audio["error"])
                 reply = "Nao consegui transcrever esse audio agora. Pode tentar novamente ou enviar em texto?"
                 result = {
@@ -597,10 +599,19 @@ async def pubsub_push(request: Request):
                     },
                 }
             else:
-                p["text"] = audio["transcript"]
+                transcript = audio["transcript"]
+                p["text"] = transcript
                 extra_updates = p.setdefault("extra", {})
                 extra_updates["audio_transcribed"] = True
                 extra_updates["audio_provider"] = audio["provider"]
+
+                # Em GRUPO: se o audio nao veio com mencao nativa do WhatsApp,
+                # verificar se a pessoa FALOU "Jennifer" ou "Jenni" no audio.
+                if extra_updates.get("is_group") and not extra_updates.get("was_mentioned_native"):
+                    low_text = transcript.lower()
+                    if "jennifer" not in low_text and "jenni" not in low_text:
+                        logger.info("webhook_group_audio_skipped_no_spoken_mention phone=%s transcript=%s", p.get("phone"), transcript[:50])
+                        return {"reply": "", "delay_ms": 0, "presence": "paused"}
 
         if result is None:
             result = await orchestrate(p)
