@@ -124,6 +124,36 @@ def test_extract_audio_message():
     assert envelope["extra"]["audio_message_id"] == "AUDIO_MSG_003"
 
 
+def test_extract_ephemeral_audio_message():
+    payload = {
+        "event": "MESSAGES_UPSERT",
+        "instance": "jennifer",
+        "data": {
+            "key": {
+                "remoteJid": "5511966830020@s.whatsapp.net",
+                "fromMe": False,
+                "id": "EPHEMERAL_AUDIO_001",
+            },
+            "pushName": "Vinicius",
+            "message": {
+                "ephemeralMessage": {
+                    "message": {
+                        "audioMessage": {
+                            "mimetype": "audio/ogg; codecs=opus",
+                            "ptt": True,
+                        }
+                    }
+                }
+            },
+            "messageType": "ephemeralMessage",
+        },
+    }
+    envelope = extract_envelope(payload)
+    assert envelope is not None
+    assert envelope["text"] == "[audio]"
+    assert envelope["extra"]["has_audio"] is True
+
+
 def test_extract_group_message():
     with _patch_bot_jid():
         envelope = extract_envelope(SAMPLE_GROUP_PAYLOAD)

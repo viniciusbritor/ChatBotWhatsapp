@@ -223,6 +223,25 @@ def _extract_mentioned_jids(message: Dict[str, Any], data: Optional[Dict[str, An
     return mentioned
 
 
+def _unwrap_message(msg: Dict[str, Any]) -> Dict[str, Any]:
+    """Unwrap nested Baileys message containers (ephemeralMessage, viewOnceMessage, etc.)."""
+    curr = msg
+    while isinstance(curr, dict):
+        if "ephemeralMessage" in curr and isinstance(curr["ephemeralMessage"], dict):
+            curr = curr["ephemeralMessage"].get("message") or {}
+        elif "viewOnceMessage" in curr and isinstance(curr["viewOnceMessage"], dict):
+            curr = curr["viewOnceMessage"].get("message") or {}
+        elif "viewOnceMessageV2" in curr and isinstance(curr["viewOnceMessageV2"], dict):
+            curr = curr["viewOnceMessageV2"].get("message") or {}
+        elif "documentWithCaptionMessage" in curr and isinstance(curr["documentWithCaptionMessage"], dict):
+            curr = curr["documentWithCaptionMessage"].get("message") or {}
+        elif "ptvMessage" in curr and isinstance(curr["ptvMessage"], dict):
+            curr = curr["ptvMessage"].get("message") or {}
+        else:
+            break
+    return curr if isinstance(curr, dict) else {}
+
+
 def extract_envelope(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Return normalized envelope or None when the payload should be ignored.
 
@@ -243,6 +262,8 @@ def extract_envelope(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return None
 
     message = data.get("message") or {}
+    if isinstance(message, dict):
+        message = _unwrap_message(message)
     key = data.get("key") or {}
 
     if key.get("fromMe"):
@@ -292,8 +313,8 @@ def extract_envelope(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         text = message["conversation"]
     elif "extendedTextMessage" in message and isinstance(message["extendedTextMessage"], dict):
         text = str(message["extendedTextMessage"].get("text") or "")
-    elif "audioMessage" in message and isinstance(message["audioMessage"], dict):
-        audio_msg = message["audioMessage"]
+    elif ("audioMessage" in message and isinstance(message["audioMessage"], dict)) or ("voiceMessage" in message and isinstance(message["voiceMessage"], dict)):
+        audio_msg = message.get("audioMessage") or message.get("voiceMessage") or {}
         extra["has_audio"] = True
         extra["audio_mimetype"] = str(audio_msg.get("mimetype") or "audio/ogg")
         extra["audio_ptt"] = bool(audio_msg.get("ptt", False))
