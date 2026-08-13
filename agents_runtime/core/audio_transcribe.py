@@ -176,6 +176,50 @@ def _transcribe_with_openai(audio_bytes: bytes, mimetype: str) -> str:
     return str(text).strip()
 
 
+GROQ_STT_MODEL = os.getenv("GROQ_STT_MODEL", "whisper-large-v3-turbo")
+GROQ_BASE_URL = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+
+
+def _transcribe_with_groq(audio_bytes: bytes, mimetype: str) -> str:
+    """Primary 100% Free STT via Groq Cloud (Whisper Large v3 Turbo)."""
+    api_key = os.getenv("GROQ_API_KEY") or get_secret("GROQ_API_KEY")
+    if not api_key:
+        raise RuntimeError("groq_stt_key_not_configured")
+    url = f"{GROQ_BASE_URL.rstrip('/')}/audio/transcriptions"
+    headers = {
+        "Authorization": f"Bearer {api_key.strip().lstrip('\ufeff')}",
+    }
+    files = {
+        "file": (
+            f"audio{_audio_extension(mimetype)}",
+            audio_bytes,
+            mimetype,
+        ),
+    }
+    data = {
+        "model": GROQ_STT_MODEL,
+        "response_format": "json",
+        "language": "pt",
+    }
+    response = httpx.post(url, headers=headers, files=files, data=data, timeout=30)
+    if response.status_code == 429:
+        raise RuntimeError("groq_stt_quota_exceeded")
+    if response.status_code == 401:
+        raise RuntimeError("groq_stt_auth_failed")
+    if response.status_code != 200:
+        logger.error(
+            "groq_stt_http_error status=%d response=%s",
+            response.status_code,
+            response.text[:500],
+        )
+    response.raise_for_status()
+    payload = response.json()
+    text = payload.get("text") or ""
+    if not text:
+        raise RuntimeError("groq_stt_empty_response")
+    return str(text).strip()
+
+
 def _transcribe_with_gemini(audio_bytes: bytes, mimetype: str) -> str:
     """Fallback STT via Gemini 2.5 Flash."""
     api_key = os.getenv("GEMINI_API_KEY") or get_secret("GEMINI_API_KEY")
@@ -229,24 +273,39 @@ def _transcribe_with_gemini(audio_bytes: bytes, mimetype: str) -> str:
 
 
 def _transcribe(audio_bytes: bytes, mimetype: str, instance: str) -> Dict[str, Any]:
-    """Try OpenAI Whisper-1 first; fall back to Gemini 2.5 Flash."""
+    """Cascade: Groq (Whisper Large v3) -> OpenAI Whisper-1 -> Gemini 2.5 Flash."""
     errors = []
     primary_error = None
 
-    # 1. Primary: OpenAI Whisper-1.
+    # 1. Groq Whisper (100% Free Tier)
+    try:
+        text = _transcribe_with_groq(audio_bytes, mimetype)
+        return {
+            "transcript": text,
+            "provider": f"groq:{GROQ_STT_MODEL}",
+            "reason": "",
+        }
+    except Exception as exc:  # noqa: BLE001
+        if primary_error is None:
+            primary_error = exc
+        errors.append(f"groq_{type(exc).__name__}")
+        logger.warning("groq_stt_failed error=%s", type(exc).__name__)
+
+    # 2. OpenAI Whisper-1
     try:
         text = _transcribe_with_openai(audio_bytes, mimetype)
         return {
             "transcript": text,
             "provider": "openai:whisper-1",
-            "reason": "",
+            "reason": ";".join(errors),
         }
     except Exception as exc:  # noqa: BLE001
-        primary_error = exc
+        if primary_error is None:
+            primary_error = exc
         errors.append(f"openai_{type(exc).__name__}")
         logger.warning("openai_stt_failed error=%s", type(exc).__name__)
 
-    # 2. Fallback: Gemini 2.5 Flash.
+    # 3. Fallback: Gemini 2.5 Flash
     try:
         text = _transcribe_with_gemini(audio_bytes, mimetype)
         return {

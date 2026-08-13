@@ -180,19 +180,37 @@ class TestPublicHostCheck:
 
 
 class TestCascadeTranscribe:
-    def test_returns_openai_result_when_successful(self):
+    def test_returns_groq_result_when_successful(self):
         from core.audio_transcribe import _transcribe
+
+        def fake_groq(*args, **kwargs):
+            return "groq transcript"
+
+        with patch("core.audio_transcribe._transcribe_with_groq", side_effect=fake_groq):
+            result = _transcribe(b"audio", "audio/ogg", "Jennifer")
+        assert result["transcript"] == "groq transcript"
+        assert result["provider"].startswith("groq:")
+
+    def test_returns_openai_result_when_groq_fails(self):
+        from core.audio_transcribe import _transcribe
+
+        def fake_groq(*args, **kwargs):
+            raise RuntimeError("groq_stt_failed")
 
         def fake_openai(*args, **kwargs):
             return "whisper transcript"
 
-        with patch("core.audio_transcribe._transcribe_with_openai", side_effect=fake_openai):
-            result = _transcribe(b"audio", "audio/ogg", "Jennifer")
+        with patch("core.audio_transcribe._transcribe_with_groq", side_effect=fake_groq):
+            with patch("core.audio_transcribe._transcribe_with_openai", side_effect=fake_openai):
+                result = _transcribe(b"audio", "audio/ogg", "Jennifer")
         assert result["transcript"] == "whisper transcript"
         assert result["provider"] == "openai:whisper-1"
 
-    def test_returns_gemini_result_when_openai_fails(self):
+    def test_returns_gemini_result_when_groq_and_openai_fail(self):
         from core.audio_transcribe import _transcribe
+
+        def fake_groq(*args, **kwargs):
+            raise RuntimeError("groq_stt_failed")
 
         def fake_openai(*args, **kwargs):
             raise RuntimeError("openai_stt_failed")
@@ -200,14 +218,18 @@ class TestCascadeTranscribe:
         def fake_gemini(*args, **kwargs):
             return "hello world"
 
-        with patch("core.audio_transcribe._transcribe_with_openai", side_effect=fake_openai):
-            with patch("core.audio_transcribe._transcribe_with_gemini", side_effect=fake_gemini):
-                result = _transcribe(b"audio", "audio/ogg", "Jennifer")
+        with patch("core.audio_transcribe._transcribe_with_groq", side_effect=fake_groq):
+            with patch("core.audio_transcribe._transcribe_with_openai", side_effect=fake_openai):
+                with patch("core.audio_transcribe._transcribe_with_gemini", side_effect=fake_gemini):
+                    result = _transcribe(b"audio", "audio/ogg", "Jennifer")
         assert result["transcript"] == "hello world"
         assert result["provider"].startswith("gemini:")
 
     def test_raises_when_all_providers_fail(self):
         from core.audio_transcribe import _transcribe
+
+        def fake_groq(*args, **kwargs):
+            raise RuntimeError("groq_stt_failed")
 
         def fake_openai(*args, **kwargs):
             raise RuntimeError("openai_stt_failed")
@@ -215,10 +237,11 @@ class TestCascadeTranscribe:
         def fake_gemini(*args, **kwargs):
             raise RuntimeError("gemini_stt_failed")
 
-        with patch("core.audio_transcribe._transcribe_with_openai", side_effect=fake_openai):
-            with patch("core.audio_transcribe._transcribe_with_gemini", side_effect=fake_gemini):
-                with pytest.raises(RuntimeError, match="openai_stt_failed"):
-                    _transcribe(b"audio", "audio/ogg", "Jennifer")
+        with patch("core.audio_transcribe._transcribe_with_groq", side_effect=fake_groq):
+            with patch("core.audio_transcribe._transcribe_with_openai", side_effect=fake_openai):
+                with patch("core.audio_transcribe._transcribe_with_gemini", side_effect=fake_gemini):
+                    with pytest.raises(RuntimeError, match="groq_stt_failed"):
+                        _transcribe(b"audio", "audio/ogg", "Jennifer")
 
 
 class TestGeminiFallbackConfiguration:
