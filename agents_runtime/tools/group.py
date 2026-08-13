@@ -467,9 +467,40 @@ def _write_user_group_memberships(db, memberships: Dict[str, list]) -> int:
             )
             invalidate(canonical)
             updated += 1
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.warning("sync_group_members membership %s error: %s", canonical, exc)
     return updated
+
+
+async def enrich_member_name(group_jid: str, phone: str, name: str) -> bool:
+    """Enriquece o nome (pushName) de um membro no snapshot group_members no Firestore."""
+    if not group_jid or not phone or not name or "@g.us" not in group_jid:
+        return False
+    try:
+        db = _get_firestore()
+        if db is None:
+            return False
+        doc_ref = db.collection("group_members").document(group_jid.replace("/", "_"))
+        doc = doc_ref.get()
+        if not doc.exists:
+            return False
+        data = doc.to_dict() or {}
+        members = data.get("members", [])
+        changed = False
+        digits = "".join(c for c in phone if c.isdigit())
+        for m in members:
+            m_phone = "".join(c for c in str(m.get("phone") or "") if c.isdigit())
+            if m_phone and m_phone == digits:
+                if m.get("name") != name:
+                    m["name"] = name
+                    changed = True
+                break
+        if changed:
+            doc_ref.update({"members": members, "updated_at": _now_iso()})
+            return True
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("enrich_member_name_failed group=%s phone=%s exc=%s", group_jid, phone, exc)
+    return False
 
 
 def _cached_member_name(group_jid: str, phone: str) -> str:

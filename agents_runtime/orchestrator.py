@@ -2774,6 +2774,11 @@ async def _execute_agent(
                 f"- NUNCA confunda o ID de um usuario/bot (ex: 75793925419076) com o ID do grupo.\n"
                 f"- NUNCA responda com relatorios tecnicos de banco de dados (ex: 'sincronizacao foi concluida para X grupos'). Responda em tom amigavel, humano e natural."
             )
+            if remote_jid and phone:
+                sender_name = str(payload.get("sender_name") or "")
+                if sender_name and sender_name != "user":
+                    from tools.group import enrich_member_name
+                    asyncio.create_task(enrich_member_name(remote_jid, phone, sender_name))
     except Exception as exc:  # noqa: BLE001
         logger.warning("user_groups_context_failed agent_id=%s exc=%s", agent_id, exc)
 
