@@ -33,21 +33,46 @@ async def transcribe_envelope_audio(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     mimetype = extra.get("audio_mimetype", "audio/ogg")
     instance = payload.get("instance", "Jennifer")
-    try:
-        if extra.get("audio_base64"):
-            result = await transcribe_base64(extra["audio_base64"], mimetype, instance=instance)
-            source = "base64"
-        elif extra.get("audio_url"):
-            result = await transcribe_url(extra["audio_url"], mimetype, instance=instance)
-            source = "url"
-        else:
-            return {"error": "audio_payload_missing"}
-    except (ValueError, RuntimeError) as exc:
-        logger.warning("audio_transcription_rejected code=%s", exc)
-        return {"error": str(exc)}
-    except Exception as exc:  # noqa: BLE001
-        logger.error("audio_transcription_failed type=%s", type(exc).__name__)
-        return {"error": f"unavailable:{type(exc).__name__}"}
+
+    # 1) Primario: baixa base64 via evolution_client (POST
+    #    getBase64FromMediaMessage — o mesmo endpoint dos anexos, que
+    #    comprovadamente retorna 201 em test; o GET getMedia retorna 404).
+    result = None
+    source = None
+    raw_id = extra.get("audio_message_id") or ""
+    remote_jid = extra.get("remote_jid") or ""
+    if raw_id and remote_jid:
+        try:
+            from core.evolution_client import get_base64_from_media_message
+
+            media = await get_base64_from_media_message(instance, raw_id, remote_jid)
+            if isinstance(media, dict) and media.get("base64"):
+                result = await transcribe_base64(
+                    media["base64"], media.get("mimetype") or mimetype, instance=instance
+                )
+                source = "base64_media"
+        except (ValueError, RuntimeError) as exc:
+            logger.warning("audio_base64_media_failed fallback_getMedia code=%s", exc)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("audio_base64_media_failed fallback_getMedia type=%s", type(exc).__name__)
+
+    # 2) Fallback: GET getMedia (fluxo antigo) ou base64 inline do envelope.
+    if result is None:
+        try:
+            if extra.get("audio_base64"):
+                result = await transcribe_base64(extra["audio_base64"], mimetype, instance=instance)
+                source = "base64"
+            elif extra.get("audio_url"):
+                result = await transcribe_url(extra["audio_url"], mimetype, instance=instance)
+                source = "url"
+            else:
+                return {"error": "audio_payload_missing"}
+        except (ValueError, RuntimeError) as exc:
+            logger.warning("audio_transcription_rejected code=%s", exc)
+            return {"error": str(exc)}
+        except Exception as exc:  # noqa: BLE001
+            logger.error("audio_transcription_failed type=%s", type(exc).__name__)
+            return {"error": f"unavailable:{type(exc).__name__}"}
 
     transcript = result.get("transcript") or ""
     logger.info(
