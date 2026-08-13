@@ -1562,17 +1562,10 @@ async def admin_users_list(request: Request):
     return JSONResponse(content={"users": users})
 
 
-# Mapa scope-prefixo -> label/icon de servico Google (D1: dinamico).
-# O portal renderiza exatamente o que este mapa gera; adicionar um novo
-# scope em OAUTH_SCOPES + entrada aqui faz o servico aparecer automaticamente.
-_GOOGLE_SERVICE_MAP = [
-    ("calendar", "Google Calendar", "calendar_month"),
-    ("gmail", "Gmail", "mail"),
-    ("drive", "Google Drive", "folder"),
-    ("tasks", "Google Tasks", "checklist"),
-    ("people", "Google Contacts", "people"),
-    ("photos", "Google Photos", "photo_library"),
-]
+# Mapa de servicos Google (D1: dinamico). Fonte unica: core.google_scopes.
+# O portal renderiza exatamente o que esse modulo gera; o fragmento de escopo
+# (svc["scope"]) e o que liga o servico ao token OAuth concedido.
+from core.google_scopes import GOOGLE_SERVICES as _GOOGLE_SERVICE_MAP  # noqa: E402
 
 
 def _build_owner_hash_map() -> Dict[str, str]:
@@ -1615,13 +1608,13 @@ async def _enrich_user_connections(user: Dict[str, Any]) -> None:
             "scopes_loaded": len(scopes),
             "services": [
                 {
-                    "id": svc_id,
-                    "label": label,
-                    "icon": icon,
-                    "connected": svc_id in scope_str,
+                    "id": svc["id"],
+                    "label": svc["label"],
+                    "icon": svc["icon"],
+                    "connected": svc["scope"] in scope_str,
                     "needs_scope": True,
                 }
-                for svc_id, label, icon in _GOOGLE_SERVICE_MAP
+                for svc in _GOOGLE_SERVICE_MAP
             ],
             "scopes": [str(s) for s in scopes],
         }
@@ -1991,16 +1984,7 @@ async def root_redirect(request: Request):
 
 OAUTH_CLIENT_ID = os.getenv("OAUTH_CLIENT_ID", "").strip()
 OAUTH_CLIENT_SECRET = (os.getenv("OAUTH_CLIENT_SECRET") or "").strip()
-OAUTH_SCOPES = [
-    "https://www.googleapis.com/auth/calendar",
-    "https://www.googleapis.com/auth/calendar.events",
-    "https://www.googleapis.com/auth/drive",
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.send",
-    "https://www.googleapis.com/auth/tasks",
-    "https://www.googleapis.com/auth/contacts.readonly",
-    "https://www.googleapis.com/auth/photoslibrary.readonly",
-]
+from core.google_scopes import ALL_OAUTH_SCOPES as OAUTH_SCOPES  # noqa: E402
 OAUTH_REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI", "").strip()
 
 
