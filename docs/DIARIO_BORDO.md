@@ -1,5 +1,31 @@
 # Diario de Bordo — ChatBotWhatsapp
 
+## 12/08/2026 (17:00 BRT) — Correções em 3 branches desacopladas + cleanup Fase F
+
+### Diagnóstico via logs (após auto-exposição ativa)
+Teste no WhatsApp revelou 3 causas raiz independentes:
+1. **Contatos/Tasks/Fotos**: `TypeError: ... unexpected keyword argument 'instance'`
+   — `_bind_tool_args` injetava `instance` em toda tool user-scoped, mas
+   people/tasks/photos têm assinatura estrita (gmail/calendar/drive aceitam).
+2. **Portal "people: Pendente"**: `_enrich_user_connections` fazia
+   `"people" in scope_str` — mas o escopo é `contacts.readonly`. Token no
+   Firestore estava correto (8 escopos). Bug de substring.
+3. **Áudio**: `GET /chat/getMedia?messageId=...` retorna **404** na Evolution;
+   o endpoint que funciona é `POST /chat/getBase64FromMediaMessage` (usado
+   nos anexos, comprovado 201 em test).
+
+### Branches
+| Branch | Fix |
+|---|---|
+| `fix/tools-instance-param` | `_bind_tool_args` **assinatura-aware** (desacoplado): injeta `phone`/`instance` só se a função aceitar (inspect, fallback conservador). Guard test: nenhum kwarg injetado pode quebrar tool user-scoped. |
+| `fix/portal-people-scope` | Novo `core/google_scopes.py` (fonte única): `GOOGLE_SERVICES` (id/label/icon/**scope**), `ALL_OAUTH_SCOPES`, `service_is_connected()`. main.py consome o módulo; `connected` por fragmento de escopo. |
+| `fix/audio-base64-media` | `evolution_webhook` salva `extra["audio_message_id"]` (id cru). `audio_pipeline` baixa via `get_base64_from_media_message` (primário) → fallback `GET getMedia`. `cloudbuild-test.yaml` ganha `MINIMAX_API_KEY` no `--set-secrets`. |
+| `chore/cleanup-fase-f-pendencias` | Remove injeção morta `GOOGLE_OAUTH_TOKEN` do `cloudbuild-ata-test.yaml`; deleta secrets `whatsapp-agente-url`, `agents-runtime-sa-token-clean`, `google-oauth-token`; deleta pasta local `WhatsappAgente/`; arquiva repo `viniciusbritor/WhatsappAgente`. |
+
+### Validação
+- Suite completa verde em cada branch (1141 → 1147 passed).
+- Deploys um a um via trigger 2nd-gen (us-central1), todos SUCCESS.
+
 ## 12/08/2026 (16:30 BRT) — Auto-exposição de tools + STT real no caminho de produção
 
 ### Contexto
