@@ -2,10 +2,8 @@
 
 > **Ambiente Operacional:** Instrucoes para configurar, executar e depurar o modulo `omnichannel-agentes` + servico `agents_runtime`.
 
-> **Última revisão:** 2026-07-31. **Regra unificada de acesso a conhecimento**
-> (RAG vs Drive vs Chat memory, com branch de grupo) — ver
-> [`docs/ARQUITETURA.md §0.0.4`](./ARQUITETURA.md#004-regra-unificada-de-acesso-a-conhecimento-31072026)
-> e [`docs/GUARDRAILS.md`](./GUARDRAILS.md).
+> **Última revisão:** 2026-08-13 — Groq Whisper 100% Free STT, comandos por voz em grupo, higienização de LID do Bot (`@75793925419076`) e esteira CI/CD estrita (proibido gcloud builds submit manual).
+> Ver [`docs/ARQUITETURA.md`](./ARQUITETURA.md) e [`docs/GUARDRAILS.md`](./GUARDRAILS.md).
 
 > **Diagrama visual ponta a ponta:** [`ARQUITETURA.md`](./ARQUITETURA.md#0-diagrama-visual-ponta-a-ponta).
 > O diagrama mostra o caminho `WhatsApp → Evolution → Cloud Run →

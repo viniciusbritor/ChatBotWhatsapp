@@ -1,7 +1,7 @@
 # Guardrails e Regras Inegociáveis — ChatBotWhatsapp
 
 > Regras DURAS que todos os agentes IA e humanos devem obedecer neste projeto.
-> Última atualização: **2026-08-07** — Harness DeepSeek v4: proibido `thinking` no `model_kwargs`.
+> Última atualização: **2026-08-13** — Obrigatoriedade estrita de deploy via Esteira CI/CD (Cloud Build) + Harness DeepSeek v4.
 
 ## Ǥ. Harness Global DeepSeek v4 (Flash e Pro) — QUEBRA SILENCIOSA
 

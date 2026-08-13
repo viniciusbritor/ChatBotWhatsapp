@@ -1,12 +1,9 @@
 # Arquitetura — ChatBotWhatsapp (Agentes Omnichannel)
 
-> Última revisão: **2026-08-10** — integração do Google Stitch Design System no `module_ui.py`.
-> Chunking com hierarquia jurídica brasileira (Art., §, Capítulo, Seção, Lei).
-> Retrieval com expansão de contexto vizinho (`search_with_context`).
-> 2 collections core: `knowledge-database` (vector user+grupo) + `message-history` (chat).
-> UI Control Plane: Design Coherence Clean Light (Google Stitch) no `module_ui.py`.
-> Regra unificada de acesso a conhecimento (RAG vs Drive vs Chat memory)
-> documentada em §0.0.4.
+> Última revisão: **2026-08-13** — Cascata STT Groq Whisper (100% Free) -> OpenAI Whisper-1 -> Gemini 2.5 Flash.
+> Comandos por voz em grupo, higienização de LID do Bot e injeção do grupo atual.
+> Integrantes de grupo sincronizados no Firestore (`group_members/{group_jid}`) com enriquecimento dinâmico (`enrich_member_name`).
+> Esteira CI/CD estrita via Cloud Build triggers no GitHub (push em `test` / `main`).
 > Ver `docs/DIARIO_BORDO.md` para o histórico completo do dia.
 
 ## 0. Diagrama visual (ponta a ponta)
@@ -31,10 +28,9 @@ flowchart LR
             JENNIFIER["Jennifer agent (system prompt)"]
             GUARDIAN["access_guardian agent\n(decide owner + OAuth + scopes)"]
             ADMIN["GET/POST /admin/* (Bearer SA)"]
-            UI["HTML do modulo Agentes Omnichannel"]
-            WHISPER["Whisper local + Gemini STT fallback"]
+            WHISPER["Groq Whisper (Free) -> OpenAI Whisper-1 -> Gemini STT"]
             EMBED["OpenAI Embeddings (somente ingestao)"]
-            SUBF["Tools: calendar/drive/gmail/web/nickname"]
+            SUBF["Tools: calendar/drive/gmail/tasks/people/photos/group/composio"]
         end
 
         subgraph PUBSUB["Pub/Sub"]
