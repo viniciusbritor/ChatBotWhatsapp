@@ -93,6 +93,33 @@ class TestToolRegistry:
         }
         assert missing == set()
 
+    def test_bind_user_scoped_tools_nao_injeta_kwarg_rejeitado(self):
+        """Contrato desacoplado: o binding NAO pode injetar um kwarg que a
+        funcao da tool nao aceite (evita TypeError). Cobre qualquer tool
+        user-scoped nova, incluindo as de assinatura estrita."""
+        import inspect
+
+        from orchestrator import _bind_tool_args
+        from tool_registry import TOOL_REGISTRY, is_user_scoped_tool
+
+        for tid, entry in TOOL_REGISTRY.items():
+            if not is_user_scoped_tool(tid):
+                continue
+            fn = entry["function"]
+            try:
+                params = inspect.signature(fn).parameters
+            except (TypeError, ValueError):
+                continue
+            accepts_var_kw = any(
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+            )
+            args = _bind_tool_args(tid, {}, "5511966830020", "Jennifer")
+            for injected in ("phone", "instance"):
+                if injected in args and not accepts_var_kw:
+                    assert injected in params, (
+                        f"tool {tid} recebeu '{injected}' mas nao aceita esse kwarg"
+                    )
+
     def test_memory_tools_are_user_scoped(self):
         """memory.* deve ser user-scoped (phone injetado em grupo/individual).
 
