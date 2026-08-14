@@ -198,7 +198,7 @@ class TestLookupPhone:
 
 class TestAgentUserWhitelist:
     def test_agent_user_blocked_on_global_admin_paths(self):
-        """agent_user nao acessa /admin/agents (fora da whitelist)."""
+        """agent_user nao acessa rotas restritas de admin (/admin/agents, accounts, skills, etc)."""
         from core.auth import _agent_user_allowed
 
         assert _agent_user_allowed("/admin/agents") is False
@@ -206,24 +206,21 @@ class TestAgentUserWhitelist:
         assert _agent_user_allowed("/admin/skills") is False
         assert _agent_user_allowed("/admin/tools") is False
         assert _agent_user_allowed("/admin/owners") is False
-        assert _agent_user_allowed("/admin/knowledge") is False
+        assert _agent_user_allowed("/admin/integrations") is False
 
     def test_agent_user_allowed_on_self_scoped_paths(self):
-        """agent_user acessa dashboard, status, users/{self} e composio."""
+        """agent_user acessa dashboard, status, me, knowledge, users e composio."""
         from core.auth import _agent_user_allowed
 
         assert _agent_user_allowed("/admin/dashboard") is True
         assert _agent_user_allowed("/admin/status") is True
+        assert _agent_user_allowed("/admin/me") is True
+        assert _agent_user_allowed("/admin/knowledge") is True
+        assert _agent_user_allowed("/admin/users") is True
         assert _agent_user_allowed("/admin/users/5511888888888") is True
         assert _agent_user_allowed("/admin/users/5511888888888/folder-permissions") is True
         assert _agent_user_allowed("/api/v1/composio/status") is True
         assert _agent_user_allowed("/api/v1/composio/authorize") is True
-
-    def test_agent_user_blocked_on_users_list(self):
-        """agent_user NAO lista todos os usuarios (/admin/users exato)."""
-        from core.auth import _agent_user_allowed
-
-        assert _agent_user_allowed("/admin/users") is False
 
 
 class TestRenderDashboardRoles:
@@ -305,3 +302,36 @@ class TestAdminWhitelist:
             with patch("agent_loader._is_instance_owner", return_value=False):
                 with patch("agent_loader.get_user", return_value=None):
                     assert get_user_role("ana@company.com") == "agent_user"
+
+
+class TestAdminEndpointsRBAC:
+    def test_admin_me_endpoint_returns_identity(self):
+        import asyncio
+        from unittest.mock import MagicMock, patch
+        from main import admin_me
+
+        request = MagicMock()
+        with patch("main._caller_role", return_value=("admin", "5511966830020")):
+            res = asyncio.run(admin_me(request))
+            import json
+            body = json.loads(res.body.decode())
+            assert body["role"] == "admin"
+            assert body["phone"] == "5511966830020"
+            assert body["is_admin"] is True
+
+    def test_admin_users_list_for_analyst_returns_only_self(self):
+        import asyncio
+        from unittest.mock import MagicMock, patch
+        from main import admin_users_list
+
+        request = MagicMock()
+        mock_user = {"phone": "5511988776655", "name": "Analista Teste"}
+        with patch("main._caller_role", return_value=("agent_user", "5511988776655")):
+            with patch("main.get_user", return_value=mock_user):
+                with patch("main._enrich_user_connections"):
+                    res = asyncio.run(admin_users_list(request))
+                    import json
+                    body = json.loads(res.body.decode())
+                    assert len(body["users"]) == 1
+                    assert body["users"][0]["phone"] == "5511988776655"
+

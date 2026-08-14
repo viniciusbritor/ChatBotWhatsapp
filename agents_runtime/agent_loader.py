@@ -524,6 +524,39 @@ def save_user(phone: str, data: Dict[str, Any]) -> bool:
         return False
 
 
+def ensure_user_registered(phone: str, sender_name: str = "", instance: str = "jennifer") -> bool:
+    """Garante que qualquer contato que interaja com a Jennifer fique registrado em usuarios/{phone}."""
+    canonical = _canonical_phone(phone)
+    if not canonical:
+        return False
+    db = _get_firestore_client()
+    if db is None:
+        return False
+    try:
+        doc_ref = db.collection("usuarios").document(canonical)
+        doc = doc_ref.get()
+        payload: Dict[str, Any] = {
+            "phone": canonical,
+            "updated_at": _now_iso(),
+            "instance": instance,
+        }
+        if sender_name and sender_name != "user":
+            payload["name"] = sender_name
+            payload["push_name"] = sender_name
+        if not doc.exists:
+            payload["created_at"] = _now_iso()
+            payload["role"] = "agent_user"
+            doc_ref.set(payload)
+        else:
+            existing = doc.to_dict() or {}
+            if sender_name and sender_name != "user" and not existing.get("name"):
+                doc_ref.set(payload, merge=True)
+        return True
+    except Exception as exc:
+        logger.debug("ensure_user_registered failed for phone=%s: %s", phone, exc)
+        return False
+
+
 def _canonical_phone(phone: str) -> str:
     """Canonicaliza phone para E.164 BR: '55' + 11 digitos.
 

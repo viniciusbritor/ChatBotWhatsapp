@@ -1,18 +1,20 @@
 import React from 'react';
-import { NavigationTab } from '../types';
+import { NavigationTab, CurrentUser } from '../types';
 
 interface SidebarProps {
   activeTab: NavigationTab;
   setActiveTab: (tab: NavigationTab) => void;
   mobileOpen: boolean;
   setMobileOpen: (open: boolean) => void;
+  currentUser?: CurrentUser | null;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
   activeTab,
   setActiveTab,
   mobileOpen,
-  setMobileOpen
+  setMobileOpen,
+  currentUser
 }) => {
   const navItems: { id: NavigationTab; label: string; icon: string; fillIcon?: boolean }[] = [
     { id: 'whatsapp', label: 'Contas WhatsApp', icon: 'chat' },
@@ -25,6 +27,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'conhecimento', label: 'Conhecimento', icon: 'menu_book' },
     { id: 'status', label: 'Status', icon: 'signal_cellular_alt' }
   ];
+
+  const visibleNavItems = currentUser && !currentUser.isAdmin
+    ? navItems.filter((item) => item.id === 'conexoes' || item.id === 'conhecimento')
+    : navItems;
 
   return (
     <>
@@ -63,7 +69,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {/* Navigation items list */}
         <nav className="flex flex-col gap-1 w-full flex-1 overflow-y-auto pr-1">
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const isActive = activeTab === item.id;
             return (
               <button

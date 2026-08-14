@@ -9,7 +9,9 @@ import {
   Integration,
   ServiceConnection,
   KnowledgeCategory,
-  SystemStatusMetric
+  SystemStatusMetric,
+  CurrentUser,
+  PortalUser
 } from './types';
 import { api, getToken, getPortalUrl } from './api/client';
 
@@ -204,6 +206,8 @@ export default function App() {
   const [mobileOpen, setMobileOpen] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [rawUsers, setRawUsers] = useState<PortalUser[]>([]);
   const [accounts, setAccounts] = useState<WhatsAppAccount[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -239,7 +243,8 @@ export default function App() {
         }
       };
       try {
-        const [acc, ag, sk, tl, users, kn, ow, integ, st] = await Promise.all([
+        const [me, acc, ag, sk, tl, users, kn, ow, integ, st] = await Promise.all([
+          fetchSafe('/admin/me', { role: 'agent_user', phone: '', is_admin: false }),
           fetchSafe('/admin/accounts', { accounts: [] }),
           fetchSafe('/admin/agents', { agents: [] }),
           fetchSafe('/admin/skills', { skills: [] }),
@@ -250,11 +255,31 @@ export default function App() {
           fetchSafe('/admin/integrations', { integrations: [] }),
           fetchSafe('/admin/status', {}),
         ]);
+
+        const curUser: CurrentUser = {
+          role: me?.role || 'agent_user',
+          phone: me?.phone || '',
+          isAdmin: Boolean(me?.is_admin),
+        };
+        setCurrentUser(curUser);
+        if (!curUser.isAdmin) {
+          setActiveTab('conexoes');
+        }
+
         setAccounts(mapAccounts(acc));
         setAgents(mapAgents(ag));
         setSkills(mapSkills(sk));
         setTools(mapTools(tl));
         const usersList = (users as any)?.users || [];
+        setRawUsers(
+          usersList.map((u: any) => ({
+            id: u.phone || u.id || '',
+            phone: u.phone || u.id || '',
+            name: u.name || u.push_name || '',
+            role: u.role || 'agent_user',
+            email: u.email || '',
+          }))
+        );
         setConnections(mapConnections(usersList));
         setCategories(mapKnowledge(kn));
         setOwners(mapOwners(ow));
@@ -405,6 +430,7 @@ export default function App() {
         setActiveTab={setActiveTab}
         mobileOpen={mobileOpen}
         setMobileOpen={setMobileOpen}
+        currentUser={currentUser}
       />
 
       <div className="flex-1 md:ml-64 flex flex-col min-h-screen transition-all duration-300">
@@ -469,6 +495,8 @@ export default function App() {
           {activeTab === 'conexoes' && (
             <ConnectionsView
               connections={connections}
+              users={rawUsers}
+              currentUser={currentUser}
               onToggleConnection={handleToggleConnection}
               onAuthorizeGoogle={authorizeGoogle}
               onAuthorizeComposio={authorizeComposio}

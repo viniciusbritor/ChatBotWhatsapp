@@ -118,3 +118,19 @@ export interface SystemStatusMetric {
   sparklineType: 'healthy' | 'degraded' | 'flat';
   details?: Record<string, string>;
 }
+
+export interface CurrentUser {
+  role: string;
+  phone: string;
+  isAdmin: boolean;
+  email?: string;
+  name?: string;
+}
+
+export interface PortalUser {
+  id: string;
+  phone: string;
+  name?: string;
+  role?: string;
+  email?: string;
+}

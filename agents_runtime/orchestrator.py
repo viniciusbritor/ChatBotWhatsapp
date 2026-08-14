@@ -2160,6 +2160,8 @@ async def _orchestrate_inner(payload: Dict[str, Any], instance: str, phone: str,
 
     first_name = _extract_first_name(sender_name)
     payload["first_name"] = first_name
+    from agent_loader import ensure_user_registered
+    ensure_user_registered(phone, sender_name=sender_name, instance=instance)
     masked_text = mask_pii(text)
     confirmation = _short_confirmation(masked_text)
 

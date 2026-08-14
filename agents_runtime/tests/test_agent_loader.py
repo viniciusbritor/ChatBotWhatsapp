@@ -120,3 +120,47 @@ class TestAtomicReload:
         assert "config_generation" in stats
         assert "last_reload_attempt_at" in stats
         assert "last_reload_error" in stats
+
+
+class TestEnsureUserRegistered:
+    def test_ensure_user_registered_creates_new(self):
+        from unittest.mock import MagicMock
+        from agent_loader import ensure_user_registered
+
+        db = MagicMock()
+        doc_ref = MagicMock()
+        doc_snap = MagicMock()
+        doc_snap.exists = False
+        doc_ref.get.return_value = doc_snap
+        db.collection.return_value.document.return_value = doc_ref
+
+        with patch("agent_loader._get_firestore_client", return_value=db):
+            ok = ensure_user_registered("5511988776655", sender_name="João Silva", instance="jennifer")
+            assert ok is True
+            doc_ref.set.assert_called_once()
+            args, kwargs = doc_ref.set.call_args
+            payload = args[0]
+            assert payload["phone"] == "5511988776655"
+            assert payload["name"] == "João Silva"
+            assert payload["role"] == "agent_user"
+
+    def test_ensure_user_registered_updates_existing_name(self):
+        from unittest.mock import MagicMock
+        from agent_loader import ensure_user_registered
+
+        db = MagicMock()
+        doc_ref = MagicMock()
+        doc_snap = MagicMock()
+        doc_snap.exists = True
+        doc_snap.to_dict.return_value = {"phone": "5511988776655"}  # sem nome
+        doc_ref.get.return_value = doc_snap
+        db.collection.return_value.document.return_value = doc_ref
+
+        with patch("agent_loader._get_firestore_client", return_value=db):
+            ok = ensure_user_registered("5511988776655", sender_name="Maria Santos")
+            assert ok is True
+            doc_ref.set.assert_called_once()
+            args, kwargs = doc_ref.set.call_args
+            assert args[0]["name"] == "Maria Santos"
+            assert kwargs.get("merge") is True
+

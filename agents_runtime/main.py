@@ -1270,10 +1270,15 @@ async def admin_integrations_list(request: Request):
 
 @app.get("/admin/knowledge")
 async def admin_knowledge_documents(request: Request):
+    import hashlib
     from agent_loader import _get_firestore_client
     from core.rag import KNOWLEDGE_DATABASE
 
     limit = min(int(request.query_params.get("limit", "50")), 200)
+    role, caller_phone = _caller_role(request)
+    caller_digits = "".join(c for c in str(caller_phone or "") if c.isdigit())
+    caller_hash = hashlib.sha256(caller_digits.encode("utf-8")).hexdigest()[:32] if caller_digits else ""
+
     db = _get_firestore_client()
     documents: list = []
     grouped: Dict[str, Dict[str, Any]] = {}
@@ -1291,12 +1296,18 @@ async def admin_knowledge_documents(request: Request):
             try:
                 for doc in stream:
                     data = doc.to_dict() or {}
+                    owner_hash = data.get("owner_hash") or ""
+                    owner_phone = owner_map.get(owner_hash, "")
+
+                    # Se for analista (não admin), filtra apenas seus próprios documentos
+                    if role != "admin" and caller_digits:
+                        if owner_hash != caller_hash and owner_phone != caller_digits:
+                            continue
+
                     source_title = data.get("source_title") or data.get("titulo") or doc.id
                     klass = data.get("class") or data.get("category") or ""
                     grp = data.get("group") or ""
                     theme = data.get("theme") or ""
-                    owner_hash = data.get("owner_hash") or ""
-                    owner_phone = owner_map.get(owner_hash, "")
                     key = f"{plain_collection}::{source_title}"
                     bucket = grouped.setdefault(key, {
                         "doc_id": source_title,
@@ -1563,11 +1574,26 @@ async def admin_register_user(request: Request):
     })
 
 
+@app.get("/admin/me")
+async def admin_me(request: Request):
+    """Return identity and role of caller."""
+    role, caller_phone = _caller_role(request)
+    return JSONResponse(content={
+        "role": role or "agent_user",
+        "phone": caller_phone or "",
+        "is_admin": role == "admin",
+    })
+
+
 @app.get("/admin/users")
 async def admin_users_list(request: Request):
-    """List all registered users (admin only), enriched with connections."""
-    _require_admin(request)
-    users = list_users()
+    """List registered users. Admin sees all; analyst sees only self."""
+    role, caller_phone = _caller_role(request)
+    if role == "admin":
+        users = list_users()
+    else:
+        user = get_user(caller_phone) if caller_phone else None
+        users = [user] if user else []
     for user in users:
         await _enrich_user_connections(user)
     return JSONResponse(content={"users": users})

@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
-import { ServiceConnection } from '../../types';
+import React, { useState, useEffect } from 'react';
+import { ServiceConnection, CurrentUser } from '../../types';
 
 interface ConnectionsViewProps {
   connections: ServiceConnection[];
+  users?: Array<{ phone: string; name?: string; id?: string }>;
+  currentUser?: CurrentUser | null;
   onToggleConnection: (id: string) => void;
   onAuthorizeGoogle: (phone: string) => void;
   onAuthorizeComposio: (phone: string) => void;
@@ -11,26 +13,56 @@ interface ConnectionsViewProps {
 
 export const ConnectionsView: React.FC<ConnectionsViewProps> = ({
   connections,
+  users = [],
+  currentUser,
   onToggleConnection,
   onAuthorizeGoogle,
   onAuthorizeComposio,
   searchQuery
 }) => {
-  const [selectedUser, setSelectedUser] = useState('+5511966830020');
+  const defaultPhone = () => {
+    if (currentUser?.phone) {
+      return currentUser.phone.startsWith('+') ? currentUser.phone : '+' + currentUser.phone;
+    }
+    if (users.length > 0 && users[0].phone) {
+      return users[0].phone.startsWith('+') ? users[0].phone : '+' + users[0].phone;
+    }
+    return '+5511966830020';
+  };
 
-  const googleConns = connections.filter(
+  const [selectedUser, setSelectedUser] = useState<string>(defaultPhone);
+
+  useEffect(() => {
+    if (currentUser?.phone) {
+      const formatted = currentUser.phone.startsWith('+') ? currentUser.phone : '+' + currentUser.phone;
+      setSelectedUser(formatted);
+    } else if (users.length > 0 && !users.some(u => (u.phone.startsWith('+') ? u.phone : '+' + u.phone) === selectedUser)) {
+      setSelectedUser(users[0].phone.startsWith('+') ? users[0].phone : '+' + users[0].phone);
+    }
+  }, [currentUser, users]);
+
+  const cleanSelectedPhone = selectedUser.replace(/\D/g, '');
+
+  const userConns = connections.filter((c) => {
+    if (!cleanSelectedPhone) return true;
+    return c.id.startsWith(cleanSelectedPhone + '__');
+  });
+
+  const googleConns = userConns.filter(
     (c) =>
       c.category === 'Conta Google' &&
       (c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         c.description.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
-  const otherConns = connections.filter(
+  const otherConns = userConns.filter(
     (c) =>
       c.category === 'Outros serviços' &&
       (c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         c.description.toLowerCase().includes(searchQuery.toLowerCase()))
   );
+
+  const isAdmin = currentUser ? currentUser.isAdmin : true;
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
@@ -47,16 +79,32 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({
           <label htmlFor="user-select" className="text-[14px] font-semibold text-[#191b23] dark:text-white">
             Usuário:
           </label>
-          <select
-            id="user-select"
-            value={selectedUser}
-            onChange={(e) => setSelectedUser(e.target.value)}
-            className="bg-[#f9f9ff] dark:bg-[#2e3038] border border-[#c2c6d6] text-[#191b23] dark:text-white rounded-xl px-4 py-1.5 font-mono text-[13px] shadow-2xs focus:ring-2 focus:ring-[#0058be]"
-          >
-            <option value="+5511966830020">+5511966830020</option>
-            <option value="+5511998765432">+5511998765432</option>
-            <option value="+5511988776655">+5511988776655</option>
-          </select>
+          {isAdmin ? (
+            <select
+              id="user-select"
+              value={selectedUser}
+              onChange={(e) => setSelectedUser(e.target.value)}
+              className="bg-[#f9f9ff] dark:bg-[#2e3038] border border-[#c2c6d6] text-[#191b23] dark:text-white rounded-xl px-4 py-1.5 font-mono text-[13px] shadow-2xs focus:ring-2 focus:ring-[#0058be]"
+            >
+              {users.length > 0 ? (
+                users.map((u) => {
+                  const val = u.phone.startsWith('+') ? u.phone : '+' + u.phone;
+                  const label = u.name ? `${u.name} (${val})` : val;
+                  return (
+                    <option key={u.phone} value={val}>
+                      {label}
+                    </option>
+                  );
+                })
+              ) : (
+                <option value={selectedUser}>{selectedUser}</option>
+              )}
+            </select>
+          ) : (
+            <span className="bg-[#ecedf7] dark:bg-[#2e3038] px-3 py-1 rounded-lg font-mono text-[13px] text-[#0058be] dark:text-[#adc6ff] font-semibold">
+              {currentUser?.name ? `${currentUser.name} (${selectedUser})` : selectedUser}
+            </span>
+          )}
         </div>
       </div>
 

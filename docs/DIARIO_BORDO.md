@@ -1,6 +1,27 @@
 # Diario de Bordo — ChatBotWhatsapp
 
-## 12/08/2026 (17:00 BRT) — Correções em 3 branches desacopladas + cleanup Fase F
+## 14/08/2026 (01:10 BRT) — Conexões Dinâmicas, RBAC Analista vs Admin e Auto-Cadastro de Contatos
+
+### Contexto & Causa-Raiz
+1. **Aba Conexões Hardcoded & Filtro Quebrado**: O `<select>` de telefones em `ConnectionsView.tsx` continha opções estáticas (`+5511966830020`, `+5511998765432`, `+5511988776655`) e o componente filtrava a lista `connections` apenas por categoria (`Conta Google` / `Outros serviços`), ignorando o telefone selecionado. Como o array continha as conexões de todos os usuários concatenadas, os cards sempre exibiam o proprietário (`5511966830020`).
+2. **Auto-cadastro de Contatos**: Contatos que enviavam sua primeira mensagem para a Jennifer (DM ou menção de grupo `@Jennifer`) não eram gravados imediatamente em `usuarios/{phone}` caso ainda não tivessem feito login/OAuth.
+3. **RBAC Portal (Admin vs Analista)**: Usuários com papel `analista` devem ter visão restrita a apenas 2 abas: `Conexões` (apenas suas próprias integrações/OAuth) e `Conhecimento` (apenas seus próprios arquivos/owner_hash), enquanto administradores têm acesso global a todas as 9 abas.
+
+### Soluções Aplicadas
+- **Auto-Cadastro de Contatos**: Injetado `ensure_user_registered(phone, sender_name, instance)` em `agent_loader.py` e acionado no início de `_orchestrate_inner` em `orchestrator.py`. Cria `usuarios/{phone}` com `phone`, `name`, `first_interaction_at`, `instance` e `role='agent_user'` no primeiro contato.
+- **Backend Identity & RBAC**:
+  - Novo endpoint `GET /admin/me` retorna `{"role": role, "phone": caller_phone, "is_admin": role == "admin"}`.
+  - Endpoint `GET /admin/users` enriquecido: administradores recebem a lista completa; analistas recebem apenas o seu próprio registro.
+  - Endpoint `GET /admin/knowledge` seguro: analistas recebem apenas documentos onde `owner_hash` ou `owner_phone` correspondem ao seu caller.
+  - `core/auth.py`: `AGENT_USER_ALLOWED_PREFIXES` atualizado para incluir `/admin/me`, `/admin/users` e `/admin/knowledge`.
+- **Frontend React (`portal/src/`)**:
+  - `App.tsx`: busca `/admin/me` no boot, armazena `currentUser`, seleciona por padrão a aba `conexoes` para analistas e propaga `currentUser` e `rawUsers` para os componentes filhos.
+  - `Sidebar.tsx`: se `!currentUser.isAdmin`, filtra os itens de navegação exibindo estritamente `conexoes` e `conhecimento`.
+  - `ConnectionsView.tsx`: alimenta o dropdown dinamicamente com `users` do Firestore. Se `analista`, oculta o dropdown travando no telefone do usuário autenticado. Aplica filtro estrito de telefone (`c.id.startsWith(cleanSelectedPhone + '__')`).
+- **Validação**:
+  - Build React `npm run build` compilado com sucesso (dist/ gerado).
+  - Suíte completa de testes verdes: **1,146 passed, 5 skipped, 1 xpassed, 0 failures**.
+  - Script de conformidade LGPD: `LGPD compliance checks passed`.
 
 ### Diagnóstico via logs (após auto-exposição ativa)
 Teste no WhatsApp revelou 3 causas raiz independentes:
