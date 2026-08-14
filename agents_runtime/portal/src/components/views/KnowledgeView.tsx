@@ -18,12 +18,13 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
 }) => {
   const [reindexToast, setReindexToast] = useState<string | null>(null);
 
-  const filtered = categories.filter(
-    (c) =>
-      c.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.collection.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.classification.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filtered = categories.filter((c) => {
+    const q = (searchQuery || '').toLowerCase();
+    const title = (c.title || '').toLowerCase();
+    const coll = (c.collection || '').toLowerCase();
+    const klass = (c.classification || '').toLowerCase();
+    return !q || title.includes(q) || coll.includes(q) || klass.includes(q);
+  });
 
   const totalChunks = categories.reduce((acc, c) => acc + c.chunkCount, 0);
 

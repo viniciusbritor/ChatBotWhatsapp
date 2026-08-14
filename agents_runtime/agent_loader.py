@@ -461,6 +461,61 @@ def _is_instance_owner(phone: str) -> bool:
     return False
 
 
+def resolve_owner_phone() -> str:
+    """Retorna o owner_phone da instancia Evolution (fallback 5511966830020)."""
+    db = _get_firestore_client()
+    if db is None:
+        return "5511966830020"
+    try:
+        for doc in db.collection("whatsapp_accounts").stream():
+            data = doc.to_dict() or {}
+            phone = data.get("owner_phone") or data.get("phone") or ""
+            digits = "".join(c for c in str(phone) if c.isdigit())
+            if digits:
+                return digits
+    except Exception:
+        pass
+    return "5511966830020"
+
+
+def sync_user_profile(
+    phone: str,
+    email: str = "",
+    uid: str = "",
+    name: str = "",
+    picture: str = "",
+    role: str = "",
+) -> bool:
+    """Vincula email, uid, name, picture e role ao doc usuarios/{phone} no Firestore."""
+    canonical = _canonical_phone(phone)
+    if not canonical:
+        return False
+    db = _get_firestore_client()
+    if db is None:
+        return False
+    try:
+        update_data: Dict[str, Any] = {
+            "updated_at": _now_iso(),
+            "phone": canonical,
+        }
+        if email:
+            update_data["email"] = str(email).strip().lower()
+        if uid:
+            update_data["firebase_uid"] = str(uid).strip()
+        if name and name != "user":
+            update_data["name"] = name
+            update_data["display_name"] = name
+        if picture:
+            update_data["picture"] = picture
+        if role:
+            update_data["role"] = role
+        db.collection("usuarios").document(canonical).set(update_data, merge=True)
+        return True
+    except Exception as exc:
+        logger.debug("sync_user_profile failed for phone=%s: %s", phone, exc)
+        return False
+
+
 def _normalize_phones(phone: str) -> List[str]:
     """Gera variacoes de formato de telefone para busca robusta."""
     candidates = []

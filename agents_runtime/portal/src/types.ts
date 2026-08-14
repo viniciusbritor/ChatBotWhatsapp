@@ -125,6 +125,7 @@ export interface CurrentUser {
   isAdmin: boolean;
   email?: string;
   name?: string;
+  picture?: string;
 }
 
 export interface PortalUser {

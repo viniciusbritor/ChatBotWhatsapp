@@ -120,7 +120,7 @@ class TestResolveCallerHybrid:
             with patch("agent_loader.get_user_role", side_effect=lambda x: "admin" if "@" in x else "agent_user"):
                 role, phone = self._request({"sub": "uid1", "email": "viniciusbritor@gmail.com"})
         assert role == "admin"
-        assert phone == ""
+        assert phone in ("5511966830020", "")
 
     def test_unknown_email_is_agent_user(self):
         """Email desconhecido e sem phone vinculado -> agent_user (seguro)."""

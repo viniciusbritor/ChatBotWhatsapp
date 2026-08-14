@@ -10,12 +10,13 @@ interface SkillsViewProps {
 export const SkillsView: React.FC<SkillsViewProps> = ({ skills, onAddNew, searchQuery }) => {
   const [selectedDocSkill, setSelectedDocSkill] = useState<Skill | null>(null);
 
-  const filtered = skills.filter(
-    (s) =>
-      s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      s.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      s.description.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filtered = skills.filter((s) => {
+    const q = (searchQuery || '').toLowerCase();
+    const name = (s.name || '').toLowerCase();
+    const code = (s.code || '').toLowerCase();
+    const desc = (s.description || '').toLowerCase();
+    return !q || name.includes(q) || code.includes(q) || desc.includes(q);
+  });
 
   return (
     <div className="space-y-6">

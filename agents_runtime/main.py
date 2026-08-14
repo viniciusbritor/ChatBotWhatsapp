@@ -764,6 +764,24 @@ def _caller_role(request: Request) -> tuple:
     return resolve_caller(request)
 
 
+def _caller_profile(request: Request) -> dict:
+    """Retorna profile completo do caller (role, phone, email, name, picture, is_admin)."""
+    try:
+        from core.auth import resolve_caller_profile
+
+        return resolve_caller_profile(request)
+    except Exception:
+        role, phone = _caller_role(request)
+        return {
+            "role": role or "agent_user",
+            "phone": phone or "",
+            "email": "",
+            "name": "Administrador" if role == "admin" else "Usuário",
+            "picture": "",
+            "is_admin": role == "admin",
+        }
+
+
 def _require_admin(request: Request) -> None:
     """Raise 403 se o caller nao for admin."""
     role, _ = _caller_role(request)
@@ -1578,11 +1596,13 @@ async def admin_register_user(request: Request):
 async def admin_me(request: Request):
     """Return identity and role of caller."""
     role, caller_phone = _caller_role(request)
-    return JSONResponse(content={
-        "role": role or "agent_user",
-        "phone": caller_phone or "",
-        "is_admin": role == "admin",
-    })
+    profile = _caller_profile(request)
+    if role:
+        profile["role"] = role
+        profile["is_admin"] = role == "admin"
+    if caller_phone:
+        profile["phone"] = caller_phone
+    return JSONResponse(content=profile)
 
 
 @app.get("/admin/users")

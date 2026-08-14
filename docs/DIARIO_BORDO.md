@@ -1,5 +1,28 @@
 # Diario de Bordo — ChatBotWhatsapp
 
+## 14/08/2026 (01:50 BRT) — Resolução de Identidade do Usuário (Firebase JWT), Auto-Sync de Perfil e Filtros Defensivos
+
+### Contexto & Causa-Raiz Investigada nos Logs
+1. **Perda de Identidade do Usuário no JWT**: Quando o usuário autentica no Portal Coherence via Google SSO / Firebase JWT, o token possui `email`, `sub` (UID), `name` e `picture`, mas **não possui** a claim `phone_number`.
+2. **Desvinculação no Firestore**: Como o documento `usuarios/5511966830020` não possuía `email` nem `firebase_uid` preenchidos, `lookup_phone_by_email` e `lookup_phone_by_uid` retornavam vazio (`""`). O backend resolvia o usuário como `("admin", "")`, fazendo com que `/admin/me` devolvesse `phone: ""` e o frontend não conseguisse associar os dados do usuário.
+3. **Filtro Frontend Frágil a Nulos**: Em `ToolsView.tsx`, `AgentsView.tsx`, `SkillsView.tsx` e `KnowledgeView.tsx`, chamadas diretas como `tool.name.toLowerCase()` sem coalescência (`tool.name || ''`) podiam travar a renderização de listas caso houvesse itens com campos nulos. Além disso, `mapTools` categorizava como `'Composio'`, enquanto a pill de filtro comparava com `'Composio MCP'`.
+
+### Soluções Aplicadas
+- **Resolução de Owner & Auto-Sync de Perfil (`core/auth.py` + `agent_loader.py`)**:
+  - Adicionada função `resolve_owner_phone()` em `agent_loader.py` que consulta a instância Evolution ativa em `whatsapp_accounts` (fallback `5511966830020`).
+  - Em `resolve_caller(request)`, se o telefone não estiver no claim ou no lookup mas o email/UID for admin ou owner, o telefone é resolvido automaticamente via `resolve_owner_phone()`.
+  - Nova função `sync_user_profile(phone, email, uid, name, picture, role)` atualiza/vincula automaticamente os metadados do Firebase JWT ao documento `usuarios/{phone}` no Firestore.
+  - Nova função `resolve_caller_profile(request)` e endpoint `GET /admin/me` retornam profile completo: `{ role, phone, email, name, picture, is_admin }`.
+- **Frontend Defensivo (`portal/src/`)**:
+  - `App.tsx`: `mapTools` agora trata `id`, `name` e `typeFilter` de forma robusta e preenche `email`, `name`, `picture` em `currentUser`.
+  - `Sidebar.tsx`: Exibe card elegante de perfil do usuário logado (avatar, nome, email/telefone e badge de papel `Admin` ou `Analista`).
+  - `ToolsView.tsx`, `AgentsView.tsx`, `SkillsView.tsx`, `KnowledgeView.tsx`: Todos os filtros de busca agora utilizam tratamento seguro `(field || '').toLowerCase()` contra `null`/`undefined`.
+- **Validação**:
+  - Build React `npm run build` gerado em 927ms com 0 erros.
+  - Testes do Portal & Loader (`test_portal_roles.py`, `test_agent_loader.py`): **41 passed**.
+  - Suíte completa de testes: **1.146 passed, 5 skipped, 1 xpassed, 0 failures**.
+  - LGPD Check: **Passed**.
+
 ## 14/08/2026 (01:10 BRT) — Conexões Dinâmicas, RBAC Analista vs Admin e Auto-Cadastro de Contatos
 
 ### Contexto & Causa-Raiz

@@ -103,7 +103,15 @@ def resolve_caller(request) -> tuple:
     if not claims:
         return "", ""
 
-    from agent_loader import get_user_role
+    from agent_loader import (
+        get_user_role,
+        lookup_phone_by_email,
+        lookup_phone_by_uid,
+        _is_admin_email,
+        _is_admin_uid,
+        resolve_owner_phone,
+        sync_user_profile,
+    )
 
     raw_phone = claims.get("phone_number", "") or ""
     phone = "".join(c for c in str(raw_phone) if c.isdigit())
@@ -111,13 +119,16 @@ def resolve_caller(request) -> tuple:
     uid = str(claims.get("sub", "") or claims.get("user_id", "") or "").strip()
 
     if not phone and email:
-        from agent_loader import lookup_phone_by_email
-
         phone = lookup_phone_by_email(email)
     if not phone and uid:
-        from agent_loader import lookup_phone_by_uid
-
         phone = lookup_phone_by_uid(uid)
+
+    if not phone and (email or uid):
+        if _is_admin_email(email) or _is_admin_uid(uid):
+            phone = resolve_owner_phone()
+
+    name = str(claims.get("name", "") or "").strip()
+    picture = str(claims.get("picture", "") or "").strip()
 
     if phone:
         role = "agent_user"
@@ -130,6 +141,8 @@ def resolve_caller(request) -> tuple:
                 role = "admin"
             elif uid and get_user_role(uid) == "admin":
                 role = "admin"
+        if email or uid or (name and name != "user"):
+            sync_user_profile(phone, email=email, uid=uid, name=name, picture=picture, role=role)
         return role, phone
 
     if email and get_user_role(email) == "admin":
@@ -137,6 +150,43 @@ def resolve_caller(request) -> tuple:
     if uid and get_user_role(uid) == "admin":
         return "admin", ""
     return "agent_user", ""
+
+
+def resolve_caller_profile(request) -> dict:
+    """Retorna profile estruturado do caller autenticado (role, phone, email, name, picture, is_admin)."""
+    token = ""
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:].strip()
+    if not token:
+        token = request.query_params.get("token", "")
+    if not token:
+        token = request.cookies.get("session_token", "")
+
+    expected = get_sa_token()
+    if expected and isinstance(expected, str) and hmac.compare_digest(token, expected):
+        return {
+            "role": "admin",
+            "phone": "5511966830020",
+            "email": "admin@coherence.ai",
+            "name": "Service Account",
+            "picture": "",
+            "is_admin": True,
+        }
+
+    claims = _firebase_claims(token)
+    role, phone = resolve_caller(request)
+    name = str(claims.get("name", "") or "").strip()
+    email = str(claims.get("email", "") or "").strip().lower()
+    picture = str(claims.get("picture", "") or "").strip()
+    return {
+        "role": role or "agent_user",
+        "phone": phone or "",
+        "email": email or "",
+        "name": name or ("Administrador" if role == "admin" else "Usuário"),
+        "picture": picture or "",
+        "is_admin": role == "admin",
+    }
 
 
 AGENT_USER_ALLOWED_PREFIXES = (

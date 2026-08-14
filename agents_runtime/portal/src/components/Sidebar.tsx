@@ -98,8 +98,44 @@ export const Sidebar: React.FC<SidebarProps> = ({
           })}
         </nav>
 
+        {/* User profile card */}
+        {currentUser && (currentUser.name || currentUser.email || currentUser.phone) && (
+          <div className="p-2.5 rounded-xl bg-[#f0f2fb] dark:bg-[#20222a] border border-[#c2c6d6]/30 mb-2 flex items-center gap-2.5">
+            {currentUser.picture ? (
+              <img
+                src={currentUser.picture}
+                alt={currentUser.name || 'User'}
+                className="w-8 h-8 rounded-full object-cover border border-white/20 shrink-0"
+              />
+            ) : (
+              <div className="w-8 h-8 rounded-full bg-[#2170e4] text-white font-bold text-[12px] flex items-center justify-center shrink-0">
+                {(currentUser.name || currentUser.email || 'U').charAt(0).toUpperCase()}
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-1">
+                <p className="text-[12px] font-semibold text-[#191b23] dark:text-white truncate">
+                  {currentUser.name || currentUser.email || 'Usuário'}
+                </p>
+                <span
+                  className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md uppercase tracking-wider ${
+                    currentUser.isAdmin
+                      ? 'bg-[#2170e4]/15 text-[#0058be] dark:text-[#8cb7ff]'
+                      : 'bg-[#196b52]/15 text-[#196b52] dark:text-[#4ade80]'
+                  }`}
+                >
+                  {currentUser.isAdmin ? 'Admin' : 'Analista'}
+                </span>
+              </div>
+              <p className="text-[10px] text-[#727785] truncate font-mono">
+                {currentUser.phone ? `+${currentUser.phone}` : currentUser.email}
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Bottom system badge */}
-        <div className="pt-3 border-t border-[#c2c6d6]/30 px-2 flex items-center justify-between">
+        <div className="pt-2 border-t border-[#c2c6d6]/30 px-2 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-[#196b52] animate-pulse"></span>
             <span className="text-[11px] font-semibold text-[#196b52] tracking-wider uppercase">

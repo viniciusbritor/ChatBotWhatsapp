@@ -18,16 +18,17 @@ export const ToolsView: React.FC<ToolsViewProps> = ({
   const [permissionModalTool, setPermissionModalTool] = useState<Tool | null>(null);
 
   const filtered = tools.filter((tool) => {
-    const matchesSearch =
-      tool.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      tool.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      tool.description.toLowerCase().includes(searchQuery.toLowerCase());
+    const q = (searchQuery || '').toLowerCase();
+    const name = (tool.name || '').toLowerCase();
+    const code = (tool.code || '').toLowerCase();
+    const desc = (tool.description || '').toLowerCase();
+    const matchesSearch = !q || name.includes(q) || code.includes(q) || desc.includes(q);
 
     if (activeCategoryFilter === 'Google Native') {
       return matchesSearch && tool.typeFilter === 'Google Native';
     }
-    if (activeCategoryFilter === 'Composio MCP') {
-      return matchesSearch && tool.typeFilter === 'Composio MCP';
+    if (activeCategoryFilter === 'Composio MCP' || activeCategoryFilter === 'Composio') {
+      return matchesSearch && (tool.typeFilter === 'Composio' || tool.typeFilter === 'Composio MCP');
     }
     return matchesSearch;
   });

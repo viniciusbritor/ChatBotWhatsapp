@@ -15,10 +15,13 @@ export const AgentsView: React.FC<AgentsViewProps> = ({
   searchQuery
 }) => {
   const filtered = agents.filter(
-    (a) =>
-      a.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      a.key.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      a.description.toLowerCase().includes(searchQuery.toLowerCase())
+    (a) => {
+      const q = (searchQuery || '').toLowerCase();
+      const name = (a.name || '').toLowerCase();
+      const key = (a.key || '').toLowerCase();
+      const desc = (a.description || '').toLowerCase();
+      return !q || name.includes(q) || key.includes(q) || desc.includes(q);
+    }
   );
 
   return (

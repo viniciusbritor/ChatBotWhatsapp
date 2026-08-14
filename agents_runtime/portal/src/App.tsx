@@ -72,17 +72,21 @@ function mapSkills(data: any): Skill[] {
 }
 
 function mapTools(data: any): Tool[] {
-  return (data?.tools || []).map((t: any) => ({
-    id: t.tool_id || t.id || '',
-    code: t.tool_id || t.id || '',
-    name: t.name || t.tool_id || '',
-    category: 'Custom',
-    typeFilter: (t.implementation || '').includes('composio') ? 'Composio' : 'Google Native',
-    description: t.description || '',
-    status: t.enabled === false ? 'Inactive' : 'Active',
-    permissions: [],
-    samplePayload: '',
-  }));
+  return (data?.tools || []).map((t: any) => {
+    const id = t.tool_id || t.id || t.name || '';
+    const isComposio = (t.implementation || '').includes('composio') || (t.type_filter || '').includes('composio');
+    return {
+      id: id,
+      code: id,
+      name: t.name || id,
+      category: (t.category || 'Custom') as any,
+      typeFilter: isComposio ? 'Composio' : 'Google Native',
+      description: t.description || '',
+      status: t.enabled === false ? 'Inactive' : 'Active',
+      permissions: t.permissions || [],
+      samplePayload: t.sample_payload || '',
+    };
+  });
 }
 
 function mapConnections(users: any[]): ServiceConnection[] {
@@ -260,6 +264,9 @@ export default function App() {
           role: me?.role || 'agent_user',
           phone: me?.phone || '',
           isAdmin: Boolean(me?.is_admin),
+          email: me?.email || '',
+          name: me?.name || '',
+          picture: me?.picture || '',
         };
         setCurrentUser(curUser);
         if (!curUser.isAdmin) {
