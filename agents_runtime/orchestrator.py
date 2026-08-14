@@ -2050,7 +2050,7 @@ async def _classify_intent_llm(text: str) -> str:
     valid = {"juridicas", "editais", "academica", "anotacoes", "ferramentas", "conversa"}
     prompt = _CLASSIFIER_PROMPT.format(text=text[:500])
 
-    # 1. Groq (Zero-cost, Ultra-fast Llama-3.1-8b-instant)
+    # 1. Groq (Zero-cost se GROQ_API_KEY configurada)
     groq_key = get_secret("GROQ_API_KEY") or os.getenv("GROQ_API_KEY", "")
     if groq_key:
         try:
@@ -2067,9 +2067,28 @@ async def _classify_intent_llm(text: str) -> str:
             if raw in valid:
                 return raw
         except Exception as exc:
-            logger.warning("groq_intent_classifier_failed, falling back to DeepSeek: %s", exc)
+            logger.warning("groq_intent_classifier_failed: %s", exc)
 
-    # 2. Fallback: DeepSeek V4 Flash
+    # 2. NVIDIA NIM (Zero-cost via NVIDIA_API_KEY)
+    nvidia_key = get_secret("NVIDIA_API_KEY") or os.getenv("NVIDIA_API_KEY", "")
+    if nvidia_key:
+        try:
+            llm_nvidia = ChatOpenAI(
+                model="meta/llama-3.1-8b-instruct",
+                api_key=nvidia_key,
+                base_url="https://integrate.api.nvidia.com/v1",
+                temperature=0,
+                max_tokens=5,
+                timeout=3,
+            )
+            result = await asyncio.to_thread(llm_nvidia.invoke, prompt)
+            raw = getattr(result, "content", str(result)).strip().lower()
+            if raw in valid:
+                return raw
+        except Exception as exc:
+            logger.warning("nvidia_intent_classifier_failed: %s", exc)
+
+    # 3. Fallback Principal: DeepSeek V4 Flash
     try:
         base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
         deepseek_key = get_secret("DEEPSEEK_API_KEY") or os.getenv("DEEPSEEK_API_KEY", "")
