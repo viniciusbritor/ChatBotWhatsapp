@@ -52,6 +52,11 @@ async def persist(
     if not text:
         return {"error": "no_text_extracted", "mimetype": mimetype}
 
+    if scope == "group":
+        group_jid = (envelope.get("extra", {}) or {}).get("remote_jid", "")
+        if "@g.us" not in str(group_jid):
+            return {"error": "group_jid_required"}
+
     try:
         from core.rag import index_private_document
 
