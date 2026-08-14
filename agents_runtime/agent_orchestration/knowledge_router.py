@@ -59,11 +59,12 @@ def _detect_intent_keywords(text: str) -> str:
 
 
 def _detect_scope(envelope: Dict[str, Any]) -> str:
-    """Returns 'group' if the envelope comes from a WhatsApp group JID."""
-    extra = envelope.get("extra", {})
-    remote_jid = extra.get("remote_jid", "")
-    if "@g.us" in str(remote_jid):
-        return "group"
+    """Returns 'private' for knowledge base indexing.
+
+    Even if the attachment arrives in a WhatsApp group, the document belongs
+    to the sender (phone / owner_hash) and is indexed in their private
+    knowledge base (isolated in knowledge-database) so only the owner has access.
+    """
     return "private"
 
 

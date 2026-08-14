@@ -757,31 +757,28 @@ async def _handle_attachment(
     source_name = extracted.get("source_name", "document")
     if status in {"rag_group", "rag_individual", "rag_individual_partial"}:
         index_result = persist.get("index_result", {})
-        indexed = index_result.get("chunks", index_result.get("indexed", 0))
-        scope = "grupo" if status == "rag_group" else "privado"
-        if status == "rag_individual_partial":
+        indexed = persist.get("chunks_indexed", index_result.get("chunks_indexed", index_result.get("chunks", index_result.get("indexed", 0))))
+        if indexed == 0:
+            reply = (
+                f"Tive um problema ao memorizar os trechos do arquivo '{source_name}'. "
+                "Pode tentar reenviar para que eu tente novamente?"
+            )
+        elif status == "rag_individual_partial":
             chunks_idx = persist.get("chunks_indexed", indexed)
             chunks_total = persist.get("chunks_total", indexed)
             reply = (
                 f"Feito! Indexei {chunks_idx}/{chunks_total} trechos do "
-                f"arquivo '{source_name}' (alguns embeddings falharam, "
+                f"arquivo '{source_name}' na sua base de conhecimento (alguns embeddings falharam, "
                 f"mas o doc esta parcialmente pesquisavel). Quer me perguntar algo?"
             )
         else:
             reply = (
                 f"Feito! Memorei {indexed} trechos do arquivo '{source_name}' "
-                f"no conhecimento {scope}. Quer me perguntar algo sobre o arquivo para verificar?"
+                "na sua base de conhecimento. Quer me perguntar algo sobre o arquivo para verificar?"
             )
         try:
             from agent_orchestration.knowledge_retriever import register_indexing
-            extra = payload.get("extra", {}) or {}
-            remote_jid = str(extra.get("remote_jid", ""))
-            if "@g.us" in remote_jid:
-                group_jid = remote_jid.split("@")[0] + "@g.us"
-                register_indexing(group_jid)
-                register_indexing(phone)
-            else:
-                register_indexing(phone)
+            register_indexing(phone)
         except Exception:
             pass
     elif status.startswith("drive_"):

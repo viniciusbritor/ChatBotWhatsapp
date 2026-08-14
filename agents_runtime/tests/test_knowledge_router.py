@@ -36,11 +36,11 @@ class TestScopeDetection:
         envelope = {"extra": {"remote_jid": "5511966830020@s.whatsapp.net"}}
         assert _detect_scope(envelope) == "private"
 
-    def test_group_scope(self):
+    def test_group_scope_routes_to_user_private_knowledge(self):
         from agent_orchestration.knowledge_router import _detect_scope
 
         envelope = {"extra": {"remote_jid": "120363123@g.us"}}
-        assert _detect_scope(envelope) == "group"
+        assert _detect_scope(envelope) == "private"
 
 
 class TestRouteAttachment:
@@ -101,7 +101,7 @@ class TestRouteAttachment:
         }
         decision = await route_attachment(envelope, "memorizar")
         assert decision["decision"] == "rag"
-        assert decision["scope"] == "group"
+        assert decision["scope"] == "private"
 
     @pytest.mark.asyncio
     async def test_unknown_mime_returns_error(self):

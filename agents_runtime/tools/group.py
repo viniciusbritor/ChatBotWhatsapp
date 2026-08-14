@@ -823,7 +823,12 @@ def _embed_text(text: str, api_key: str = "",
                  max_retries: int = 3) -> Optional[List[float]]:
     if not text or not text.strip():
         return None
-    key = api_key or os.getenv("OPENAI_API_KEY", "").strip()
+    try:
+        from core.secrets import get_secret
+        secret_key = get_secret("OPENAI_API_KEY")
+    except Exception:
+        secret_key = ""
+    key = api_key or os.getenv("OPENAI_API_KEY", "").strip() or secret_key
     if not key:
         logger.warning("group_rag: OPENAI_API_KEY not set for embedding")
         return None

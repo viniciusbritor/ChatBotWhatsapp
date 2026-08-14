@@ -40,7 +40,7 @@ async def extract(envelope: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 async def persist(
     envelope: Dict[str, Any],
     extracted: Dict[str, Any],
-    scope: str,
+    scope: str = "private",
     metadata=None,
 ) -> Dict[str, Any]:
     phone = envelope.get("phone", "")
@@ -48,34 +48,9 @@ async def persist(
     text = extracted.get("text", "")
     source_name = extracted.get("source_name", "note.txt")
     mimetype = extracted.get("mimetype", "text/plain")
-    metadata = metadata or {}
-    extra_metadata = {"mimetype": mimetype, "scope": scope, **metadata}
+    extra_metadata = {"mimetype": mimetype, "scope": "private", **metadata}
     if not text:
         return {"error": "no_text_extracted", "mimetype": mimetype}
-
-    if scope == "group":
-        try:
-            from tools.group import index_group_document
-
-            group_jid = envelope.get("extra", {}).get("remote_jid", "")
-            if "@g.us" not in group_jid:
-                return {"error": "group_jid_required"}
-            result = await index_group_document(
-                phone=phone,
-                group_jid=group_jid,
-                text=text,
-                visibility="group",
-                source_name=source_name,
-            )
-            return {
-                "status": "rag_group",
-                "index_result": result,
-                "source_name": source_name,
-                "scope": scope,
-            }
-        except Exception as exc:
-            logger.warning("text_handler group index failed: %s", exc)
-            return {"error": "rag_index_failed", "detail": str(exc)}
 
     try:
         from core.rag import index_private_document
@@ -84,16 +59,34 @@ async def persist(
             phone=phone,
             text_content=text,
             source_title=source_name,
-            category="whatsapp_attachment",
+            category=extra_metadata.get("class", "legislacao") if extra_metadata.get("class") else "whatsapp_attachment",
             metadata=extra_metadata,
+            class_=extra_metadata.get("class"),
+            group=extra_metadata.get("group"),
+            theme=extra_metadata.get("theme"),
         )
         if result.get("error"):
             return {"error": "rag_index_failed", "detail": result.get("error")}
+        if result.get("partial"):
+            chunks_idx = result.get("chunks_indexed", 0)
+            total = result.get("chunks", 0)
+            return {
+                "status": "rag_individual_partial",
+                "index_result": result,
+                "source_name": source_name,
+                "scope": "private",
+                "category": metadata or {},
+                "chunks_indexed": chunks_idx,
+                "chunks_total": total,
+            }
+        chunks_indexed = result.get("chunks_indexed", result.get("chunks", 0))
         return {
             "status": "rag_individual",
             "index_result": result,
             "source_name": source_name,
-            "scope": scope,
+            "scope": "private",
+            "category": metadata,
+            "chunks_indexed": chunks_indexed,
         }
     except Exception as exc:
         logger.warning("text_handler private index failed: %s", exc)

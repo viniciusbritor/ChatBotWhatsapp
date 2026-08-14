@@ -73,41 +73,16 @@ async def _download_bytes(envelope: Dict[str, Any]) -> Optional[bytes]:
 async def persist(
     envelope: Dict[str, Any],
     extracted: Dict[str, Any],
-    scope: str,
+    scope: str = "private",
     metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     phone = envelope.get("phone", "")
     text = extracted.get("text", "")
     source_name = extracted.get("source_name", "document.pdf")
     mimetype = extracted.get("mimetype", "application/pdf")
-    extra_metadata = {"mimetype": mimetype, "scope": scope, **(metadata or {})}
+    extra_metadata = {"mimetype": mimetype, "scope": "private", **(metadata or {})}
     if not text:
         return {"error": "no_text_extracted", "mimetype": mimetype}
-
-    if scope == "group":
-        try:
-            from tools.group import index_group_document
-
-            group_jid = envelope.get("extra", {}).get("remote_jid", "")
-            if "@g.us" not in group_jid:
-                return {"error": "group_jid_required"}
-            result = await index_group_document(
-                phone=phone,
-                group_jid=group_jid,
-                text=text,
-                visibility="group",
-                source_name=source_name,
-            )
-            return {
-                "status": "rag_group",
-                "index_result": result,
-                "source_name": source_name,
-                "scope": scope,
-                "category": metadata or {},
-            }
-        except Exception as exc:
-            logger.warning("pdf_handler group index failed: %s", exc)
-            return {"error": "rag_index_failed", "detail": str(exc)}
 
     try:
         from core.rag import index_private_document
@@ -131,17 +106,19 @@ async def persist(
                 "status": "rag_individual_partial",
                 "index_result": result,
                 "source_name": source_name,
-                "scope": scope,
+                "scope": "private",
                 "category": metadata or {},
                 "chunks_indexed": chunks_idx,
                 "chunks_total": total,
             }
+        chunks_indexed = result.get("chunks_indexed", result.get("chunks", 0))
         return {
             "status": "rag_individual",
             "index_result": result,
             "source_name": source_name,
-            "scope": scope,
+            "scope": "private",
             "category": metadata or {},
+            "chunks_indexed": chunks_indexed,
         }
     except Exception as exc:
         logger.warning("pdf_handler private index failed: %s", exc)

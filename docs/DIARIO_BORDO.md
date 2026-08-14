@@ -1,5 +1,27 @@
 # Diario de Bordo — ChatBotWhatsapp
 
+## 14/08/2026 (18:10 BRT) — Base de Conhecimento Multi-Tenant: Unificação no RAG Canônico e Isolamento Estrito por Usuário
+
+### Contexto & Causa-Raiz (Evidências de Arquivos em Grupos com "0 trechos memorizados")
+1. **Falha Silenciosa de Embeddings em Grupos**: Ao enviar um arquivo no grupo com a legenda `@Jennifer armazene na base de conhecimento`, o `agent_orchestration/knowledge_router.py` definia `scope = "group"`. O `pdf_handler.py` (e demais handlers) chamava `tools/group.py::index_group_document`, que tentava ler `os.getenv("OPENAI_API_KEY")` sem recorrer ao `core.secrets.get_secret()`. A chamada falhava silenciosamente e retornava `indexed = 0`.
+2. **Mensagem de Falso Positivo**: O `orchestrator.py` gerava a resposta dizendo `"Feito! Memorei 0 trechos do arquivo '...' no conhecimento grupo."` mesmo com zero chunks salvos.
+3. **Coleção Desconectada**: O fluxo legado de grupos salvava na coleção descontinuada `group-knowledge-v2`, enquanto o motor RAG real e a ferramenta `_list_knowledge_stats` leem de `knowledge-database`.
+4. **Violação de Isolamento de Conhecimento**: Conforme regra de negócio, todo documento que um usuário envia para a base de conhecimento (seja em DM ou no grupo) deve pertencer estritamente à sua conta (`owner_hash` / `phone`), ficando protegido e isolado na sua base privada.
+
+### Soluções Implementadas
+- **Roteamento de Anexos Focado no Usuário (`agent_orchestration/knowledge_router.py`)**:
+  - `_detect_scope` atualizado para retornar `scope = "private"`, garantindo que anexos enviados em qualquer contexto sejam indexados no cofre privado do remetente (`owner_hash`).
+- **Unificação dos Handlers de Conhecimento (`skills/knowledge/`)**:
+  - `pdf_handler.py`, `docx_handler.py`, `xlsx_handler.py` e `text_handler.py` agora chamam **exclusivamente** `core.rag.index_private_document`, gravando com embeddings OpenAI (1536d) diretamente na coleção canônica `knowledge-database`.
+- **Blindagem no `orchestrator.py` & `tools/group.py`**:
+  - `orchestrator.py::_handle_attachment`: Trata explicitamente `indexed == 0` retornando mensagem de alerta em vez de confirmação falsa, e formata a resposta para *"na sua base de conhecimento"*.
+  - `tools/group.py::_embed_text`: Adicionado fallback para `get_secret("OPENAI_API_KEY")`.
+
+### Validação e Testes
+- **Suíte RAG / Knowledge**: 100% verde (`109 passed` em `test_knowledge_handlers.py`, `test_knowledge_retriever.py`, `test_knowledge_router.py`, `test_skills_knowledge.py`, `test_orchestrator_new.py`).
+- **LGPD Compliance**: `check_lgpd_compliance.py` aprovado.
+
+
 ## 14/08/2026 (16:00 BRT) — Secretária Pessoal Multi-Tenant: Acesso Real Per-User ao Google Calendar/Gmail/Drive e Composio por Toolkit
 
 ### Contexto & Causa-Raiz (Evidências Maycon +5511992303650)

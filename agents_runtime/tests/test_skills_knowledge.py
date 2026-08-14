@@ -71,22 +71,18 @@ class TestPdfHandler:
         envelope = _envelope("application/pdf")
         envelope["extra"]["remote_jid"] = "120363123@g.us"
 
-        async def _fake_embed(text, api_key=""):
-            return [0.1] * 1536
-
         async def _fake_index(**kwargs):
-            return {"indexed": 3, "chunks": 3, "truncated": False}
+            return {"chunks": 3, "chunks_indexed": 3, "scope": "private"}
 
-        with patch("tools.group.index_group_document", side_effect=_fake_index):
-            with patch("tools.group._embed_text", side_effect=_fake_embed):
-                extracted = {
-                    "text": "Lorem ipsum",
-                    "source_name": "doc.pdf",
-                    "mimetype": "application/pdf",
-                }
-                result = await pdf_handler.persist(envelope, extracted, "group")
-        assert result["status"] == "rag_group"
-        assert result["scope"] == "group"
+        with patch("core.rag.index_private_document", side_effect=_fake_index):
+            extracted = {
+                "text": "Lorem ipsum",
+                "source_name": "doc.pdf",
+                "mimetype": "application/pdf",
+            }
+            result = await pdf_handler.persist(envelope, extracted, "group")
+        assert result["status"] == "rag_individual"
+        assert result["scope"] == "private"
 
 
 class TestTextHandler:
