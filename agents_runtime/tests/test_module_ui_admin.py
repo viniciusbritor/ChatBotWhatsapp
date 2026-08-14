@@ -382,4 +382,4 @@ class TestOnboardingEndpoints(_AuthFixture):
         from orchestrator import _onboarding_url
 
         url = _onboarding_url("+5511966830020")
-        assert "/a/5511966830020/conectar" in url
+        assert "token=ml." in url

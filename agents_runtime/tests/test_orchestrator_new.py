@@ -1,4 +1,4 @@
-﻿"""Testes do novo orchestrator ÔÇö Tier 1 + Tier 2 + multi-intent."""
+"""Testes do novo orchestrator ÔÇö Tier 1 + Tier 2 + multi-intent."""
 from __future__ import annotations
 
 import pytest
@@ -312,7 +312,7 @@ class TestOnboardingNudge:
         with patch("orchestrator._user_has_any_connection", return_value=False):
             out = await _maybe_onboarding_nudge(payload, result)
         assert "conecte suas contas" in out["reply"]
-        assert "/a/5511999999999/conectar" in out["reply"]
+        assert "token=ml." in out["reply"]
 
     @pytest.mark.asyncio
     async def test_sem_nudge_se_ja_conectado(self):
