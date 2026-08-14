@@ -13,7 +13,7 @@ import json
 import time
 import random
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 import httpx
 
