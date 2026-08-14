@@ -240,26 +240,14 @@ export default function App() {
         try {
           return await api(path);
         } catch (e: any) {
-          if (e.status === 401 || e.status === 403) {
-            setLoadError(`Sessão expirada ou sem permissão (${e.status}). Faça login novamente no Portal Coherence.`);
+          if (path === '/admin/me' && e.status === 401) {
+            setLoadError('Sessão expirada. Faça login novamente no Portal Coherence.');
           }
           return fallback;
         }
       };
       try {
-        const [me, acc, ag, sk, tl, users, kn, ow, integ, st] = await Promise.all([
-          fetchSafe('/admin/me', { role: 'agent_user', phone: '', is_admin: false }),
-          fetchSafe('/admin/accounts', { accounts: [] }),
-          fetchSafe('/admin/agents', { agents: [] }),
-          fetchSafe('/admin/skills', { skills: [] }),
-          fetchSafe('/admin/tools', { tools: [] }),
-          fetchSafe('/admin/users', { users: [] }),
-          fetchSafe('/admin/knowledge', { documents: [] }),
-          fetchSafe('/admin/owners', { owners: [] }),
-          fetchSafe('/admin/integrations', { integrations: [] }),
-          fetchSafe('/admin/status', {}),
-        ]);
-
+        const me = await fetchSafe('/admin/me', { role: 'agent_user', phone: '', is_admin: false });
         const curUser: CurrentUser = {
           role: me?.role || 'agent_user',
           phone: me?.phone || '',
@@ -269,29 +257,63 @@ export default function App() {
           picture: me?.picture || '',
         };
         setCurrentUser(curUser);
+
         if (!curUser.isAdmin) {
           setActiveTab('conexoes');
+          const [acc, ag, users, kn, st] = await Promise.all([
+            fetchSafe('/admin/accounts', { accounts: [] }),
+            fetchSafe('/admin/agents', { agents: [] }),
+            fetchSafe('/admin/users', { users: [] }),
+            fetchSafe('/admin/knowledge', { documents: [] }),
+            fetchSafe('/admin/status', {}),
+          ]);
+          setAccounts(mapAccounts(acc));
+          setAgents(mapAgents(ag));
+          const usersList = (users as any)?.users || [];
+          setRawUsers(
+            usersList.map((u: any) => ({
+              id: u.phone || u.id || '',
+              phone: u.phone || u.id || '',
+              name: u.name || u.push_name || '',
+              role: u.role || 'agent_user',
+              email: u.email || '',
+            }))
+          );
+          setConnections(mapConnections(usersList));
+          setCategories(mapKnowledge(kn));
+          setStatusMetrics(mapStatus(st as any));
+        } else {
+          const [acc, ag, sk, tl, users, kn, ow, integ, st] = await Promise.all([
+            fetchSafe('/admin/accounts', { accounts: [] }),
+            fetchSafe('/admin/agents', { agents: [] }),
+            fetchSafe('/admin/skills', { skills: [] }),
+            fetchSafe('/admin/tools', { tools: [] }),
+            fetchSafe('/admin/users', { users: [] }),
+            fetchSafe('/admin/knowledge', { documents: [] }),
+            fetchSafe('/admin/owners', { owners: [] }),
+            fetchSafe('/admin/integrations', { integrations: [] }),
+            fetchSafe('/admin/status', {}),
+          ]);
+          setAccounts(mapAccounts(acc));
+          setAgents(mapAgents(ag));
+          setSkills(mapSkills(sk));
+          setTools(mapTools(tl));
+          const usersList = (users as any)?.users || [];
+          setRawUsers(
+            usersList.map((u: any) => ({
+              id: u.phone || u.id || '',
+              phone: u.phone || u.id || '',
+              name: u.name || u.push_name || '',
+              role: u.role || 'agent_user',
+              email: u.email || '',
+            }))
+          );
+          setConnections(mapConnections(usersList));
+          setCategories(mapKnowledge(kn));
+          setOwners(mapOwners(ow));
+          setIntegrations(mapIntegrations(integ));
+          setStatusMetrics(mapStatus(st as any));
         }
-
-        setAccounts(mapAccounts(acc));
-        setAgents(mapAgents(ag));
-        setSkills(mapSkills(sk));
-        setTools(mapTools(tl));
-        const usersList = (users as any)?.users || [];
-        setRawUsers(
-          usersList.map((u: any) => ({
-            id: u.phone || u.id || '',
-            phone: u.phone || u.id || '',
-            name: u.name || u.push_name || '',
-            role: u.role || 'agent_user',
-            email: u.email || '',
-          }))
-        );
-        setConnections(mapConnections(usersList));
-        setCategories(mapKnowledge(kn));
-        setOwners(mapOwners(ow));
-        setIntegrations(mapIntegrations(integ));
-        setStatusMetrics(mapStatus(st as any));
       } catch (e: any) {
         setLoadError(e.message || 'Falha ao carregar dados do backend');
       }
