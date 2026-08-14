@@ -1,6 +1,31 @@
-# Diario de Bordo — ChatBotWhatsapp
+## 14/08/2026 (20:15 BRT) — Resolução Universal de Telefones Internacionais (+41 Suíça / +55 Brasil), Tokens Multi-Tenant e Onboarding
 
-## 14/08/2026 (18:10 BRT) — Base de Conhecimento Multi-Tenant: Unificação no RAG Canônico e Isolamento Estrito por Usuário
+### Contexto & Causa-Raiz (Evidências Erik +41783430540 e Maycon)
+1. **Canonicalização Forçada de DDI 55 (`_canonical_phone`)**: O telefone do Erik é internacional da Suíça: `+41 78 343 05 40` (11 dígitos). O helper `_canonical_phone` em `agent_loader.py` assumia que qualquer número de 10 ou 11 dígitos era brasileiro sem 55, e prefixava `55` cegamente (`5541783430540`), salvando o token OAuth no doc `usuarios/5541783430540`.
+2. **Descompasso no Webhook e `get_user_oauth`**: O webhook da Evolution API envia o `remoteJid` com o número internacional puro `41783430540`. O `access_guardian.py` e `core/oauth_per_user.py::get_user_oauth` buscavam estritamente pelo doc `usuarios/41783430540`, retornando `None`. A Jennifer caía em loop pedindo autorização repetidamente.
+3. **Cards Invisíveis no Portal Conexões**: No Portal, o usuário analista logado como `41783430540` filtrava conexões por `c.id.startsWith("41783430540__")`. Como o backend gerava `5541783430540__google__...`, os cards não apareciam.
+4. **Onboarding com Links Duplicados**: `_maybe_onboarding_nudge` anexava o Magic Link do Portal no rodapé mesmo quando a resposta já era um link OAuth direto do Google.
+
+### Soluções Implementadas
+- **Tratamento Inteligente de DDI Internacional (`agent_loader.py`)**:
+  - `_canonical_phone` atualizado para diferenciar números brasileiros (11 dígitos com 9º dígito = 9 e DDD 11-99) de números internacionais (ex: Suíça 41, EUA 1, etc.), mantendo os dígitos originais.
+  - `_normalize_phones` gera todas as variantes possíveis (`clean`, `55+clean`, `clean sem 55`, `+clean`).
+  - `save_user` salva no canônico e sincroniza em quaisquer documentos variantes existentes.
+- **Busca e Persistência Multi-Candidatos em `core/oauth_per_user.py`**:
+  - `get_user_oauth` e `_persist_token` agora testam todos os candidatos de formato (`_candidate_phones`), garantindo recuperação imediata do token independentemente do formato vindo do webhook.
+  - `_get_firestore` adicionado fallback explícito `coherence-ominichannel-fs`.
+- **Resolução de E-mail Enriquecida (`agent_loader.py::lookup_phone_by_email`)**:
+  - Busca por `email`, `alternate_emails` e `google_oauth_token.email`, permitindo vincular Google SSO aos números de Maycon (`mapxessa@gmail.com` e `mayconpxavier@gmail.com`) e Erik (`erikimmele1@gmail.com`).
+- **Ajuste de Comparação no Frontend (`portal/src/components/views/ConnectionsView.tsx`)**:
+  - Filtro `userConns` flexibilizado para casar IDs com ou sem prefixo 55.
+- **Desduplicação de Onboarding (`orchestrator.py`)**:
+  - `_maybe_onboarding_nudge` não anexa link duplicado quando a resposta já contém solicitação OAuth ou bloqueio do guardian.
+
+### Validação e Testes
+- **Testes Unitários & Integração**: **1167 passed, 0 failures** na suite completa do pytest.
+- **Simulação Headless E2E**:
+  - **Erik (`+41783430540`)**: `access_guardian` concedeu **ALLOW** com 8 escopos e retornou os 3 compromissos reais da agenda do Google Calendar.
+  - **Maycon (`+5511992303650`)**: `access_guardian` concedeu **ALLOW** e retornou 14 compromissos reais do Google Calendar.
 
 ### Contexto & Causa-Raiz (Evidências de Arquivos em Grupos com "0 trechos memorizados")
 1. **Falha Silenciosa de Embeddings em Grupos**: Ao enviar um arquivo no grupo com a legenda `@Jennifer armazene na base de conhecimento`, o `agent_orchestration/knowledge_router.py` definia `scope = "group"`. O `pdf_handler.py` (e demais handlers) chamava `tools/group.py::index_group_document`, que tentava ler `os.getenv("OPENAI_API_KEY")` sem recorrer ao `core.secrets.get_secret()`. A chamada falhava silenciosamente e retornava `indexed = 0`.

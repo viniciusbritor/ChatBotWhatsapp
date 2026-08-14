@@ -31,12 +31,10 @@ def _now_iso() -> str:
 def _get_firestore_client():
     """Get Firestore client."""
     from google.cloud import firestore
-    project = os.getenv("GCP_PROJECT") or os.getenv("GCLOUD_PROJECT")
+    project = os.getenv("GCP_PROJECT") or os.getenv("GCLOUD_PROJECT") or "coherence-ominichannel-fs"
     emulator_host = os.getenv("FIRESTORE_EMULATOR_HOST")
     if emulator_host:
         return firestore.Client(project=project or "demo-project")
-    if not project:
-        return None
     return firestore.Client(project=project)
 
 
@@ -458,8 +456,8 @@ def _get_admins_config() -> Dict[str, Any]:
 def lookup_phone_by_email(email: str) -> str:
     """Encontra o phone do usuario que tem ``email`` vinculado.
 
-    Varre usuarios/{phone} procurando doc com campo ``email``
-    (setado pelo Portal no cadastro ou pela Jennifer no onboarding).
+    Varre usuarios/{phone} procurando doc com campo ``email``,
+    ``alternate_emails`` ou ``google_oauth_token.email``.
     Retorna o doc id (phone) ou "" se nao encontrar.
     """
     value = str(email or "").strip().lower()
@@ -472,8 +470,14 @@ def lookup_phone_by_email(email: str) -> str:
         for doc in db.collection("usuarios").stream():
             data = doc.to_dict() or {}
             doc_email = str(data.get("email", "") or "").strip().lower()
-            if doc_email == value:
-                return doc.id
+            doc_emails = [doc_email]
+            for alt in data.get("alternate_emails") or []:
+                doc_emails.append(str(alt).strip().lower())
+            token_email = str((data.get("google_oauth_token") or {}).get("email", "") or "").strip().lower()
+            if token_email:
+                doc_emails.append(token_email)
+            if value in doc_emails and any(doc_emails):
+                return str(data.get("phone") or doc.id)
     except Exception:
         return ""
     return ""
@@ -574,18 +578,22 @@ def sync_user_profile(
 def _normalize_phones(phone: str) -> List[str]:
     """Gera variacoes de formato de telefone para busca robusta."""
     candidates = []
-    clean = phone.strip().lstrip("+")
+    clean = "".join(c for c in str(phone or "") if c.isdigit())
+    if not clean:
+        return []
     candidates.append(clean)
-    if clean.startswith("55"):
+    canonical = _canonical_phone(clean)
+    if canonical and canonical not in candidates:
+        candidates.append(canonical)
+    if clean.startswith("55") and len(clean) > 10:
         candidates.append(clean[2:])
     else:
         candidates.append("55" + clean)
-    if not clean.startswith("+"):
-        candidates.append("+" + clean)
+    candidates.append("+" + clean)
     seen = []
     result = []
     for c in candidates:
-        if c not in seen:
+        if c and c not in seen:
             seen.append(c)
             result.append(c)
     return result
@@ -617,16 +625,26 @@ def has_nickname(phone: str) -> bool:
 def save_user(phone: str, data: Dict[str, Any]) -> bool:
     """Create or update a user in Firestore.
 
-    O doc ID e sempre o phone canonical (E.164 BR, ex: 5511966830020) para
-    evitar documentos orfaos duplicados (ex: 11966830020 sem o prefixo 55).
+    Salva no canonical e sincroniza em quaisquer documentos variantes
+    existentes para evitar descompasso em webhooks internacionais.
     """
     db = _get_firestore_client()
     if db is None:
         return False
     try:
         data["updated_at"] = _now_iso()
-        canonical = _canonical_phone(phone) or phone
+        canonical = _canonical_phone(phone) or "".join(c for c in str(phone or "") if c.isdigit())
+        if not canonical:
+            return False
         data["phone"] = canonical
+        # Sincroniza em docs existentes de variantes do telefone
+        for p in _normalize_phones(phone):
+            try:
+                doc = db.collection("usuarios").document(p).get()
+                if doc.exists and p != canonical:
+                    db.collection("usuarios").document(p).set(data, merge=True)
+            except Exception:
+                pass
         db.collection("usuarios").document(canonical).set(data, merge=True)
         return True
     except Exception as e:
@@ -668,17 +686,27 @@ def ensure_user_registered(phone: str, sender_name: str = "", instance: str = "j
 
 
 def _canonical_phone(phone: str) -> str:
-    """Canonicaliza phone para E.164 BR: '55' + 11 digitos.
+    """Canonicaliza phone para E.164.
 
-    Aceita +5511966830020, 55119966830020, 11966830020, 119966830020
-    → sempre retorna 5511966830020 (ou o primeiro formato valido com 55).
+    Para números brasileiros sem 55:
+    - 11 dígitos com DDD válido (11 a 99) e nono dígito 9 (ex: 11966830020) → 5511966830020
+    - 10 dígitos com DDD válido (11 a 99) (ex: 1132345678) → 551132345678
+    - 12 ou 13 dígitos começando com 55 (ex: 5511966830020) → 5511966830020
+    Para números internacionais (ex: Suíça 41783430540, EUA 14155552671, etc.):
+    - Mantém os dígitos originais sem prefixar 55 indevidamente.
     """
     digits = "".join(c for c in str(phone or "") if c.isdigit())
-    if len(digits) == 12 and digits.startswith("55"):
-        return digits  # já é 55 + 11
-    if len(digits) == 11:
+    if not digits:
+        return ""
+    if len(digits) in (12, 13) and digits.startswith("55"):
+        return digits
+    if len(digits) == 11 and digits.startswith("55"):
+        return digits
+    # Se tem 11 dígitos e começa com DDD brasileiro (11 a 99) com 9 no 3º dígito:
+    if len(digits) == 11 and digits[:2].isdigit() and int(digits[:2]) in range(11, 100) and digits[2] == "9":
         return "55" + digits
-    if len(digits) == 10:
+    # Se tem 10 dígitos e começa com DDD brasileiro (11 a 99) e dígitos fixos (2 a 5):
+    if len(digits) == 10 and digits[:2].isdigit() and int(digits[:2]) in range(11, 100) and digits[2] in "2345":
         return "55" + digits
     return digits
 

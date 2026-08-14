@@ -51,7 +51,11 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({
 
   const userConns = connections.filter((c) => {
     if (!cleanSelectedPhone) return true;
-    return (c.id || '').startsWith(cleanSelectedPhone + '__');
+    const connPhone = (c.id || '').split('__')[0] || '';
+    if (connPhone === cleanSelectedPhone) return true;
+    if (connPhone.startsWith('55') && connPhone.slice(2) === cleanSelectedPhone) return true;
+    if (cleanSelectedPhone.startsWith('55') && cleanSelectedPhone.slice(2) === connPhone) return true;
+    return false;
   });
 
   const googleConns = userConns.filter(

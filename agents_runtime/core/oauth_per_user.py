@@ -106,14 +106,34 @@ def parse_oauth_state(state: str) -> Optional[str]:
 
 def _get_firestore():
     try:
-        project = os.getenv("GCP_PROJECT") or os.getenv("GCLOUD_PROJECT")
-        if not project:
-            return None
+        project = os.getenv("GCP_PROJECT") or os.getenv("GCLOUD_PROJECT") or "coherence-ominichannel-fs"
         from google.cloud import firestore
         return firestore.Client(project=project)
     except Exception as exc:
         logger.warning("firestore unavailable for oauth per-user: %s", exc)
         return None
+
+
+def _candidate_phones(phone: str) -> list:
+    """Gera variacoes de formato de telefone para busca e persistencia robusta."""
+    raw = str(phone or "").strip()
+    digits = re.sub(r"\D", "", raw)
+    if not digits:
+        return []
+    candidates = [digits]
+    if digits.startswith("55") and len(digits) > 10:
+        candidates.append(digits[2:])
+    else:
+        candidates.append("55" + digits)
+    if not raw.startswith("+") and raw:
+        candidates.append("+" + digits)
+    seen = set()
+    result = []
+    for c in candidates:
+        if c and c not in seen:
+            seen.add(c)
+            result.append(c)
+    return result
 
 
 def _is_expired(expiry: Any) -> bool:
@@ -178,28 +198,42 @@ def _persist_token(db, phone: str, token_data: Dict[str, Any]) -> None:
         if key not in {"client_id", "client_secret"}
     }
     persisted["updated_at"] = now_brt().isoformat()
-    try:
-        db.collection(OAUTH_USER_COLLECTION).document(norm_phone).set(
-            {"google_oauth_token": persisted},
-            merge=True,
-        )
-    except Exception as exc:
-        logger.warning("oauth persist failed: %s", exc)
+    candidates = _candidate_phones(phone)
+    target_docs = set()
+    for p in candidates:
+        try:
+            doc = db.collection(OAUTH_USER_COLLECTION).document(p).get()
+            if doc.exists:
+                target_docs.add(p)
+        except Exception:
+            pass
+    if not target_docs:
+        target_docs.add(norm_phone)
+    for target in target_docs:
+        try:
+            db.collection(OAUTH_USER_COLLECTION).document(target).set(
+                {"google_oauth_token": persisted},
+                merge=True,
+            )
+        except Exception as exc:
+            logger.warning("oauth persist failed for %s: %s", target, exc)
 
 
 def get_user_oauth(phone: str) -> Optional[Dict[str, Any]]:
     db = _get_firestore()
-    norm_phone = re.sub(r"\D", "", str(phone or ""))
-    if db is None or not norm_phone:
+    if db is None:
         return None
-    try:
-        doc = db.collection(OAUTH_USER_COLLECTION).document(norm_phone).get()
-    except Exception as exc:
-        logger.warning("oauth fetch failed: %s", exc)
-        return None
-    if not doc.exists:
-        return None
-    return (doc.to_dict() or {}).get("google_oauth_token")
+    candidates = _candidate_phones(phone)
+    for p in candidates:
+        try:
+            doc = db.collection(OAUTH_USER_COLLECTION).document(p).get()
+            if doc.exists:
+                token = (doc.to_dict() or {}).get("google_oauth_token")
+                if token and isinstance(token, dict) and (token.get("token") or token.get("access_token") or token.get("refresh_token")):
+                    return token
+        except Exception as exc:
+            logger.warning("oauth fetch failed for %s: %s", p, exc)
+    return None
 
 
 def get_valid_user_token(phone: str) -> Optional[str]:

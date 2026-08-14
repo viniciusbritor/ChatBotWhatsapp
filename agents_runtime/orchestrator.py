@@ -367,7 +367,15 @@ async def _maybe_onboarding_nudge(payload: Dict[str, Any], result: Dict[str, Any
     if not phone:
         return result
     metadata = result.get("metadata", {}) or {}
-    if metadata.get("error") or result.get("reply", "").lower().find("conecte suas contas") != -1:
+    reply_lower = result.get("reply", "").lower()
+    if (
+        metadata.get("error")
+        or metadata.get("blocked")
+        or metadata.get("blocked_reason")
+        or "conecte suas contas" in reply_lower
+        or "oauth/google" in reply_lower
+        or "/portal" in reply_lower
+    ):
         return result
     has_conn = await _user_has_any_connection(phone)
     if has_conn is not False:
