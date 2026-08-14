@@ -147,7 +147,8 @@ class TestPrefetchModule:
             return_value='[{"id":"1","summary":"Reuniao"}]',
         ):
             result = await prefetch_for_agent("5511", "jennifer", "calendar")
-        assert "Reuniao" in result
+        assert result is not None
+        assert "Reuniao" in result["text"]
 
     @pytest.mark.asyncio
     async def test_prefetch_email_returns_data(self):
@@ -159,7 +160,8 @@ class TestPrefetchModule:
             return_value='[{"id":"1","subject":"Hello"}]',
         ):
             result = await prefetch_for_agent("5511", "jennifer", "email")
-        assert "Hello" in result
+        assert result is not None
+        assert "Hello" in result["text"]
 
     @pytest.mark.asyncio
     async def test_prefetch_drive_returns_data(self):
@@ -171,7 +173,8 @@ class TestPrefetchModule:
             return_value='[{"id":"1","name":"ata.pdf"}]',
         ):
             result = await prefetch_for_agent("5511", "jennifer", "drive", text="ata")
-        assert "ata.pdf" in result
+        assert result is not None
+        assert "ata.pdf" in result["text"]
 
     @pytest.mark.asyncio
     async def test_prefetch_unknown_type_returns_none(self):
