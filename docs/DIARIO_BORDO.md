@@ -1,5 +1,25 @@
 # Diario de Bordo — ChatBotWhatsapp
 
+## 14/08/2026 (05:22 BRT) — RBAC Dinâmico via Portal Coherence `user_permissions` + Fix `isAdmin`/Null-Safety no Portal
+
+### Contexto & Causa-Raiz
+1. **RBAC hardcoded no Firestore**: `core/auth.py::resolve_caller` resolvia `role` apenas por `usuarios/{phone}.role`, whitelist `config/admins` e owner da instância. Admins e analistas eram detectados por campo manual — sem fonte única da verdade. O Portal Coherence já mantém a coleção `user_permissions` (e `users/{email}.global_role`), mas o agente-runtime ainda não consultava.
+2. **`ReferenceError: isAdmin is not defined` no Portal**: `ConnectionsView.tsx` referenciava `isAdmin` sem import, quebrando render para usuários sem `currentUser` carregado. `App.tsx` propagava `null` em `user` aos componentes filhos, e `mapTools` categorizava como `'Composio'` enquanto a pill comparava com `'Composio MCP'`.
+
+### Soluções Aplicadas (commits `ce7e522`, `dd87176`, `2df9545`)
+- **Integração `user_permissions` do Portal** (`agents_runtime/agent_loader.py` + `agents_runtime/core/auth.py`):
+  - Nova função `get_coherence_module_role(email, uid)` em `agent_loader.py` que consulta a coleção Firestore `user_permissions` (chaves `{email}_omnichannel-agentes` / `_omnichannel-agents` / `_agents-omnichannel`, campos `is_active` e `role` mapeados para `admin`/`agent_user`) com fallback para `users/{email}.global_role` (admin se `is_super_admin` ou `role=admin`; senão `agent_user`).
+  - Em `resolve_caller(request)`, a ordem de resolução do `role` agora é: **Portal** (`get_coherence_module_role`) → `usuarios/{id}.role` → whitelist `config/admins` → owner da instância → default `agent_user`.
+  - Novos prefixos liberados para `agent_user`: `/admin/accounts` e `/admin/agents`.
+- **Fix portal (`dd87176`)**: `ConnectionsView.tsx` corrigiu `isAdmin` (import) e null-safety no render; `App.tsx` preenche `email/name/picture` em `currentUser` quando o user chega.
+- **Magic link ON também para GET** (`core/magic_link.py` + `main.py`): novo endpoint `GET /admin/users/{phone}/magic-link` (gera URL assinada) além do `POST /admin/users/{phone}/invite` (envia pelo WhatsApp).
+- **Testes atualizados** (`2df9545`): `test_module_ui_admin.py` e `test_orchestrator_new.py` com asserções no novo padrão `magic link` (`/portal/?phone=...`).
+
+### Validação
+- Build Cloud Build SUCCESS (08:22 UTC, revision `agents-runtime-test-00437-sfz`, `COMMIT_SHA=ce7e522`).
+- Suíte de testes: **1146 passed, 5 skipped, 1 xpassed, 0 failures**.
+- LGPD Check: **Passed**.
+
 ## 14/08/2026 (04:45 BRT) — Conexões Multi-Tenant, Links Mágicos de Autorização, Convites via WhatsApp e Isolamento Estrito de Conhecimento
 
 ### Contexto & Desafio
