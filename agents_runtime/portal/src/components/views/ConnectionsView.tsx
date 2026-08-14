@@ -43,27 +43,30 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({
 
   const cleanSelectedPhone = selectedUser.replace(/\D/g, '');
 
+  const isAdmin = currentUser ? currentUser.isAdmin : true;
+  const [inviteStatus, setInviteStatus] = useState<string | null>(null);
+  const [inviting, setInviting] = useState<boolean>(false);
+
+  const q = (searchQuery || '').toLowerCase();
+
   const userConns = connections.filter((c) => {
     if (!cleanSelectedPhone) return true;
-    return c.id.startsWith(cleanSelectedPhone + '__');
+    return (c.id || '').startsWith(cleanSelectedPhone + '__');
   });
 
   const googleConns = userConns.filter(
     (c) =>
       c.category === 'Conta Google' &&
-      (c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        c.description.toLowerCase().includes(searchQuery.toLowerCase()))
+      ((c.name || '').toLowerCase().includes(q) ||
+        (c.description || '').toLowerCase().includes(q))
   );
 
   const otherConns = userConns.filter(
     (c) =>
       c.category === 'Outros serviços' &&
-      (c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        c.description.toLowerCase().includes(searchQuery.toLowerCase()))
+      ((c.name || '').toLowerCase().includes(q) ||
+        (c.description || '').toLowerCase().includes(q))
   );
-
-  const [inviteStatus, setInviteStatus] = useState<string | null>(null);
-  const [inviting, setInviting] = useState<boolean>(false);
 
   const handleSendInvite = async () => {
     if (!cleanSelectedPhone) return;
