@@ -57,3 +57,4 @@ gate*.log
 
 # Legacy folder scheduled for Fase F cleanup
 WhatsappAgente/
+interface_google_studio/

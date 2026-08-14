@@ -335,3 +335,104 @@ class TestAdminEndpointsRBAC:
                     assert len(body["users"]) == 1
                     assert body["users"][0]["phone"] == "5511988776655"
 
+
+class TestMagicLinkAuth:
+    """Testes para o gerador e validador de Magic Links."""
+
+    def test_generate_and_verify_valid_token(self):
+        from core.magic_link import generate_magic_link_token, verify_magic_link_token
+
+        token = generate_magic_link_token("5511999887766", ttl_seconds=3600)
+        assert token.startswith("ml.")
+        claims = verify_magic_link_token(token)
+        assert claims is not None
+        assert claims["phone"] == "5511999887766"
+        assert claims["role"] == "agent_user"
+
+    def test_verify_expired_token(self):
+        from core.magic_link import generate_magic_link_token, verify_magic_link_token
+
+        token = generate_magic_link_token("5511999887766", ttl_seconds=-10)
+        assert verify_magic_link_token(token) is None
+
+    def test_verify_tampered_token(self):
+        from core.magic_link import generate_magic_link_token, verify_magic_link_token
+
+        token = generate_magic_link_token("5511999887766", ttl_seconds=3600)
+        tampered = token[:-4] + "abcd"
+        assert verify_magic_link_token(tampered) is None
+
+    def test_resolve_caller_with_magic_link(self):
+        from core.magic_link import generate_magic_link_token
+        from core.auth import resolve_caller
+        from unittest.mock import MagicMock
+
+        token = generate_magic_link_token("5511999887766", ttl_seconds=3600)
+        req = MagicMock()
+        req.headers = {"Authorization": f"Bearer {token}"}
+        req.query_params = {}
+        req.cookies = {}
+        role, phone = resolve_caller(req)
+        assert role == "agent_user"
+        assert phone == "5511999887766"
+
+
+class TestInviteAndKnowledgeEndpoints:
+    """Testes para convites via WhatsApp e isolamento de conhecimento."""
+
+    def test_invite_endpoint_success(self):
+        import asyncio
+        from unittest.mock import MagicMock, patch, AsyncMock
+        from main import admin_users_invite
+
+        req = MagicMock()
+        with patch("main._require_admin"):
+            with patch("core.evolution_client.send_text", new_callable=AsyncMock, return_value=True):
+                res = asyncio.run(admin_users_invite("5511917389901", req))
+                import json
+                body = json.loads(res.body.decode())
+                assert body["status"] == "ok"
+                assert body["phone"] == "5511917389901"
+                assert "magic_link" in body
+                assert "ml." in body["magic_link"]
+                assert body["whatsapp_sent"] is True
+
+    def test_knowledge_isolation_analyst(self):
+        import asyncio
+        import hashlib
+        from unittest.mock import MagicMock, patch
+        from main import admin_knowledge_documents
+
+        req = MagicMock()
+        req.query_params = {"limit": "50"}
+        caller_phone = "5511917389901"
+        caller_hash = hashlib.sha256(caller_phone.encode()).hexdigest()[:32]
+        other_hash = hashlib.sha256("5511966830020".encode()).hexdigest()[:32]
+
+        doc_mine = MagicMock()
+        doc_mine.id = "doc1"
+        doc_mine.to_dict.return_value = {
+            "source_title": "Meu Doc Privado",
+            "owner_hash": caller_hash,
+            "text_content": "Conteúdo secreto do analista",
+        }
+
+        doc_other = MagicMock()
+        doc_other.id = "doc2"
+        doc_other.to_dict.return_value = {
+            "source_title": "Doc de Outro Usuário",
+            "owner_hash": other_hash,
+            "text_content": "Conteúdo restrito de terceiro",
+        }
+
+        mock_db = MagicMock()
+        mock_db.collection.return_value.limit.return_value.stream.return_value = [doc_mine, doc_other]
+
+        with patch("main._caller_role", return_value=("agent_user", caller_phone)):
+            with patch("agent_loader._get_firestore_client", return_value=mock_db):
+                res = asyncio.run(admin_knowledge_documents(req))
+                import json
+                body = json.loads(res.body.decode())
+                assert len(body["documents"]) == 1
+                assert body["documents"][0]["title"] == "Meu Doc Privado"
+

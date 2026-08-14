@@ -664,13 +664,9 @@ _GHOST_ONLY_FIELDS = {"group_memberships", "group_memberships_updated_at"}
 
 
 def _user_doc_is_real(data: Dict[str, Any]) -> bool:
-    """True se o doc representa um usuario real (nao so o indice inverso).
-
-    O ``sync_group_members`` grava ``usuarios/{phone}.group_memberships`` via
-    ``set(merge=True)``, criando docs "fantasma" para membros de grupo que
-    nunca interagiram com a Jennifer. Esses docs tem apenas campos
-    ``group_memberships*`` e nao devem aparecer como usuarios no Portal.
-    """
+    """True se o doc representa um usuario real ou contato catalogado."""
+    if data.get("phone") or data.get("name") or data.get("role") or data.get("google_oauth_token"):
+        return True
     for key, value in data.items():
         if key in _GHOST_ONLY_FIELDS:
             continue

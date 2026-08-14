@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { KnowledgeCategory } from '../../types';
+import { KnowledgeCategory, CurrentUser } from '../../types';
 
 interface KnowledgeViewProps {
   categories: KnowledgeCategory[];
+  currentUser?: CurrentUser | null;
   onUploadClick: () => void;
   onViewChunks: (cat: KnowledgeCategory) => void;
   onReindex: (catId: string) => void;
@@ -11,6 +12,7 @@ interface KnowledgeViewProps {
 
 export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
   categories,
+  currentUser,
   onUploadClick,
   onViewChunks,
   onReindex,
@@ -34,12 +36,27 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
     setTimeout(() => setReindexToast(null), 2500);
   };
 
+  const isAnalyst = currentUser && !currentUser.isAdmin;
+
   return (
     <div className="space-y-6">
       {/* Toast Alert */}
       {reindexToast && (
         <div className="fixed top-20 right-8 z-50 bg-[#191b23] text-[#a3efcf] px-4 py-3 rounded-xl shadow-2xl text-[13px] font-mono border border-[#a3efcf]">
           ⚡ {reindexToast}
+        </div>
+      )}
+
+      {/* Analyst Isolation Notice */}
+      {isAnalyst && (
+        <div className="p-4 rounded-2xl bg-[#e6f4ea] dark:bg-[#132d20] border border-[#196b52]/40 text-[#196b52] dark:text-[#a3efcf] text-[13px] flex items-center gap-3">
+          <span className="material-symbols-outlined text-[22px]">lock</span>
+          <div>
+            <p className="font-bold">Base de Conhecimento Individual (Isolamento Ativo)</p>
+            <p className="text-[12px] opacity-90">
+              Você está visualizando apenas os arquivos e memórias enviados pelo seu número (+{currentUser.phone}). Os documentos corporativos e de outros analistas permanecem inacessíveis.
+            </p>
+          </div>
         </div>
       )}
 
@@ -50,7 +67,9 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
             Conhecimento
           </h1>
           <p className="text-[14px] text-[#424754] dark:text-[#c2c6d6] mt-0.5">
-            Coleções vetoriais, chunks e modelo RAG
+            {isAnalyst
+              ? 'Seus arquivos e documentos indexados para consulta com a Jennifer'
+              : 'Coleções vetoriais, chunks e modelo RAG'}
           </p>
         </div>
         <button

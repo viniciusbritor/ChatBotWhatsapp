@@ -1,4 +1,4 @@
-﻿"""E2E smoke tests ÔÇö fluxo completo detect() ÔåÆ run() ÔåÆ response.
+"""E2E smoke tests ÔÇö fluxo completo detect() ÔåÆ run() ÔåÆ response.
 
 Validam a integra├º├úo real entre orquestrador e pipelines.
 Mockam apenas depend├¬ncias externas: Firestore, DeepSeek API, Evolution API, agent execution.
@@ -109,7 +109,8 @@ class TestE2EEmail:
             with patch("pipelines._ack.send_ack", AsyncMock()):
                 with patch("pipelines._prefetch.prefetch_for_agent", _mock_prefetch_email()):
                     with patch("pipelines._executor.run_agent", _mock_agent_email_response()):
-                        result = await orchestrate(_base_payload("meus emails"))
+                        with patch("orchestrator._user_has_any_connection", new_callable=AsyncMock, return_value=True):
+                            result = await orchestrate(_base_payload("meus emails"))
 
         reply = result["reply"].lower()
         assert "agenda" not in reply, "Email mencionou Agenda!"

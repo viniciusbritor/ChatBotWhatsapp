@@ -62,10 +62,40 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({
         c.description.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
-  const isAdmin = currentUser ? currentUser.isAdmin : true;
+  const [inviteStatus, setInviteStatus] = useState<string | null>(null);
+  const [inviting, setInviting] = useState<boolean>(false);
+
+  const handleSendInvite = async () => {
+    if (!cleanSelectedPhone) return;
+    setInviting(true);
+    try {
+      const tok = sessionStorage.getItem('_ctok') || new URLSearchParams(location.search).get('token') || '';
+      const res = await fetch(`/admin/users/${cleanSelectedPhone}/invite?token=${tok}`, {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (data.status === 'ok') {
+        setInviteStatus(`Convite enviado via WhatsApp para +${cleanSelectedPhone}!`);
+      } else {
+        setInviteStatus(`Erro ao enviar convite: ${data.message || 'Falha na Evolution API'}`);
+      }
+    } catch (e: any) {
+      setInviteStatus(`Falha de rede ao disparar convite.`);
+    } finally {
+      setInviting(false);
+      setTimeout(() => setInviteStatus(null), 4000);
+    }
+  };
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
+      {/* Toast Alert */}
+      {inviteStatus && (
+        <div className="fixed top-20 right-8 z-50 bg-[#191b23] text-[#a3efcf] px-4 py-3 rounded-xl shadow-2xl text-[13px] font-mono border border-[#a3efcf]">
+          💬 {inviteStatus}
+        </div>
+      )}
+
       {/* Header Banner */}
       <div className="bg-white dark:bg-[#191b23] p-6 rounded-2xl shadow-xs border border-[#c2c6d6]/40 space-y-4">
         <h2 className="text-[32px] font-bold text-[#191b23] dark:text-white tracking-tight">
@@ -75,31 +105,41 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({
           Serviços que a Jennifer pode acessar por você — conecte sua conta para liberar cada funcionalidade
         </p>
 
-        <div className="flex items-center gap-3 pt-2">
+        <div className="flex flex-wrap items-center gap-3 pt-2">
           <label htmlFor="user-select" className="text-[14px] font-semibold text-[#191b23] dark:text-white">
             Usuário:
           </label>
           {isAdmin ? (
-            <select
-              id="user-select"
-              value={selectedUser}
-              onChange={(e) => setSelectedUser(e.target.value)}
-              className="bg-[#f9f9ff] dark:bg-[#2e3038] border border-[#c2c6d6] text-[#191b23] dark:text-white rounded-xl px-4 py-1.5 font-mono text-[13px] shadow-2xs focus:ring-2 focus:ring-[#0058be]"
-            >
-              {users.length > 0 ? (
-                users.map((u) => {
-                  const val = u.phone.startsWith('+') ? u.phone : '+' + u.phone;
-                  const label = u.name ? `${u.name} (${val})` : val;
-                  return (
-                    <option key={u.phone} value={val}>
-                      {label}
-                    </option>
-                  );
-                })
-              ) : (
-                <option value={selectedUser}>{selectedUser}</option>
-              )}
-            </select>
+            <div className="flex flex-wrap items-center gap-3">
+              <select
+                id="user-select"
+                value={selectedUser}
+                onChange={(e) => setSelectedUser(e.target.value)}
+                className="bg-[#f9f9ff] dark:bg-[#2e3038] border border-[#c2c6d6] text-[#191b23] dark:text-white rounded-xl px-4 py-1.5 font-mono text-[13px] shadow-2xs focus:ring-2 focus:ring-[#0058be]"
+              >
+                {users.length > 0 ? (
+                  users.map((u) => {
+                    const val = u.phone.startsWith('+') ? u.phone : '+' + u.phone;
+                    const label = u.name ? `${u.name} (${val})` : val;
+                    return (
+                      <option key={u.phone} value={val}>
+                        {label}
+                      </option>
+                    );
+                  })
+                ) : (
+                  <option value={selectedUser}>{selectedUser}</option>
+                )}
+              </select>
+              <button
+                onClick={handleSendInvite}
+                disabled={inviting}
+                className="bg-[#196b52] hover:bg-[#145541] disabled:opacity-50 text-white font-semibold text-[12px] px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 shadow-xs"
+              >
+                <span className="material-symbols-outlined text-[16px]">send</span>
+                {inviting ? 'Enviando...' : 'Enviar convite no WhatsApp'}
+              </button>
+            </div>
           ) : (
             <span className="bg-[#ecedf7] dark:bg-[#2e3038] px-3 py-1 rounded-lg font-mono text-[13px] text-[#0058be] dark:text-[#adc6ff] font-semibold">
               {currentUser?.name ? `${currentUser.name} (${selectedUser})` : selectedUser}

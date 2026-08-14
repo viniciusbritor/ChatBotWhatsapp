@@ -2703,14 +2703,14 @@ async def _verify_calendar_event(phone: str, result: dict, tool_args: dict) -> d
 
 
 def _onboarding_url(phone: str) -> str:
-    """Gera URL publica de onboarding (P5) para o user conectar Google/Composio."""
-    import os as _os
+    """Gera URL publica de onboarding/conexão com Magic Link assinado para o user."""
+    try:
+        from core.magic_link import build_magic_link_url
 
-    base = (_os.getenv("BASE_URL") or _os.getenv("EVO_BASE_URL") or "").rstrip("/")
-    digits = "".join(c for c in str(phone) if c.isdigit())
-    if not base:
-        return f"/a/{digits}/conectar"
-    return f"{base}/a/{digits}/conectar"
+        return build_magic_link_url(phone)
+    except Exception:
+        digits = "".join(c for c in str(phone) if c.isdigit())
+        return f"/portal/?phone={digits}"
 
 
 def _resolve_agent_tools(agent: Dict[str, Any]) -> List[str]:

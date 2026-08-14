@@ -42,6 +42,10 @@ def is_path_protected(path: str) -> bool:
 def _is_valid_firebase_jwt(token: str) -> bool:
     if not token:
         return False
+    if token.startswith("ml."):
+        from core.magic_link import verify_magic_link_token
+
+        return verify_magic_link_token(token) is not None
     try:
         claims = id_token.verify_firebase_token(
             token,
@@ -55,9 +59,13 @@ def _is_valid_firebase_jwt(token: str) -> bool:
 
 
 def _firebase_claims(token: str) -> dict:
-    """Retorna claims do Firebase JWT validado, ou dict vazio."""
+    """Retorna claims do Firebase JWT validado ou magic link token, ou dict vazio."""
     if not token:
         return {}
+    if token.startswith("ml."):
+        from core.magic_link import verify_magic_link_token
+
+        return verify_magic_link_token(token) or {}
     try:
         claims = id_token.verify_firebase_token(
             token,

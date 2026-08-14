@@ -1,5 +1,33 @@
 # Diario de Bordo — ChatBotWhatsapp
 
+## 14/08/2026 (04:45 BRT) — Conexões Multi-Tenant, Links Mágicos de Autorização, Convites via WhatsApp e Isolamento Estrito de Conhecimento
+
+### Contexto & Desafio
+1. **Contatos de Grupo Ocultos do Admin**: Contatos catalogados via menções ou participação em grupos (`group_memberships`) eram descartados por `_user_doc_is_real` em `list_users()`. O Admin não conseguia visualizar nem gerenciar as conexões desses membros na interface.
+2. **Onboarding Descentralizado Multi-Tenant**: Usuários comuns (analistas / membros da empresa) que desejam que a Jennifer acerte sua agenda, consulte e-mails ou execute ações no LinkedIn/GitHub precisam de um fluxo self-service de conexão sem exigir configuração prévia de Google SSO no Firebase.
+3. **Isolamento de Conhecimento por Usuário (RBAC)**: Usuários com papel Analista (`agent_user`) devem visualizar estritamente seus próprios arquivos e memórias na aba Conhecimento (`owner_hash == sha256(phone)`), sem ter acesso à base corporativa global ou a dados de outros analistas.
+
+### Soluções Implementadas
+- **Backfill & Exposição Completa de Contatos (`agent_loader.py`)**:
+  - `_user_doc_is_real` atualizado para reconhecer qualquer documento com `phone`, `name` ou `role`.
+  - Executado backfill no Firestore gravando `role='agent_user'`, `phone` e nomes de exibição amigáveis para todos os contatos identificados.
+- **Módulo de Links Mágicos de Autorização (`core/magic_link.py` & `core/auth.py`)**:
+  - Implementada geração e validação de tokens seguros com assinatura HMAC-SHA256 (`generate_magic_link_token`, `verify_magic_link_token`, `build_magic_link_url`).
+  - Middleware de autenticação (`core/auth.py`) aceita tokens `ml.*`, autenticando o usuário diretamente no Portal como `agent_user` e associando seu número de telefone.
+- **Disparo de Convites via WhatsApp (`main.py` & `ConnectionsView.tsx`)**:
+  - Criado endpoint `POST /admin/users/{phone}/invite` que dispara uma mensagem oficial pelo Evolution API com o Magic Link exclusivo para o contato.
+  - Adicionado botão **"Enviar convite no WhatsApp"** no dropdown de usuários da aba Conexões.
+  - `_onboarding_url(phone)` no `orchestrator.py` atualizado para fornecer o Magic Link sempre que a Jennifer detectar necessidade de autorização de um novo usuário.
+- **Isolamento Estrito de Conhecimento e Conexões (`main.py`, `KnowledgeView.tsx`, `ConnectionsView.tsx`)**:
+  - `GET /admin/knowledge` bloqueia qualquer documento que não coincida com o hash ou telefone do analista chamador.
+  - `KnowledgeView.tsx` exibe banner informativo de privacidade atestando o isolamento da base pessoal.
+  - `ConnectionsView.tsx` bloqueia a troca de usuários para analistas, fixando a visualização no seu próprio número.
+- **Validação**:
+  - Build frontend React: **0 erros**.
+  - Testes do Portal & RBAC (`test_portal_roles.py`): **47 passed**.
+  - Testes de pipeline E2E (`tests/pipelines/`): **112 passed**.
+  - Suíte completa de testes: **1.152 passed, 0 failures**.
+
 ## 14/08/2026 (01:50 BRT) — Resolução de Identidade do Usuário (Firebase JWT), Auto-Sync de Perfil e Filtros Defensivos
 
 ### Contexto & Causa-Raiz Investigada nos Logs

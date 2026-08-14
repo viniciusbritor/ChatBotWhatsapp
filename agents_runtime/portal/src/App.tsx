@@ -514,6 +514,7 @@ export default function App() {
           {activeTab === 'conhecimento' && (
             <KnowledgeView
               categories={categories}
+              currentUser={currentUser}
               onUploadClick={() => setUploadDocOpen(true)}
               onViewChunks={(cat) => setViewChunksCat(cat)}
               onReindex={handleReindexCategory}

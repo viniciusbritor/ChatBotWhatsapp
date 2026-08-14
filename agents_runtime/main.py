@@ -1317,8 +1317,10 @@ async def admin_knowledge_documents(request: Request):
                     owner_hash = data.get("owner_hash") or ""
                     owner_phone = owner_map.get(owner_hash, "")
 
-                    # Se for analista (não admin), filtra apenas seus próprios documentos
-                    if role != "admin" and caller_digits:
+                    # Se for analista (não admin), isolamento estrito: só vê seus próprios documentos
+                    if role != "admin":
+                        if not caller_digits:
+                            continue
                         if owner_hash != caller_hash and owner_phone != caller_digits:
                             continue
 
@@ -1708,6 +1710,50 @@ async def admin_users_get(phone: str, request: Request):
     if not user:
         raise HTTPException(status_code=404, detail="user_not_found")
     return JSONResponse(content={"user": user})
+
+
+@app.get("/admin/users/{phone}/magic-link")
+async def admin_users_magic_link(phone: str, request: Request):
+    """Gera o magic link do usuário (admin ou self)."""
+    _require_self_or_admin(request, phone)
+    from core.magic_link import build_magic_link_url
+    from agent_loader import _canonical_phone
+
+    canonical = _canonical_phone(phone) or phone
+    url = build_magic_link_url(canonical)
+    return JSONResponse(content={"phone": canonical, "magic_link": url})
+
+
+@app.post("/admin/users/{phone}/invite")
+async def admin_users_invite(phone: str, request: Request):
+    """Admin dispara convite via WhatsApp com Magic Link para o usuário conectar suas contas."""
+    _require_admin(request)
+    from core.magic_link import build_magic_link_url
+    from core.evolution_client import send_text
+    from agent_loader import _canonical_phone
+
+    canonical = _canonical_phone(phone) or phone
+    link_url = build_magic_link_url(canonical)
+    message = (
+        "👋 *Olá!*\n\n"
+        "Seu acesso às integrações e conexões da *Jennifer* foi liberado pelo Administrador.\n\n"
+        "Para conectar suas contas seguras (Google Agenda, Gmail, Drive, GitHub ou LinkedIn), acesse o link abaixo:\n\n"
+        f"🔗 {link_url}\n\n"
+        "_Após conectar suas contas, você poderá solicitar consultas de agenda, e-mails e tarefas diretamente para a Jennifer aqui no WhatsApp!_"
+    )
+    send_res = False
+    try:
+        send_res = await send_text(phone=canonical, text=message, instance="Jennifer")
+    except Exception as exc:
+        logger.warning("invite_send_text_failed phone=%s exc=%s", canonical, exc)
+        send_res = False
+
+    return JSONResponse(content={
+        "status": "ok",
+        "phone": canonical,
+        "magic_link": link_url,
+        "whatsapp_sent": bool(send_res),
+    })
 
 
 @app.post("/admin/users/{phone}/folder-permissions")
