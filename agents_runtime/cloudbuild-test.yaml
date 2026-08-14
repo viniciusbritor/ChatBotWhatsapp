@@ -14,7 +14,7 @@ steps:
     entrypoint: "bash"
     args:
       - "-c"
-      - "cd /workspace/agents_runtime/portal && rm -rf node_modules package-lock.json && npm install --no-audit --no-fund && chmod -R +x node_modules/.bin 2>/dev/null || true && npm run build && ls -la dist/"
+      - "cd /workspace/agents_runtime/portal && npm install --no-audit --no-fund && node ./node_modules/vite/bin/vite.js build && ls -la dist/"
 
   - name: "gcr.io/cloud-builders/docker"
     id: "docker-prune-cache"
