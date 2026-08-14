@@ -80,7 +80,7 @@ def build_calendar_payload(events: List[Dict[str, Any]]) -> Optional[Dict[str, A
         return None
     return {
         "title": "Eventos da agenda",
-        "headers": ["Evento", "Inicio", "Fim"],
+        "headers": ["Evento", "Início", "Fim"],
         "rows": events_to_rows(events),
         "emoji_header": "📅",
     }

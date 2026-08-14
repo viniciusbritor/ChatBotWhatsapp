@@ -189,12 +189,13 @@ async def _finalize_orchestration(
     if (
         reply_text
         and os.getenv("IMAGE_REPORT_AUTO", "true").lower() == "true"
-        and not metadata.get("skip_image_report")
         and payload.get("phone")
     ):
         try:
             tabular_payload = _detect_tabular_payload(result)
-            if tabular_payload:
+            user_force_image = _user_requested_image(masked_text)
+            skip_image = bool(metadata.get("skip_image_report")) and not user_force_image
+            if tabular_payload and not skip_image:
                 await _auto_send_image(payload, tabular_payload, reply_text)
         except Exception as exc:
             logger.warning("auto_render_failed: %s", exc)
@@ -450,6 +451,25 @@ def _detect_tabular_payload(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                 "emoji_header": "📚",
             }
     return None
+
+
+_IMAGE_REQUEST_KEYWORDS = ("tabela", "imagem", "grafico", "gráfico", "png", "print", "planilha")
+
+
+def _user_requested_image(masked_text: str) -> bool:
+    """Detecta pedido explicito do usuario por render visual.
+
+    Usado pelo auto-image para sobrescrever ``skip_image_report`` quando
+    o usuario pede "em tabela", "como imagem", "grafico" etc. A normalizacao
+    usa ``unicodedata.normalize('NFKD', ...)`` para casar "grafico"/"gráfico".
+    """
+    if not masked_text:
+        return False
+    normalized = "".join(
+        c for c in unicodedata.normalize("NFKD", masked_text.lower())
+        if not unicodedata.combining(c)
+    )
+    return any(kw in normalized for kw in _IMAGE_REQUEST_KEYWORDS)
 
 
 async def _auto_send_image(
