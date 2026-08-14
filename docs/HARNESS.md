@@ -2,7 +2,7 @@
 
 > **Ambiente Operacional:** Instrucoes para configurar, executar e depurar o modulo `omnichannel-agentes` + servico `agents_runtime`.
 
-> **Última revisão:** 2026-08-13 — Groq Whisper 100% Free STT, comandos por voz em grupo, higienização de LID do Bot (`@75793925419076`) e esteira CI/CD estrita (proibido gcloud builds submit manual).
+> **Última revisão:** 2026-08-14 — FinOps Total: DeepSeek V3 Primário com Prompt Caching Ativo, Fallback Groq (`llama-3.3-70b` / `llama-3.1-8b`), Truncamento de Ferramentas a 1.500 chars, Desativação do `proactive_worker` e Esteira CI/CD estrita (trigger Cloud Build).
 > Ver [`docs/ARQUITETURA.md`](./ARQUITETURA.md) e [`docs/GUARDRAILS.md`](./GUARDRAILS.md).
 
 > **Diagrama visual ponta a ponta:** [`ARQUITETURA.md`](./ARQUITETURA.md#0-diagrama-visual-ponta-a-ponta).

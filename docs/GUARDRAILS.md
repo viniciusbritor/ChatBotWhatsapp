@@ -1,7 +1,26 @@
 # Guardrails e Regras Inegociáveis — ChatBotWhatsapp
 
 > Regras DURAS que todos os agentes IA e humanos devem obedecer neste projeto.
-> Última atualização: **2026-08-13** — Obrigatoriedade estrita de deploy via Esteira CI/CD (Cloud Build) + Harness DeepSeek v4.
+> Última atualização: **2026-08-14** — FinOps Estrito (Prompt Caching Estático, Poda de Tools a 1.500 chars, Groq Fallback e Desativação do Proactive Worker).
+
+## 0. Guardrails de FinOps e Contenção de Custos de LLM
+
+### §0.1 — Estabilização Obrigatória de Prompt Caching (DeepSeek)
+- **Regra:** O `messages[0]` (`system_prompt`) DEVE ser **100% estático** (persona, tom de voz, regras de negócio e skills fixas).
+- **Proibição Absoluta:** É terminantemente proibido injetar timestamps variáveis (`Hora atual: HH:MM`), datas, nomes dinâmicos, fatos de memória ou histórico recente dentro do `system_prompt`.
+- **Ação:** Qualquer contexto dinâmico deve ser injetado exclusivamente no `user_prompt` para garantir **>90% de Cache Hit** na API DeepSeek (reduzindo o custo de 0.14 USD para 0.014 USD / 1M tokens).
+
+### §0.2 — Teto de Truncamento de Ferramentas (Anti-Explosão de Contexto)
+- **Regra:** Em `chat_with_tools`, o retorno de qualquer ferramenta (Calendar, Drive, Gmail, Composio) deve ser truncado para no máximo **1.500 caracteres** (~350 palavras) antes de ser reinjetado no array de mensagens do modelo.
+- **Motivo:** Impede que saídas extensas de JSON inflacionem o contexto acumulado de 2.000 para 50.000 tokens a cada rodada de conversação.
+
+### §0.3 — Fallback Obrigatório para Groq
+- **Regra:** Se o DeepSeek retornar erro `429` (Quota/Créditos esgotados), `401`, `5xx` ou timeout, o sistema deve acionar automaticamente o **Groq** (`llama-3.3-70b-versatile` para tools/geral ou `llama-3.1-8b-instant` para heurísticas), sem falhar a mensagem para o usuário.
+
+### §0.4 — Desativação Total de Workers Proativos
+- **Regra:** O `proactive_worker` deve permanecer estritamente desativado (`PROACTIVE_DISABLED: "true"`). Nenhuma rotina em cron ou Cloud Scheduler deve invocar LLMs em background sem uma mensagem explícita do usuário.
+
+
 
 ## Ǥ. Harness Global DeepSeek v4 (Flash e Pro) — QUEBRA SILENCIOSA
 

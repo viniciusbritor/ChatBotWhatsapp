@@ -1,8 +1,8 @@
 # Arquitetura — ChatBotWhatsapp (Agentes Omnichannel)
 
-> Última revisão: **2026-08-13** — Cascata STT Groq Whisper (100% Free) -> OpenAI Whisper-1 -> Gemini 2.5 Flash.
-> Comandos por voz em grupo, higienização de LID do Bot e injeção do grupo atual.
-> Integrantes de grupo sincronizados no Firestore (`group_members/{group_jid}`) com enriquecimento dinâmico (`enrich_member_name`).
+> Última revisão: **2026-08-14** — FinOps Total: DeepSeek V3 Primário com Prompt Caching Ativo + Fallback Groq (Llama 3.3 70B / 3.1 8B).
+> Poda de Retorno de Ferramentas (teto de 1.500 chars), desativação do `proactive_worker`.
+> Transcrição de áudios via Groq Whisper (Free) -> OpenAI Whisper-1 -> Gemini STT.
 > Esteira CI/CD estrita via Cloud Build triggers no GitHub (push em `test` / `main`).
 > Ver `docs/DIARIO_BORDO.md` para o histórico completo do dia.
 
@@ -25,12 +25,17 @@ flowchart LR
             PUSH["POST /pubsub/push"]
             ORCH["orchestrator.py (tool loop)"]
             GRAPH["LangGraph StateGraph\njennifier -> classify ->\nguardian -> manager -> reply"]
-            JENNIFIER["Jennifer agent (system prompt)"]
+            JENNIFIER["Jennifer agent (system prompt estatico)"]
             GUARDIAN["access_guardian agent\n(decide owner + OAuth + scopes)"]
             ADMIN["GET/POST /admin/* (Bearer SA)"]
             WHISPER["Groq Whisper (Free) -> OpenAI Whisper-1 -> Gemini STT"]
             EMBED["OpenAI Embeddings (somente ingestao)"]
-            SUBF["Tools: calendar/drive/gmail/tasks/people/photos/group/composio"]
+            SUBF["Tools: calendar/drive/gmail/tasks/people/photos/group/composio (max 1500 chars)"]
+        end
+
+        subgraph LLM_LAYER["Provedores LLM (FinOps & Failover)"]
+            PRIMARY_LLM["DeepSeek V3 (Primary)\nPrompt Cache Hit: 0.014 USD/1M\nCache Miss: 0.14 USD/1M"]
+            FALLBACK_LLM["Groq Cloud (Failover)\nLlama 3.3 70B Versatile\nLlama 3.1 8B Instant (Free Tier)"]
         end
 
         subgraph PUBSUB["Pub/Sub"]
@@ -39,10 +44,10 @@ flowchart LR
         end
 
         subgraph SECRETS["Secret Manager"]
+            S_DEEPSEEK["DEEPSEEK_API_KEY"]
+            S_GROQ["GROQ_API_KEY"]
             S_OPENAI["OPENAI_API_KEY"]
             S_EVO["EVOLUTION_API_KEY"]
-            S_MINIMAX["MINIMAX_API_KEY"]
-            S_GEMINI["GEMINI_API_KEY (LLM fallback + STT)"]
             S_SA["agents-runtime-sa-token"]
         end
 
@@ -58,20 +63,16 @@ flowchart LR
             AUDIT["audit/* (5y)"]
         end
 
-        subgraph STORAGE["Cloud Storage"]
-            GCS["coherence-knowledge-prod (livros/editais)"]
-        end
-
         CLOUD_BUILD["Cloud Build\n(trigger deploy-agents-runtime-test)"]
     end
 
     WA -- "mensagem" --> EVO_API
     EVO_API -- "POST /webhook (HTTPS)" --> WEBHOOK
-    WEBHOOK -- "1. resolve_message_id (deterministico)" --> LEDGER
+    WEBHOOK -- "1. resolve_message_id" --> LEDGER
     WEBHOOK -- "2. ledger.register_or_load()" --> LEDGER
-    WEBHOOK -- "3. markMessagesAsRead (async, 5s timeout)" --> EVO_API
+    WEBHOOK -- "3. markMessagesAsRead" --> EVO_API
     WEBHOOK -- "4. publish chatbotwhatsapp-messages" --> TOPIC
-    WEBHOOK -- "200 OK (sem bloquear)" --> EVO_API
+    WEBHOOK -- "200 OK" --> EVO_API
 
     TOPIC -- "push (OIDC validado)" --> PUSH
     PUSH -- "ledger.claim (lease 120s)" --> LEDGER
@@ -84,13 +85,13 @@ flowchart LR
     GUARDIAN --> USERS
     GRAPH -- "prefetch Calendar/Email/Drive" --> SUBF
     SUBF --> WHISPER
-    SUBF -- "OAuth per-user" --> USERS
-    SUBF -- "Calendar/Drive/Gmail" --> USER
 
-    WHISPER -. "OPENAI_API_KEY" .-> S_OPENAI
-    EMBED -. "OPENAI_API_KEY (somente ingestao)" .-> S_OPENAI
-    JENNIFIER -. "MiniMax M2.7-highspeed -> Gemini 2.5 Flash" .-> S_MINIMAX
-    JENNIFIER -. "fallback cascade" .-> S_GEMINI
+    JENNIFIER -- "1. Primario (Prompt Caching Ativo)" --> PRIMARY_LLM
+    PRIMARY_LLM -- "Failover (429/5xx/Timeout)" --> FALLBACK_LLM
+
+    PRIMARY_LLM -. "DEEPSEEK_API_KEY" .-> S_DEEPSEEK
+    FALLBACK_LLM -. "GROQ_API_KEY" .-> S_GROQ
+    WHISPER -. "GROQ / OPENAI" .-> S_OPENAI
 
     ORCH -- "history.write (always, plain)" --> HISTORY
     ORCH -- "history.read (where owner_hash == ...)" --> HISTORY

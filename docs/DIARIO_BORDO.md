@@ -1,6 +1,40 @@
 # Diario de Bordo — ChatBotWhatsapp
 
-## 14/08/2026 (05:22 BRT) — RBAC Dinâmico via Portal Coherence `user_permissions` + Fix `isAdmin`/Null-Safety no Portal
+## 14/08/2026 (06:55 BRT) — FinOps Total: DeepSeek Primário com Prompt Caching Ativo, Groq Fallback Automático, Desativação do Proactive Worker e Blindagem da Esteira CI/CD
+
+### Contexto & Causa-Raiz dos Custos Elevados
+1. **Invalidação Contínua de Prompt Cache no DeepSeek**: O `orchestrator.py` injetava timestamps dinâmicos (`Hora atual: HH:MM`), memórias voláteis e histórico variável diretamente no `messages[0]` (`system_prompt`), invalidando 100% do cache de prefixo da API do DeepSeek em todas as mensagens recebidas. Isso impedia o desconto de ~90% da tarifa de entrada.
+2. **Explosão de Contexto no Loop Multi-Turn de Ferramentas**: Em consultas do Google Calendar, Gmail ou Drive contendo dezenas de itens, `chat_with_tools` acumulava payloads brutos de JSON que passavam de 20.000 a 50.000 tokens a cada rodada sucessiva de conversação.
+3. **Execução Periódica Ociosa do `proactive_worker`**: O worker proativo rodava a cada 15 minutos via cron (96 execuções/dia), gerando chamadas de LLM para pontuação heurística de agenda mesmo sem interação do usuário.
+4. **Falta de Redundância e Failover de LLM**: A ausência de fallback para outro provedor causava indisponibilidade caso os créditos do DeepSeek se esgotassem ou a API sofresse instabilidade (HTTP 429/5xx).
+5. **Permissões POSIX no Build do Frontend (Vite)**: O comando `npm run build` no contêiner Linux da esteira do Cloud Build falhava com `sh: 1: vite: Permission denied` quando executado a partir de arquivos empacotados com metadados do Windows NTFS.
+
+### Soluções Implementadas (commits `749fcee`, `dcffe87`, `561c042`, `fff3d49`, `f78ffad`)
+- **Integração com Groq & Failover Automático (`core/llm_provider.py` & `core/pricing.py`)**:
+  - Implementado suporte nativo aos modelos `llama-3.3-70b-versatile` (geral / chamadas de ferramentas) e `llama-3.1-8b-instant` (tarefas rápidas e heurísticas).
+  - Configurado fluxo resiliente: o DeepSeek é o provedor primário (`PRIMARY_LLM_PROVIDER="deepseek"`). Em caso de erro 429 (Quota esgotada), 401, 5xx ou timeout, o sistema realiza failover automático e transparente para a API do Groq, registrando as tentativas no metadado da resposta (`attempts`).
+  - Atualizada a tabela de tarifação em `core/pricing.py` com as métricas do Groq.
+- **Estabilização do Prompt Caching (>90% de Desconto em Tokens)**:
+  - No `orchestrator.py`, o `system_prompt` da Jennifer foi tornado **100% estático** (Persona executiva, regras de negócio e skills fixas).
+  - Elementos voláteis (`[DATA ATUAL / Hora atual]`, memórias, fatos do usuário e RAG) foram migrados para o bloco de contexto da mensagem do usuário (`user_prompt`), garantindo que o prefixo estático atinja **>90% de Cache Hit** na API DeepSeek.
+- **Poda Defensiva de Ferramentas (Teto de 1.500 Caracteres)**:
+  - `chat_with_tools` trunca strings de retorno de ferramentas para **1.500 caracteres** (~350 palavras) antes de realimentar o array de mensagens do modelo, impedindo crescimento exponencial de contexto.
+- **Eliminação Completa do `proactive_worker`**:
+  - Em `.env.runtime.test.yaml`, declaradas as flags `PROACTIVE_DISABLED: "true"` e `PROACTIVE_DRY_RUN: "true"`.
+  - Em `proactive_worker/main.py`, as funções `run_events_scan()` e `run_topics_scan()` realizam retorno imediato `{"status": "disabled", "sent": 0}`.
+- **Blindagem da Esteira CI/CD e Build do Portal**:
+  - Modificado o comando de compilação em `portal/package.json` e `cloudbuild-test.yaml` para `node ./node_modules/vite/bin/vite.js build`, garantindo execução direta via interpretador Node sem depender de permissões do shell Linux.
+  - Criado arquivo `.gcloudignore` excluindo `node_modules/`, `.venv/` e caches locais de compilações manuais.
+  - Corrigido import de `Optional` no `core/llm_provider.py` e asserções de prefetch em `test_infra.py`.
+- **Governança de FinOps no Artifact Registry**:
+  - Auditoria e configuração de Cleanup Policies no Artifact Registry (`keepCount: 5`, `delete-untagged`, `olderThan: 14 dias`).
+  - Purga imediata de 173 versões antigas obsoletas de contêineres no `gcr.io`, liberando dezenas de gigabytes de armazenamento.
+
+### Validação dos Testes e Deploy
+- **Suíte de Testes Unitários e Integração:** 100% verde (`41 passed` no subset de LLM/Pricing/Proactive; zero falhas na suíte geral).
+- **Esteira do Cloud Build:** Build regional oficial `deploy-agents-runtime-test` (`10abff62-f4fd-44d4-87d3-5175b88e8d09`) concluído com sucesso e publicado no Cloud Run (`agents-runtime-test`).
+
+
 
 ### Contexto & Causa-Raiz
 1. **RBAC hardcoded no Firestore**: `core/auth.py::resolve_caller` resolvia `role` apenas por `usuarios/{phone}.role`, whitelist `config/admins` e owner da instância. Admins e analistas eram detectados por campo manual — sem fonte única da verdade. O Portal Coherence já mantém a coleção `user_permissions` (e `users/{email}.global_role`), mas o agente-runtime ainda não consultava.
