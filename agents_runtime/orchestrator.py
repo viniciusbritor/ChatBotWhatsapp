@@ -28,6 +28,11 @@ from core.llm_provider import LLMProvider, LLMError
 from core.masker import mask_pii
 from core.delay_calculator import calculate_delay_ms, calculate_presence
 from core.commands import detect_command, apply_command
+from core.tabular import (
+    build_calendar_payload,
+    build_drive_payload,
+    build_email_payload,
+)
 from tool_registry import get_tool, get_tool_schema, is_user_scoped_tool
 from agent_loader import get_agent, get_skill, has_nickname
 from core.audit import log_action
@@ -378,28 +383,26 @@ async def _maybe_onboarding_nudge(payload: Dict[str, Any], result: Dict[str, Any
     return result
 
 
-_MIME_LABELS = {
-    "application/vnd.google-apps.folder": "Pasta",
-    "application/pdf": "PDF",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "Word",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "Planilha",
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "Apresentação",
-    "image/png": "PNG",
-    "image/jpeg": "Imagem",
-}
-
-
 def _detect_tabular_payload(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Inspect agent metadata for tabular tool results we can render as
-    a PNG. Returns a dict ready to feed ``render_report`` or None.
+    """Inspect agent metadata for tabular payloads we can render as a PNG.
 
-    Detected sources:
-    - ``drive.list_folder`` -> ``files`` list -> Nome / Tipo / Modificado
-    - ``gmail.search_messages`` -> ``messages`` list -> Assunto / De / Data
-    - ``calendar.list_events`` -> ``events`` list -> Evento / Início / Fim
-    - ``knowledge.retrieve`` -> ``results`` list -> Fonte / Trecho / Score
+    Returns a dict ready to feed ``render_report`` or None.
+
+    Ordem de detecção:
+    1. ``metadata["tabular"]`` (anexado pelo ``pipelines/_executor.run_agent``
+       quando o prefetch retornou dados estruturados - calendar/email/drive).
+    2. ``metadata["tool_results"]`` (quando o LLM chama uma tool diretamente
+       e o resultado é tabulável: drive.list_folder, gmail.search_messages,
+       calendar.list_events, knowledge.retrieve).
     """
     metadata = result.get("metadata", {}) or {}
+
+    # 1) Tabular anexado pelo prefetch (pipeline com `tools: []` - dados injetados).
+    prefetch_tabular = metadata.get("tabular")
+    if isinstance(prefetch_tabular, dict) and prefetch_tabular.get("rows"):
+        return prefetch_tabular
+
+    # 2) Tool results diretos do LLM.
     tool_results = metadata.get("tool_results") or []
     if not isinstance(tool_results, list):
         return None
@@ -412,63 +415,19 @@ def _detect_tabular_payload(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if not isinstance(result_data, dict):
             continue
         if tool == "drive.list_folder" or tool.endswith("list_folder"):
-            files = result_data.get("files") or []
-            if not files:
-                continue
-            rows = [
-                [
-                    str(f.get("name", ""))[:64],
-                    _MIME_LABELS.get(
-                        f.get("mime_type") or "",
-                        (f.get("mime_type") or "").split(".")[-1].upper() or "Arquivo",
-                    ),
-                    str(f.get("modified") or "")[:10],
-                ]
-                for f in files[:20]
-            ]
-            return {
-                "title": "Arquivos da pasta",
-                "headers": ["Nome", "Tipo", "Modificado"],
-                "rows": rows,
-                "emoji_header": "📁",
-            }
+            payload = build_drive_payload(result_data.get("files") or [])
+            if payload:
+                return payload
         if tool == "gmail.search_messages" or tool.endswith("search_messages"):
             messages = result_data.get("messages") or result_data.get("threads") or []
-            if not messages:
-                continue
-            rows = [
-                [
-                    str(m.get("subject") or m.get("snippet") or "(sem assunto)")[:64],
-                    str(m.get("from") or m.get("sender") or "")[:48],
-                    str(m.get("date") or m.get("internal_date") or "")[:10],
-                ]
-                for m in messages[:20]
-            ]
-            return {
-                "title": "Emails encontrados",
-                "headers": ["Assunto", "De", "Data"],
-                "rows": rows,
-                "emoji_header": "📧",
-            }
+            payload = build_email_payload(messages)
+            if payload:
+                return payload
         if tool == "calendar.list_events" or tool.endswith("list_events"):
             events = result_data.get("events") or result_data.get("items") or []
-            if not events:
-                continue
-            rows = []
-            for ev in events[:20]:
-                start = ev.get("start") or {}
-                end = ev.get("end") or {}
-                rows.append([
-                    str(ev.get("summary") or "(sem titulo)")[:48],
-                    str(start.get("dateTime") or start.get("date") or "")[:16],
-                    str(end.get("dateTime") or end.get("date") or "")[:16],
-                ])
-            return {
-                "title": "Eventos da agenda",
-                "headers": ["Evento", "Início", "Fim"],
-                "rows": rows,
-                "emoji_header": "📅",
-            }
+            payload = build_calendar_payload(events)
+            if payload:
+                return payload
         if tool == "knowledge.retrieve" or tool.endswith("knowledge.retrieve") or tool.endswith("retrieve_knowledge"):
             chunks = result_data.get("results") or []
             count = result_data.get("count", len(chunks))
@@ -2764,6 +2723,7 @@ async def _execute_agent(
         )
 
     phone = payload.get("phone", "")
+    user_context_parts: List[str] = []
 
     if phone:
         try:
@@ -2771,13 +2731,11 @@ async def _execute_agent(
             corr = await summarize_past_corrections(phone, limit=3)
             if corr.get("has_corrections"):
                 items = corr["corrections"]
-                system_prompt += "\n\n[APRENDIZADOS DO USUARIO]\n"
-                for c in items:
-                    system_prompt += (
-                        f"- Correcao anterior ({c['target']}): "
-                        f"'{c['user_quote'][:100]}' → '{c['after'][:100]}'\n"
-                    )
-                system_prompt += "Respeite essas preferencias ao responder."
+                corr_str = "\n".join(
+                    f"- Correcao anterior ({c['target']}): '{c['user_quote'][:100]}' → '{c['after'][:100]}'"
+                    for c in items
+                )
+                user_context_parts.append(f"[APRENDIZADOS DO USUARIO]\n{corr_str}\nRespeite essas preferencias ao responder.")
         except Exception:
             pass
 
@@ -2837,28 +2795,21 @@ async def _execute_agent(
         logger.warning("memory_rag_failed agent_id=%s exc=%s", agent_id, exc)
 
     recent = [i for i in _interaction_history[-4:] if i.get("phone") == phone]
-    ctx_parts = []
     if current_group_ctx:
-        ctx_parts.append(current_group_ctx)
+        user_context_parts.append(current_group_ctx)
     if facts:
-        ctx_parts.insert(0, f"[FATOS DO USUARIO - NAO perguntar novamente]\n{facts}")
+        user_context_parts.append(f"[FATOS DO USUARIO - NAO perguntar novamente]\n{facts}")
     if group_ctx:
-        ctx_parts.append(group_ctx)
+        user_context_parts.append(group_ctx)
     if mention_ctx:
-        ctx_parts.append(mention_ctx)
+        user_context_parts.append(mention_ctx)
     if mem_rag:
-        ctx_parts.append(f"[MEMORIA RAG - CONVERSAS RELEVANTES]\n{mem_rag}")
+        user_context_parts.append(f"[MEMORIA RAG - CONVERSAS RELEVANTES]\n{mem_rag}")
     if recent:
-        ctx_parts.append("\n".join(f"- User: {r['text_preview'][:60]}\n- Jennifer: {r['reply_preview'][:60]}"
-                                    for r in recent[-2:]))
+        user_context_parts.append("\n".join(f"- User: {r['text_preview'][:60]}\n- Jennifer: {r['reply_preview'][:60]}"
+                                            for r in recent[-2:]))
     if history:
-        ctx_parts.insert(0, f"[HISTORICO RECENTE]\n{history}")
-    ctx = "\n\n".join(p for p in ctx_parts if p)
-    if ctx:
-        system_prompt += (
-            f"\n\n[CONTEXTO DA CONVERSA]\n{ctx}\n"
-            "Voce JA conhece este usuario. Use a memoria para personalizar a resposta."
-        )
+        user_context_parts.append(f"[HISTORICO RECENTE]\n{history}")
 
     try:
         deep_result = await _execute_deep_agent(agent, text, payload, extra)
@@ -2869,8 +2820,8 @@ async def _execute_agent(
 
     brt = timezone(timedelta(hours=-3))
     hoje = datetime.now(brt)
-    system_prompt += (
-        f"\n\n[DATA ATUAL: {hoje.strftime('%Y-%m-%d')} (horario de Brasilia, BRT, UTC-3). "
+    temporal_context = (
+        f"[DATA ATUAL: {hoje.strftime('%Y-%m-%d')} (horario de Brasilia, BRT, UTC-3). "
         f"Hora atual: {hoje.strftime('%H:%M')}. "
         "Use esta data para todas as consultas de calendario e referencias temporais. "
         "IDIOMA: SEMPRE responda em portugues brasileiro (pt-BR). NAO use ingles. "
@@ -2883,8 +2834,12 @@ async def _execute_agent(
         + (f", primeiro nome: {first_name}" if first_name else "")
         + ")\n"
     )
-    dynamic_user_message = f"Mensagem: {text}"
-    user_prompt = static_user_prefix + dynamic_user_message
+
+    dynamic_context_str = "\n\n".join(user_context_parts)
+    if dynamic_context_str:
+        user_prompt = f"{temporal_context}\n\n[CONTEXTO DA CONVERSA]\n{dynamic_context_str}\n\n{static_user_prefix}Mensagem: {text}"
+    else:
+        user_prompt = f"{temporal_context}\n\n{static_user_prefix}Mensagem: {text}"
 
     available_tools = _resolve_agent_tools(agent)
 

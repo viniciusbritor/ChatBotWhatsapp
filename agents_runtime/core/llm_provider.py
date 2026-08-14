@@ -28,25 +28,42 @@ class LLMError(Exception):
 
 
 class LLMProvider:
-    """DeepSeek V4 Flash client. OpenAI-compatible API."""
+    """Multi-provider client supporting Groq (Llama 3.3/3.1) and DeepSeek V4 Flash. OpenAI-compatible API."""
 
     DEFAULT_MODEL = "deepseek-v4-flash"
     DEFAULT_BASE_URL = "https://api.deepseek.com"
     PROVIDER_TAG = "deepseek-v4-flash"
+
+    GROQ_DEFAULT_BASE = "https://api.groq.com/openai/v1"
+    GROQ_DEFAULT_MODEL = "llama-3.3-70b-versatile"
+    GROQ_FAST_MODEL = "llama-3.1-8b-instant"
 
     def __init__(self):
         self.deepseek_key = get_secret("DEEPSEEK_API_KEY")
         self.deepseek_base = os.getenv("DEEPSEEK_BASE_URL", self.DEFAULT_BASE_URL)
         self.deepseek_model = os.getenv("DEEPSEEK_MODEL", self.DEFAULT_MODEL)
 
+        self.groq_key = get_secret("GROQ_API_KEY")
+        self.groq_base = os.getenv("GROQ_BASE_URL", self.GROQ_DEFAULT_BASE)
+        self.groq_model = os.getenv("GROQ_MODEL", self.GROQ_DEFAULT_MODEL)
+        self.groq_fast_model = os.getenv("GROQ_FAST_MODEL", self.GROQ_FAST_MODEL)
+
+        # Primary provider selection: 'groq' | 'deepseek'
+        self.primary_provider = os.getenv("PRIMARY_LLM_PROVIDER", "deepseek").lower()
+
     def is_available(self) -> bool:
-        return bool(self.deepseek_key)
+        return bool(self.deepseek_key or self.groq_key)
 
     def _backoff_sleep(self, attempt: int, base: float = 1.0, cap: float = 30.0):
         delay = min(cap, base * (2 ** attempt)) + random.uniform(0, 0.5)
         time.sleep(delay)
 
-    def _build_headers(self) -> Dict[str, str]:
+    def _build_headers(self, provider: str = "deepseek") -> Dict[str, str]:
+        if provider == "groq":
+            return {
+                "Authorization": f"Bearer {self.groq_key}",
+                "Content-Type": "application/json",
+            }
         return {
             "Authorization": f"Bearer {self.deepseek_key}",
             "Content-Type": "application/json",
@@ -61,65 +78,126 @@ class LLMProvider:
         temperature: float = 0.7,
         max_tokens: int = 1000,
         thinking_disabled: bool = True,
+        provider: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Single call to DeepSeek V4 Flash. No cascade. The ``model`` arg is
-        accepted for backward compatibility but always resolves to
-        ``self.deepseek_model`` (env-configurable via ``DEEPSEEK_MODEL``).
+        """Call LLM with DeepSeek as primary and automatic fallback to Groq."""
+        attempts = []
+        target_provider = provider or self.primary_provider
 
-        NOTE: ``thinking`` field is intentionally NOT sent. DeepSeek rejects
-        with HTTP 400 when ``thinking`` is combined with ``tools`` or with
-        JSON mode in v4-flash; leaving it out lets the model use its default
-        behaviour and is the only configuration that works for tool calling.
-        """
-        if not self.deepseek_key:
+        if not self.deepseek_key and not self.groq_key:
             raise LLMError("deepseek_key_not_configured")
-        url = f"{self.deepseek_base}/chat/completions"
-        sys_content = system_prompt or ""
-        if json_mode and "json" not in sys_content.lower():
-            sys_content = "JSON: " + sys_content
-        payload = {
-            "model": self.deepseek_model,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "messages": [
-                {"role": "system", "content": sys_content},
-                {"role": "user", "content": user_prompt},
-            ],
-            "cache_mode": "default",
-        }
-        if json_mode:
-            payload["response_format"] = {"type": "json_object"}
-        async with httpx.AsyncClient(timeout=300) as client:
-            resp = await client.post(url, headers=self._build_headers(), json=payload)
-        if resp.status_code == 429:
-            raise LLMError("deepseek_quota_exceeded")
-        if resp.status_code == 401:
-            raise LLMError("deepseek_auth_failed")
-        if resp.status_code >= 500:
-            raise LLMError(f"deepseek_server_error_{resp.status_code}")
-        resp.raise_for_status()
-        data = resp.json()
-        if "choices" not in data or not data["choices"]:
-            raise LLMError("deepseek_empty_response")
-        content = data["choices"][0]["message"].get("content", "") or ""
-        usage = data.get("usage") or {}
-        cache_hit = int(
-            usage.get("prompt_cache_hit_tokens", 0)
-            or (usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0)
-            or 0
-        )
-        return {
-            "content": content,
-            "model_used": data.get("model", self.deepseek_model),
-            "provider": self.PROVIDER_TAG,
-            "attempts": [f"{self.PROVIDER_TAG}:success"],
-            "usage": {
-                "prompt_tokens": int(usage.get("prompt_tokens", 0) or 0),
-                "completion_tokens": int(usage.get("completion_tokens", 0) or 0),
-                "total_tokens": int(usage.get("total_tokens", 0) or 0),
-                "cache_hit_tokens": cache_hit,
-            },
-        }
+
+        # 1. Try DeepSeek first (or primary)
+        if (target_provider == "deepseek" or not provider) and self.deepseek_key:
+            try:
+                url = f"{self.deepseek_base}/chat/completions"
+                sys_content = system_prompt or ""
+                if json_mode and "json" not in sys_content.lower():
+                    sys_content = "JSON: " + sys_content
+                payload = {
+                    "model": self.deepseek_model,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                    "messages": [
+                        {"role": "system", "content": sys_content},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "cache_mode": "default",
+                }
+                if json_mode:
+                    payload["response_format"] = {"type": "json_object"}
+                async with httpx.AsyncClient(timeout=300) as client:
+                    resp = await client.post(url, headers=self._build_headers(provider="deepseek"), json=payload)
+                if resp.status_code == 429:
+                    raise LLMError("deepseek_quota_exceeded")
+                if resp.status_code == 401:
+                    raise LLMError("deepseek_auth_failed")
+                if resp.status_code >= 500:
+                    raise LLMError(f"deepseek_server_error_{resp.status_code}")
+                resp.raise_for_status()
+                data = resp.json()
+                if "choices" not in data or not data["choices"]:
+                    raise LLMError("deepseek_empty_response")
+                content = data["choices"][0]["message"].get("content", "") or ""
+                usage = data.get("usage") or {}
+                cache_hit = int(
+                    usage.get("prompt_cache_hit_tokens", 0)
+                    or (usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0)
+                    or 0
+                )
+                return {
+                    "content": content,
+                    "model_used": data.get("model", self.deepseek_model),
+                    "provider": self.PROVIDER_TAG,
+                    "attempts": [f"{self.PROVIDER_TAG}:success"],
+                    "usage": {
+                        "prompt_tokens": int(usage.get("prompt_tokens", 0) or 0),
+                        "completion_tokens": int(usage.get("completion_tokens", 0) or 0),
+                        "total_tokens": int(usage.get("total_tokens", 0) or 0),
+                        "cache_hit_tokens": cache_hit,
+                    },
+                }
+            except Exception as ds_err:
+                logger.warning("deepseek_chat_failed exc=%s fallback_to_groq=%s", ds_err, bool(self.groq_key))
+                attempts.append(f"deepseek:failed:{ds_err}")
+                if not self.groq_key or provider == "deepseek":
+                    if isinstance(ds_err, LLMError):
+                        raise
+                    raise LLMError(f"deepseek_failed: {ds_err}") from ds_err
+
+        # 2. Fallback / Direct to Groq
+        if self.groq_key:
+            try:
+                url = f"{self.groq_base}/chat/completions"
+                model_id = self.groq_fast_model if model in ("fast", "llama-3.1-8b-instant", "8b") else self.groq_model
+                sys_content = system_prompt or ""
+                if json_mode and "json" not in sys_content.lower():
+                    sys_content = "JSON: " + sys_content
+                payload = {
+                    "model": model_id,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                    "messages": [
+                        {"role": "system", "content": sys_content},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                }
+                if json_mode:
+                    payload["response_format"] = {"type": "json_object"}
+                async with httpx.AsyncClient(timeout=300) as client:
+                    resp = await client.post(url, headers=self._build_headers(provider="groq"), json=payload)
+                if resp.status_code == 429:
+                    raise LLMError("groq_quota_exceeded")
+                if resp.status_code == 401:
+                    raise LLMError("groq_auth_failed")
+                if resp.status_code >= 500:
+                    raise LLMError(f"groq_server_error_{resp.status_code}")
+                resp.raise_for_status()
+                data = resp.json()
+                if "choices" not in data or not data["choices"]:
+                    raise LLMError("groq_empty_response")
+                content = data["choices"][0]["message"].get("content", "") or ""
+                usage = data.get("usage") or {}
+                attempts.append(f"groq:{model_id}:success")
+                return {
+                    "content": content,
+                    "model_used": data.get("model", model_id),
+                    "provider": f"groq:{model_id}",
+                    "attempts": attempts,
+                    "usage": {
+                        "prompt_tokens": int(usage.get("prompt_tokens", 0) or 0),
+                        "completion_tokens": int(usage.get("completion_tokens", 0) or 0),
+                        "total_tokens": int(usage.get("total_tokens", 0) or 0),
+                        "cache_hit_tokens": 0,
+                    },
+                }
+            except Exception as groq_err:
+                logger.error("groq_chat_failed exc=%s", groq_err)
+                if isinstance(groq_err, LLMError):
+                    raise
+                raise LLMError(f"groq_failed: {groq_err}") from groq_err
+
+        raise LLMError("deepseek_key_not_configured")
 
     async def chat_escalating(
         self,
@@ -174,14 +252,29 @@ class LLMProvider:
         so we transparently rewrite ``.`` -> ``_`` on the wire and translate
         back when the model calls the tool.
         """
-        if not self.deepseek_key:
-            raise LLMError("deepseek_key_not_configured")
-        url = f"{self.deepseek_base}/chat/completions"
+        target_provider = "groq" if (self.primary_provider == "groq" and self.groq_key) else "deepseek"
+        if target_provider == "groq" and not self.groq_key:
+            target_provider = "deepseek"
+        elif target_provider == "deepseek" and not self.deepseek_key and self.groq_key:
+            target_provider = "groq"
+
+        if target_provider == "groq":
+            url = f"{self.groq_base}/chat/completions"
+            model_id = self.groq_model
+            headers = self._build_headers(provider="groq")
+            provider_tag = f"groq:{model_id}"
+        else:
+            if not self.deepseek_key:
+                raise LLMError("deepseek_key_not_configured")
+            url = f"{self.deepseek_base}/chat/completions"
+            model_id = self.deepseek_model
+            headers = self._build_headers(provider="deepseek")
+            provider_tag = self.PROVIDER_TAG
+
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
-        model_id = self.deepseek_model
         tool_count = 0
         total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
@@ -206,20 +299,42 @@ class LLMProvider:
                 "temperature": temperature,
                 "max_tokens": max_tokens,
                 "messages": messages,
-                "cache_mode": "default",
             }
+            if target_provider == "deepseek":
+                payload["cache_mode"] = "default"
             if json_mode:
                 payload["response_format"] = {"type": "json_object"}
             if tools:
                 payload["tools"] = tools
-            async with httpx.AsyncClient(timeout=300) as client:
-                resp = await client.post(url, headers=self._build_headers(), json=payload)
-            if resp.status_code == 429:
-                raise LLMError("deepseek_quota_exceeded")
-            if resp.status_code == 401:
-                raise LLMError("deepseek_auth_failed")
-            resp.raise_for_status()
-            data = resp.json()
+            try:
+                async with httpx.AsyncClient(timeout=300) as client:
+                    resp = await client.post(url, headers=headers, json=payload)
+                if resp.status_code == 429:
+                    raise LLMError(f"{target_provider}_quota_exceeded")
+                if resp.status_code == 401:
+                    raise LLMError(f"{target_provider}_auth_failed")
+                if resp.status_code >= 500:
+                    raise LLMError(f"{target_provider}_server_error_{resp.status_code}")
+                resp.raise_for_status()
+                data = resp.json()
+            except Exception as call_err:
+                if target_provider == "deepseek" and self.groq_key:
+                    logger.warning("deepseek_tool_call_failed exc=%s falling_back_to_groq=true", call_err)
+                    target_provider = "groq"
+                    url = f"{self.groq_base}/chat/completions"
+                    model_id = self.groq_model
+                    headers = self._build_headers(provider="groq")
+                    provider_tag = f"groq:{model_id}"
+                    payload["model"] = model_id
+                    payload.pop("cache_mode", None)
+                    async with httpx.AsyncClient(timeout=300) as client:
+                        resp = await client.post(url, headers=headers, json=payload)
+                    resp.raise_for_status()
+                    data = resp.json()
+                else:
+                    if isinstance(call_err, LLMError):
+                        raise
+                    raise LLMError(f"{target_provider}_tool_call_failed: {call_err}") from call_err
             choices = data.get("choices", [])
             round_usage = data.get("usage") or {}
             total_usage["prompt_tokens"] += int(round_usage.get("prompt_tokens", 0) or 0)
@@ -237,7 +352,7 @@ class LLMProvider:
                     "content": "Resposta vazia do LLM.",
                     "model_used": model_id,
                     "tool_rounds": tool_count,
-                    "provider": self.PROVIDER_TAG,
+                    "provider": provider_tag,
                     "usage": total_usage,
                 }
             msg = choices[0].get("message", {})
@@ -248,7 +363,7 @@ class LLMProvider:
                     "content": content,
                     "model_used": model_id,
                     "tool_rounds": tool_count,
-                    "provider": self.PROVIDER_TAG,
+                    "provider": provider_tag,
                     "usage": total_usage,
                 }
             for tc in tool_calls:
@@ -275,11 +390,19 @@ class LLMProvider:
                         tool_result = json.dumps({"error": "tool_executor_not_configured"})
                 except Exception as e:
                     tool_result = json.dumps({"error": str(e)})
-                result_preview = str(tool_result)[:200]
+                
+                # Truncate payload to 1500 chars to avoid prompt token explosion across rounds
+                raw_tool_content = str(tool_result) if isinstance(tool_result, str) else json.dumps(tool_result)
+                if len(raw_tool_content) > 1500:
+                    truncated_content = raw_tool_content[:1500] + "... [truncado para economia de tokens]"
+                else:
+                    truncated_content = raw_tool_content
+                
+                result_preview = truncated_content[:200]
                 logger.info("tool_result round=%d tool=%s result=%s", tool_count + 1, name, result_preview)
                 messages.append({
                     "role": "tool",
-                    "content": str(tool_result) if isinstance(tool_result, str) else json.dumps(tool_result),
+                    "content": truncated_content,
                     "tool_call_id": tc.get("id", ""),
                 })
             tool_count += 1

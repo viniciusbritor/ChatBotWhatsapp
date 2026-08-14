@@ -88,7 +88,12 @@ def generate_event_message(event: Dict[str, Any], window: str) -> str:
 
 
 async def score_relevance_with_llm(message: str, context: str) -> float:
-    """Score message relevance using LLM (0-1)."""
+    """Score message relevance using heuristics and lightweight LLM (0-1)."""
+    # Heuristic short-circuit: standard event reminders are intrinsically relevant
+    lower_msg = message.lower()
+    if any(k in lower_msg for k in ["comeca em 1h", "em 3h", "amanha tem", "lembrete:"]):
+        return 0.90
+
     llm = LLMProvider()
     if not llm.is_available():
         return 0.85
@@ -104,12 +109,12 @@ async def score_relevance_with_llm(message: str, context: str) -> float:
                 f"Mensagem: {message}\n\n"
                 "Esta mensagem e relevante? Score de 0 a 1."
             ),
-            model="deepseek-v4-flash",
-            temperature=0.2,
-            max_tokens=100,
+            model="fast",
+            temperature=0.1,
+            max_tokens=80,
             json_mode=True,
         )
-        content = result["content"]
+        content = result.get("content", "")
         try:
             import re
             match = re.search(r'\"score\":\s*([\d.]+)', content)
@@ -204,6 +209,10 @@ async def process_candidate(candidate: Dict[str, Any]) -> bool:
 
 async def run_events_scan() -> Dict[str, Any]:
     """Run the upcoming events scan across known users (Fase D)."""
+    if os.getenv("PROACTIVE_DISABLED", "false").lower() == "true":
+        logger.info("Proactive worker is disabled via PROACTIVE_DISABLED=true. Skipping run.")
+        return {"status": "disabled", "candidates": 0, "sent": 0, "blocked": 0, "users": 0}
+
     phones = _known_phones()
     if not phones:
         logger.info("No phones configured for proactive worker (PROACTIVE_WORKER_PHONES)")
@@ -343,6 +352,10 @@ async def _generate_topic_message(contact: Dict[str, Any], history: str) -> Opti
 
 async def run_topics_scan() -> Dict[str, Any]:
     """Run the topics-based proactive scan (Tue+Fri 8h BRT)."""
+    if os.getenv("PROACTIVE_DISABLED", "false").lower() == "true":
+        logger.info("Proactive worker is disabled via PROACTIVE_DISABLED=true. Skipping topics scan.")
+        return {"status": "disabled", "candidates": 0, "sent": 0, "blocked": 0, "skipped": 0}
+
     contacts = await _get_eligible_contacts()
     logger.info(f"Topics scan: {len(contacts)} eligible contacts")
 
