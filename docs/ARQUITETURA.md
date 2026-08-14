@@ -508,7 +508,7 @@ em `agents_runtime/docs/` foram removidas em 22/07/2026.
   `user_id` no `tools.execute()`, `toolkit_versions` em
   `tools/_composio_common.py` (11 apps). `COMPOSIO_API_KEY` no Secret Manager.
   Endpoints Connect: `/api/v1/composio/{status,connect-all,authorize-owner}`.
-- **LLM / Classificação**: Groq `llama-3.1-8b-instant` (classificador zero custo, ~100ms) com fallback para DeepSeek V4 Flash. Execução principal de agentes via DeepSeek V4 Flash (provedor principal único).
+- **LLM / Classificação**: Cascata zero-custo no `_classify_intent_llm`: **Groq `llama-3.1-8b-instant`** (primário, ~100ms) → **NVIDIA NIM `meta/llama-3.1-8b-instruct`** → **DeepSeek V4 Flash** (fallback principal). Execução principal de agentes via DeepSeek V4 Flash (provedor principal único).
 - **STT**: Cascata Groq Whisper Large v3 Turbo (Grátis, ~300ms) → OpenAI Whisper-1 → Gemini 2.5 Flash.
 - **Workers**: `proactive_worker` ativo. Job em lote `ata_worker` foi removido (substituído por fluxo síncrono sob demanda).
 - **Chunking**: `_chunk_text_semantic()` com detecção de hierarquia

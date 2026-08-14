@@ -52,5 +52,8 @@ pub_debug.txt
 pub_pull.txt
 pub_pull2.txt
 
+# Gate test logs (scratch)
+gate*.log
+
 # Legacy folder scheduled for Fase F cleanup
 WhatsappAgente/

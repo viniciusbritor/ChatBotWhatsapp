@@ -4633,3 +4633,9 @@ Suite: 1.148 passed, 0 failures. E2E e builds de CI/CD validados com sucesso no 
    - Sincronização dos 4 arquivos canônicos (`ARQUITETURA.md`, `HARNESS.md`, `GUARDRAILS.md`, `DIARIO_BORDO.md`) e `AGENTS.md`.
 
 Suite: Suíte de testes aprovada. Script `check_lgpd_compliance.py` executado com status `LGPD compliance checks passed`.
+
+### Follow-up (13/08/2026, 21:03–21:10 BRT) — Fallback NVIDIA NIM + binds de chaves (`d25061d`, `15210b2`)
+
+- `_classify_intent_llm` em `orchestrator.py` ganhou o **fallback NVIDIA NIM `meta/llama-3.1-8b-instruct`** (`NVIDIA_API_KEY`, base `https://integrate.api.nvidia.com/v1`, timeout 3s) entre o Groq e o DeepSeek — mantendo o classificador 100% zero custo.
+- `cloudbuild-test.yaml`: `--set-secrets` passa a incluir `NVIDIA_API_KEY=NVIDIA_API_KEY:latest` (substituindo a injeção antiga) e `GROQ_API_KEY=GROQ_API_KEY:latest`.
+- `NVIDIA_API_KEY` reativada no Secret Manager (v1–v3 enabled) e atualizado o status em `docs/HARNESS.md` (de "versao bloqueada" para ativo/classificador).

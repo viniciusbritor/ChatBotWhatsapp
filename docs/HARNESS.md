@@ -626,7 +626,7 @@ MIME + tie-breaker LLM.
 | `GEMINI_API_KEY` | `agents-runtime` (fallback STT somente sob consentimento) | ativo |
 | `DEEPSEEK_API_KEY` | LLM cascade (1º recurso apos MiniMax M2.7) | **versao bloqueada — aguardando nova key** |
 | `MINIMAX_API_KEY` | LLM cascade (MiniMax-M2.7 highspeed → M3) | **versao bloqueada — aguardando nova key** |
-| `NVIDIA_API_KEY` | cascade LLM (legado) | **versao bloqueada — aguardando nova key** |
+| `NVIDIA_API_KEY` | classificador de intenção zero-custo (fallback NVIDIA NIM `meta/llama-3.1-8b-instruct`) | ativo (v1–v3 enabled, bind em `--set-secrets`) |
 | `agents-runtime-sa-token` | Bearer SA | **versao bloqueada — aguardando nova key** |
 
 > ⚠️ As chaves com "versao bloqueada" foram desabilitadas no
