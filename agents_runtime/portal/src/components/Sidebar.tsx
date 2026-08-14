@@ -7,6 +7,7 @@ interface SidebarProps {
   mobileOpen: boolean;
   setMobileOpen: (open: boolean) => void;
   currentUser?: CurrentUser | null;
+  hasOwnInstance?: boolean;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -14,7 +15,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setActiveTab,
   mobileOpen,
   setMobileOpen,
-  currentUser
+  currentUser,
+  hasOwnInstance = false
 }) => {
   const navItems: { id: NavigationTab; label: string; icon: string; fillIcon?: boolean }[] = [
     { id: 'whatsapp', label: 'Contas WhatsApp', icon: 'chat' },
@@ -29,7 +31,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   ];
 
   const visibleNavItems = currentUser && !currentUser.isAdmin
-    ? navItems.filter((item) => item.id === 'conexoes' || item.id === 'conhecimento')
+    ? navItems.filter((item) => {
+        if (item.id === 'conexoes' || item.id === 'conhecimento') return true;
+        if (hasOwnInstance && (item.id === 'whatsapp' || item.id === 'agentes')) return true;
+        return false;
+      })
     : navItems;
 
   return (

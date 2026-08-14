@@ -438,6 +438,7 @@ export default function App() {
         mobileOpen={mobileOpen}
         setMobileOpen={setMobileOpen}
         currentUser={currentUser}
+        hasOwnInstance={accounts.length > 0}
       />
 
       <div className="flex-1 md:ml-64 flex flex-col min-h-screen transition-all duration-300">

@@ -1014,8 +1014,10 @@ def _build_user_connections(request: Request) -> Dict[str, Any]:
 
 @app.get("/admin/accounts")
 async def admin_accounts_list(request: Request):
-    _require_admin(request)
     from agent_loader import _get_firestore_client
+
+    role, caller_phone = _caller_role(request)
+    caller_digits = "".join(c for c in str(caller_phone or "") if c.isdigit())
 
     db = _get_firestore_client()
     if db is None:
@@ -1025,6 +1027,10 @@ async def admin_accounts_list(request: Request):
         for doc in db.collection("whatsapp_accounts").stream():
             data = doc.to_dict() or {}
             data["id"] = doc.id
+            if role != "admin":
+                owner = "".join(c for c in str(data.get("owner_phone", "") or "") if c.isdigit())
+                if not caller_digits or owner != caller_digits:
+                    continue
             rows.append(data)
         await _enrich_accounts_with_evolution_state(rows)
         return JSONResponse(content={"accounts": rows})

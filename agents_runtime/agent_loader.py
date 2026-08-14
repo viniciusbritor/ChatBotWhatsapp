@@ -334,37 +334,92 @@ def get_user(phone: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def get_coherence_module_role(email: str, uid: str = "") -> Optional[str]:
+    """Consulta a permissao real configurada no Portal Coherence (user_permissions).
+
+    Verifica a colecao `user_permissions` para o modulo omnichannel-agentes
+    (chaves: {email}_omnichannel-agentes, {email}_omnichannel-agents, etc.).
+    Retorna 'admin', 'agent_user' ou None (se nao encontrado).
+    """
+    email_clean = str(email or "").strip().lower()
+    if not email_clean:
+        return None
+    db = _get_firestore_client()
+    if db is None:
+        return None
+    try:
+        possible_keys = [
+            f"{email_clean}_omnichannel-agentes",
+            f"{email_clean}_omnichannel-agents",
+            f"{email_clean}_agents-omnichannel",
+        ]
+        for key in possible_keys:
+            doc = db.collection("user_permissions").document(key).get()
+            if doc.exists:
+                data = doc.to_dict() or {}
+                if data.get("is_active") is not False:
+                    p_role = str(data.get("role", "") or "").strip().lower()
+                    if p_role in ("admin", "super-admin", "super_admin"):
+                        return "admin"
+                    if p_role in ("analyst", "analista", "user", "agent_user", "member"):
+                        return "agent_user"
+
+        doc_user = db.collection("users").document(email_clean).get()
+        if doc_user.exists:
+            u_data = doc_user.to_dict() or {}
+            g_role = str(u_data.get("global_role", "") or "").strip().lower()
+            if g_role in ("analyst", "analista", "user", "agent_user"):
+                return "agent_user"
+            if u_data.get("is_super_admin") is True or g_role in ("admin", "super-admin"):
+                return "admin"
+    except Exception as exc:
+        logger.debug("get_coherence_module_role failed: %s", exc)
+    return None
+
+
 def get_user_role(identifier: str) -> str:
     """Role do usuario: 'admin' ou 'agent_user' (default).
 
     Ordem de resolucao:
-    1. Owner de instancia (whatsapp_accounts.owner_phone) -> admin.
-    2. Email/UID na whitelist config/admins -> admin.
-    3. Email do usuario vinculado na whitelist -> admin.
-    4. Role explicito em usuarios/{identifier}.role == 'admin'.
+    1. Permissao explicita no Portal Coherence (user_permissions / users).
+    2. Role explicito em usuarios/{identifier}.role.
+    3. Whitelist config/admins.
+    4. Owner de instancia (whatsapp_accounts.owner_phone).
     5. Default seguro: agent_user.
     """
+    ident = str(identifier or "").strip().lower()
+    if "@" in ident:
+        coherence_role = get_coherence_module_role(ident)
+        if coherence_role:
+            return coherence_role
+
+    user = get_user(identifier)
+    if user:
+        if user.get("email"):
+            coherence_role = get_coherence_module_role(user["email"])
+            if coherence_role:
+                return coherence_role
+        if user.get("role"):
+            r = str(user.get("role", "")).strip().lower()
+            if r in ("admin", "super-admin"):
+                return "admin"
+            if r in ("agent_user", "analyst", "analista", "user"):
+                return "agent_user"
+
+    if _is_admin_email(identifier) or _is_admin_uid(identifier):
+        return "admin"
+
     if _is_instance_owner(identifier):
         return "admin"
-    if _is_admin_email(identifier):
-        return "admin"
-    if _is_admin_uid(identifier):
-        return "admin"
-    user = get_user(identifier)
-    if not user:
-        return "agent_user"
-    if user.get("email") and _is_admin_email(user["email"]):
-        return "admin"
-    return "admin" if user.get("role") == "admin" else "agent_user"
+
+    return "agent_user"
 
 
 def _is_admin_email(identifier: str) -> bool:
-    """True se ``identifier`` for um email na whitelist config/admins (ou fallback do owner)."""
+    """True se ``identifier`` for um email na whitelist config/admins."""
     value = str(identifier or "").strip().lower()
     if not value or "@" not in value:
         return False
-    if value == "viniciusbritor@gmail.com":
-        return True
     admins = _get_admins_config()
     return value in {e.strip().lower() for e in admins.get("admin_emails", []) if e}
 

@@ -201,8 +201,6 @@ class TestAgentUserWhitelist:
         """agent_user nao acessa rotas restritas de admin (/admin/agents, accounts, skills, etc)."""
         from core.auth import _agent_user_allowed
 
-        assert _agent_user_allowed("/admin/agents") is False
-        assert _agent_user_allowed("/admin/accounts") is False
         assert _agent_user_allowed("/admin/skills") is False
         assert _agent_user_allowed("/admin/tools") is False
         assert _agent_user_allowed("/admin/owners") is False

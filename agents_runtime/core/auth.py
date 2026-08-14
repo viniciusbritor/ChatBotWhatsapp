@@ -113,6 +113,7 @@ def resolve_caller(request) -> tuple:
 
     from agent_loader import (
         get_user_role,
+        get_coherence_module_role,
         lookup_phone_by_email,
         lookup_phone_by_uid,
         _is_admin_email,
@@ -138,26 +139,22 @@ def resolve_caller(request) -> tuple:
     name = str(claims.get("name", "") or "").strip()
     picture = str(claims.get("picture", "") or "").strip()
 
-    if phone:
-        role = "agent_user"
-        try:
-            role = get_user_role(phone)
-        except Exception:
-            role = "agent_user"
-        if role == "agent_user":
-            if email and get_user_role(email) == "admin":
-                role = "admin"
-            elif uid and get_user_role(uid) == "admin":
-                role = "admin"
-        if email or uid or (name and name != "user"):
-            sync_user_profile(phone, email=email, uid=uid, name=name, picture=picture, role=role)
-        return role, phone
+    role = "agent_user"
+    if email:
+        coherence_role = get_coherence_module_role(email, uid)
+        if coherence_role:
+            role = coherence_role
+        else:
+            role = get_user_role(email)
+    elif phone:
+        role = get_user_role(phone)
+    elif uid:
+        role = get_user_role(uid)
 
-    if email and get_user_role(email) == "admin":
-        return "admin", ""
-    if uid and get_user_role(uid) == "admin":
-        return "admin", ""
-    return "agent_user", ""
+    if phone and (email or uid or (name and name != "user")):
+        sync_user_profile(phone, email=email, uid=uid, name=name, picture=picture, role=role)
+
+    return role, phone
 
 
 def resolve_caller_profile(request) -> dict:
@@ -202,6 +199,8 @@ AGENT_USER_ALLOWED_PREFIXES = (
     "/admin/ping",
     "/admin/status",
     "/admin/me",
+    "/admin/accounts",
+    "/admin/agents",
     "/admin/users",
     "/admin/knowledge",
     "/api/v1/composio/status",
