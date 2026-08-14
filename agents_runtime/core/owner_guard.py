@@ -132,6 +132,14 @@ def _check_folder_permission(
             logger.debug(
                 "owner_bypass_check_failed phone=%s exc=%s", phone, exc,
             )
+    # Multi-tenant: Se o usuário tem token Google OAuth próprio válido no Firestore, permita!
+    try:
+        from core.oauth_per_user import get_user_oauth
+        token_data = get_user_oauth(phone)
+        if token_data and token_data.get("scopes"):
+            return None
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("owner_guard_multi_tenant_oauth_check_failed phone=%s exc=%s", phone, exc)
 
     try:
         from core.folder_permissions import get_user_allowed_tools
@@ -215,7 +223,11 @@ async def _invoke_with_guard(
     try:
         tool = CAPABILITY_TO_TOOL.get(capability, "")
         if tool in {"drive", "gmail"} and isinstance(result, dict):
-            # Owner bypass: não filtra resultados do proprietário
+            # Multi-tenant / Owner bypass: não filtra resultados de quem tem OAuth próprio ou é proprietário
+            from core.oauth_per_user import get_user_oauth as _guo
+            _tok = _guo(phone)
+            if _tok and _tok.get("scopes"):
+                return result
             from core.runtime_context import get_instance as _rti
             from core.owner import resolve_owner as _ro
             _inst = _rti()

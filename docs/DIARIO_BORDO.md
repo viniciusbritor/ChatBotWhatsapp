@@ -1,6 +1,31 @@
 # Diario de Bordo — ChatBotWhatsapp
 
-## 14/08/2026 (06:55 BRT) — FinOps Total: DeepSeek Primário com Prompt Caching Ativo, Groq Fallback Automático, Desativação do Proactive Worker e Blindagem da Esteira CI/CD
+## 14/08/2026 (16:00 BRT) — Secretária Pessoal Multi-Tenant: Acesso Real Per-User ao Google Calendar/Gmail/Drive e Composio por Toolkit
+
+### Contexto & Causa-Raiz (Evidências Maycon +5511992303650)
+1. **Bloqueio Legado de "Owner-Only" nas Ferramentas**: O `access_guardian.py` e os decorators `@_owner_guard` nas tools (`tools/google_calendar.py`, `tools/google_gmail.py`, `tools/google_drive.py`) e `core/owner.py` barravam qualquer usuário que não fosse o dono da linha master do WhatsApp (`5511966830020` - Vinicius), retornando `owner_only_capability`. O DeepSeek recebia esse erro e respondia erroneamente pedindo autorização OAuth em loop, mesmo quando o usuário já possuía `google_oauth_token` válido no Firestore.
+2. **Autorização Genérica do Composio no Portal**: No `ConnectionsView.tsx`, ao clicar no card do LinkedIn, a função chamava `/a/{phone}/composio` sem o parâmetro `toolkit`, abrindo apenas a primeira aba pendente (Google Meet) em vez do LinkedIn.
+3. **Normalização de Telefone no Firestore**: `get_user_oauth` e `_persist_token` em `core/oauth_per_user.py` consultavam o documento sem higienizar caracteres não numéricos (`+55...`), causando falhas de lookup para números internacionais ou formatados.
+4. **Secret Manager Fallback para OAuth**: `_oauth_client_secret` e `_oauth_client_id` não carregavam `oauth-client-secret` dinamicamente quando as variáveis de ambiente locais estavam ausentes.
+
+### Soluções Implementadas
+- **Arquitetura Multi-Tenant no Access Guardian e Owner Guard**:
+  - `agent_orchestration/access_guardian.py::decide_guardian`: Avalia o usuário pelo seu próprio cofre de tokens (`usuarios/{phone}.google_oauth_token`). Se possui os escopos requeridos, concede `allow` diretamente com isolamento total dos dados.
+  - `core/owner.py::deny_if_not_owner` e `core/owner_guard.py`: Usuários com token OAuth próprio válido no Firestore recebem liberação direta, operando estritamente na sua própria conta Google sem sofrer restrições da instância master.
+- **Roteamento Pontual de Apps no Composio**:
+  - `main.py::/a/{phone}/composio`: Aceita `toolkit: Optional[str]` e direciona a geração de link para o app clicado.
+  - `portal/src/App.tsx` e `ConnectionsView.tsx`: Repassam o `toolkit` (ex: `linkedin`, `github`) no clique do card, abrindo a tela de autorização correta imediatamente.
+- **Normalização e Blindagem de Credenciais (`core/oauth_per_user.py`)**:
+  - Normalização estrita de `phone` (`re.sub(r"\D", "", phone)`) em todos os lookups e persistências de tokens no Firestore.
+  - Cache de `_oauth_client_id` e `_oauth_client_secret` com resolução automática a partir do GCP Secret Manager (`oauth-client-secret`).
+  - Parsing defensivo de JSON em `_prefetch_calendar` e `_prefetch_email` no `orchestrator.py`.
+- **Script de Simulação Headless de WhatsApp (`scripts/simulate_user_chat.py`)**:
+  - Criada ferramenta CLI para testar mensagens de qualquer usuário em DM ou Grupo em 2 segundos sem depender de mensagens no WhatsApp físico.
+
+### Validação e Testes
+- **Simulação Headless E2E**: Testado com o usuário Maycon (`+5511992303650`) — a Jennifer consultou com sucesso a agenda real do Google Calendar da Alterego e retornou os 4 compromissos do dia perfeitamente formatados.
+- **Suíte Geral do Pytest**: **1165 passed, 5 skipped, 1 xpassed, 0 failures** em 4m05s.
+- **Testes Unitários Dedicados**: `tests/test_group_consent.py::TestMultiTenantUserAccess` (9/9 passed).
 
 ### Contexto & Causa-Raiz dos Custos Elevados
 1. **Invalidação Contínua de Prompt Cache no DeepSeek**: O `orchestrator.py` injetava timestamps dinâmicos (`Hora atual: HH:MM`), memórias voláteis e histórico variável diretamente no `messages[0]` (`system_prompt`), invalidando 100% do cache de prefixo da API do DeepSeek em todas as mensagens recebidas. Isso impedia o desconto de ~90% da tarifa de entrada.

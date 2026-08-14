@@ -7,9 +7,9 @@
 ## TL;DR
 
 - **Bot WhatsApp** (Evolution API → Cloud Run `agents-runtime-test` → Pub/Sub → orchestrator → Evolution).
-- **Owner único** por instância: telefone master em `whatsapp_accounts/{id}.owner_phone`. **Só ele** acessa Gmail/Drive/Calendar. Outros recebem `owner_only_capability`.
+- **Owner e Multi-Tenant Secretária Pessoal (14/08/2026)**: Telefone master em `whatsapp_accounts/{id}.owner_phone` (Vinicius). Usuários autorizados com conta Google conectada em `usuarios/{phone}.google_oauth_token` operam com a Jennifer como **Secretária Pessoal Multi-Tenant** (acesso à própria agenda/emails/arquivos com isolamento estrito via per-user OAuth). Apenas usuários sem credenciais recebem `request_oauth`.
 - **OAuth per-user** (Fase D, 21/07/2026): token em `usuarios/{phone}.google_oauth_token` no Firestore. **Não existe mais fallback global** `GOOGLE_OAUTH_TOKEN` em produção.
-- **Guard de verdade** = `access_guardian` (subagente no grafo LangGraph, Fase H 23/07/2026). O `@_owner_guard` nos `tools/google_*.py` é decoração legada — quem decide owner+OAuth+scopes é o access_guardian **antes** da tool.
+- **Guard de verdade** = `access_guardian` (subagente no grafo LangGraph, Fase H 23/07/2026 + Multi-Tenant 14/08/2026). Quem decide owner+OAuth+scopes é o access_guardian **antes** da tool. Se o caller possui token Google válido no Firestore, `allow` é concedido diretamente.
 - **LLM único**: DeepSeek V4 Flash via `ChatOpenAI(base_url='https://api.deepseek.com/v1')` (Fase N, 25/07/2026). Cascade removido. Gemini só STT sob consentimento.
 - **DEPLOY**: push em `test` → trigger `deploy-agents-runtime-test` (2nd-gen, us-central1). **PROIBIDO `gcloud builds submit` manual** (GUARDRAILS §10).
 - **CANAL**: apenas **WhatsApp via Evolution API v2.3.7**. **NÃO suportado**: LinkedIn, Telegram, Facebook, Instagram, Discord, SMS. PDF/anexo que chega por outro canal é silenciosamente ignorado (webhook não recebe).

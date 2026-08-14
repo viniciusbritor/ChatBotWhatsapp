@@ -382,22 +382,25 @@ export default function App() {
     setTimeout(() => clearInterval(timer), 120000);
   };
 
-  const authorizeComposio = async (phone: string) => {
+  const authorizeComposio = async (phone: string, toolkit?: string) => {
     try {
       const base = window.location.origin;
-      const res: any = await api(`${base}/a/${encodeURIComponent(phone)}/composio`, { method: 'POST' });
+      const url = toolkit
+        ? `${base}/a/${encodeURIComponent(phone)}/composio?toolkit=${encodeURIComponent(toolkit)}`
+        : `${base}/a/${encodeURIComponent(phone)}/composio`;
+      const res: any = await api(url, { method: 'POST' });
       const links = (res && res.links) || [];
       const pendentes = links.filter((l: any) => l.url);
       if (pendentes.length) {
-        // Abre apenas a PRIMEIRA aba pendente (evita muitas abas).
         window.open(pendentes[0].url, '_blank');
-        alert(`Autorize o app ${pendentes[0].toolkit || ''}. Depois volte aqui e clique novamente para o próximo.`);
+        const appLabel = toolkit || pendentes[0].toolkit || '';
+        alert(`Autorize o aplicativo ${appLabel} na nova janela. Ao concluir, volte aqui!`);
       } else {
-        alert('Todos os apps já estão conectados! ✅');
+        alert('Este aplicativo já está conectado! ✅');
         await refreshConnections();
       }
     } catch (e: any) {
-      alert('Erro ao iniciar Composio: ' + e.message);
+      alert('Erro ao iniciar conexão: ' + (e.message || 'Falha no Composio'));
     }
   };
 

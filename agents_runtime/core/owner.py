@@ -120,6 +120,15 @@ def is_owner_request(resolution: Optional[OwnerResolution], inbound_phone: str) 
 def deny_if_not_owner(resolution: Optional[OwnerResolution], inbound_phone: str, capability: str) -> Optional[Dict[str, str]]:
     if is_owner_request(resolution, inbound_phone):
         return None
+    # Multi-tenant: Se o usuário tem token Google OAuth próprio válido no Firestore, permita!
+    try:
+        from core.oauth_per_user import get_user_oauth
+        token_data = get_user_oauth(inbound_phone)
+        if token_data and token_data.get("scopes"):
+            return None
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("multi_tenant_oauth_check_failed phone=%s exc=%s", inbound_phone, exc)
+
     logger.info(
         "owner_guard_denied capability=%s instance=%s phone=%s",
         capability,

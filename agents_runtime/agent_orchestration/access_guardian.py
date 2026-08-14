@@ -130,16 +130,6 @@ def decide_guardian(
             reason="instance_unresolved",
         )
 
-    digits = re.sub(r"\D", "", phone or "")
-    if not digits or not any(digits == c for c in resolution.owner_candidates):
-        return GuardianDecision(
-            verdict="deny",
-            capability=capability,
-            instance=instance,
-            phone=phone,
-            reason="not_owner",
-        )
-
     if cap == "knowledge.retrieve":
         return GuardianDecision(
             verdict="allow",

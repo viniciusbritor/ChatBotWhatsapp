@@ -7,7 +7,7 @@ interface ConnectionsViewProps {
   currentUser?: CurrentUser | null;
   onToggleConnection: (id: string) => void;
   onAuthorizeGoogle: (phone: string) => void;
-  onAuthorizeComposio: (phone: string) => void;
+  onAuthorizeComposio: (phone: string, toolkit?: string) => void;
   searchQuery: string;
 }
 
@@ -194,8 +194,9 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({
                     e.stopPropagation();
                     const parts = conn.id.split('__');
                     const phone = parts[0] || '';
+                    const service = parts[2] || '';
                     if (conn.category === 'Conta Google') onAuthorizeGoogle(phone);
-                    else onAuthorizeComposio(phone);
+                    else onAuthorizeComposio(phone, service);
                   }}
                   className="text-[#0058be] font-semibold text-[12px] hover:bg-[#d8e2ff]/30 px-3 py-1 rounded-lg transition-colors border border-[#0058be]/20"
                 >
@@ -242,8 +243,9 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({
                     e.stopPropagation();
                     const parts = conn.id.split('__');
                     const phone = parts[0] || '';
+                    const service = parts[2] || '';
                     if (conn.category === 'Conta Google') onAuthorizeGoogle(phone);
-                    else onAuthorizeComposio(phone);
+                    else onAuthorizeComposio(phone, service);
                   }}
                   className="text-[#0058be] font-semibold text-[12px] hover:bg-[#d8e2ff]/30 px-3 py-1 rounded-lg transition-colors border border-[#0058be]/20 shrink-0"
                 >

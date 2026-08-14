@@ -1313,6 +1313,13 @@ async def _prefetch_calendar(phone: str, instance: str = "") -> Optional[str]:
             max_results=50,
             instance=instance,
         )
+        if isinstance(result, str):
+            try:
+                result = json.loads(result)
+            except Exception:
+                result = {}
+        if not isinstance(result, dict):
+            return None
         events = result.get("events", [])
         if not events:
             return None
@@ -1332,6 +1339,13 @@ async def _prefetch_email(phone: str, instance: str = "") -> Optional[str]:
             max_results=10,
             instance=instance,
         )
+        if isinstance(result, str):
+            try:
+                result = json.loads(result)
+            except Exception:
+                result = {}
+        if not isinstance(result, dict):
+            return None
         messages = result.get("messages", [])
         if not messages:
             return None

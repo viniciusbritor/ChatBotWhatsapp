@@ -2166,11 +2166,11 @@ async def onboarding_conectar(phone: str, request: Request):
 
 
 @app.post("/a/{phone}/composio")
-async def onboarding_composio(phone: str):
-    """Gera links de conexao para TODOS os apps Composio pendentes do user."""
+async def onboarding_composio(phone: str, toolkit: Optional[str] = None):
+    """Gera links de conexao para apps Composio (todos ou toolkit especifico)."""
     from tools.composio_connect import connect_all
 
-    result = await connect_all(phone)
+    result = await connect_all(phone, toolkit=toolkit or "")
     links = result.get("links", [])
     out = [
         {"toolkit": item.get("toolkit"), "url": item.get("connect_url") or item.get("url")}

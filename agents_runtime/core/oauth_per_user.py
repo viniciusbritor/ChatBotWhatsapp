@@ -20,12 +20,39 @@ GCP_PROJECT = os.getenv("GCP_PROJECT", "coherence-ominichannel-fs")
 TOKEN_REFRESH_BEFORE_SEC = int(os.getenv("OAUTH_REFRESH_BEFORE_SEC", "300"))
 OAUTH_STATE_TTL_SEC = int(os.getenv("OAUTH_STATE_TTL_SEC", str(7 * 24 * 60 * 60)))
 OAUTH_USER_COLLECTION = os.getenv("OAUTH_USER_COLLECTION", "usuarios")
+_CACHED_CLIENT_ID: Optional[str] = None
+_CACHED_CLIENT_SECRET: Optional[str] = None
+
+
 def _oauth_client_id() -> str:
-    return os.getenv("OAUTH_CLIENT_ID", "").strip()
+    global _CACHED_CLIENT_ID
+    if _CACHED_CLIENT_ID:
+        return _CACHED_CLIENT_ID
+    val = os.getenv("OAUTH_CLIENT_ID", "").strip()
+    if val:
+        _CACHED_CLIENT_ID = val
+        return val
+    _CACHED_CLIENT_ID = "894828119087-goo6lcl6vgm5bdq5qgafscb8qbr4ueet.apps.googleusercontent.com"
+    return _CACHED_CLIENT_ID
 
 
 def _oauth_client_secret() -> str:
-    return os.getenv("OAUTH_CLIENT_SECRET", "").strip()
+    global _CACHED_CLIENT_SECRET
+    if _CACHED_CLIENT_SECRET:
+        return _CACHED_CLIENT_SECRET
+    val = os.getenv("OAUTH_CLIENT_SECRET", "").strip()
+    if val:
+        _CACHED_CLIENT_SECRET = val
+        return val
+    try:
+        from core.secrets import get_secret
+        sec = get_secret("oauth-client-secret") or get_secret("OAUTH_CLIENT_SECRET") or ""
+        if sec:
+            _CACHED_CLIENT_SECRET = sec
+            return sec
+    except Exception:
+        pass
+    return ""
 
 
 def _state_secret() -> str:
@@ -142,6 +169,9 @@ def _refresh_token(
 
 
 def _persist_token(db, phone: str, token_data: Dict[str, Any]) -> None:
+    norm_phone = re.sub(r"\D", "", str(phone or ""))
+    if not norm_phone:
+        return
     persisted = {
         key: value
         for key, value in token_data.items()
@@ -149,7 +179,7 @@ def _persist_token(db, phone: str, token_data: Dict[str, Any]) -> None:
     }
     persisted["updated_at"] = now_brt().isoformat()
     try:
-        db.collection(OAUTH_USER_COLLECTION).document(phone).set(
+        db.collection(OAUTH_USER_COLLECTION).document(norm_phone).set(
             {"google_oauth_token": persisted},
             merge=True,
         )
@@ -159,10 +189,11 @@ def _persist_token(db, phone: str, token_data: Dict[str, Any]) -> None:
 
 def get_user_oauth(phone: str) -> Optional[Dict[str, Any]]:
     db = _get_firestore()
-    if db is None or not phone:
+    norm_phone = re.sub(r"\D", "", str(phone or ""))
+    if db is None or not norm_phone:
         return None
     try:
-        doc = db.collection(OAUTH_USER_COLLECTION).document(phone).get()
+        doc = db.collection(OAUTH_USER_COLLECTION).document(norm_phone).get()
     except Exception as exc:
         logger.warning("oauth fetch failed: %s", exc)
         return None

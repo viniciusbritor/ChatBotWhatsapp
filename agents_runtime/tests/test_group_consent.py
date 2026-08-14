@@ -147,3 +147,55 @@ class TestPipelinesPassGroupContext:
         assert kwargs["is_group"] is True
         assert kwargs["group_jid"] == "120363@g.us"
         assert kwargs["original_text"] == "quais meus emails"
+
+
+class TestMultiTenantUserAccess:
+    def test_non_owner_with_valid_oauth_allowed_in_decide_guardian(self):
+        """Usuário não-owner com token próprio válido recebe allow no access_guardian."""
+        from agent_orchestration.access_guardian import decide_guardian
+        from core.owner import OwnerResolution
+
+        mock_resolution = OwnerResolution(
+            owner_phone="5511966830020",
+            owner_uid="vinicius",
+            account_id="acc1",
+            instance="Jennifer",
+        )
+        mock_token_data = {
+            "scopes": ["https://www.googleapis.com/auth/calendar"],
+            "user_email": "maycon@alterego.business",
+        }
+
+        with patch("agent_orchestration.access_guardian.resolve_owner", return_value=mock_resolution):
+            with patch("agent_orchestration.access_guardian.get_user_oauth", return_value=mock_token_data):
+                decision = decide_guardian(
+                    instance="Jennifer",
+                    phone="5511992303650",
+                    capability="calendar.list_events",
+                )
+        assert decision.verdict == "allow"
+        assert decision.user_email == "maycon@alterego.business"
+
+    def test_non_owner_without_oauth_requests_oauth_in_decide_guardian(self):
+        """Usuário não-owner sem token recebe request_oauth com link."""
+        from agent_orchestration.access_guardian import decide_guardian
+        from core.owner import OwnerResolution
+
+        mock_resolution = OwnerResolution(
+            owner_phone="5511966830020",
+            owner_uid="vinicius",
+            account_id="acc1",
+            instance="Jennifer",
+        )
+
+        with patch("agent_orchestration.access_guardian.resolve_owner", return_value=mock_resolution):
+            with patch("agent_orchestration.access_guardian.get_user_oauth", return_value=None):
+                decision = decide_guardian(
+                    instance="Jennifer",
+                    phone="5511888888888",
+                    capability="calendar.list_events",
+                )
+        assert decision.verdict == "request_oauth"
+        assert decision.reason == "oauth_missing"
+        assert "5511888888888" in decision.oauth_link
+
