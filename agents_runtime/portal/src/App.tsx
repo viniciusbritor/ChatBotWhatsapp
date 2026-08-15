@@ -115,8 +115,8 @@ function mapConnections(users: any[]): ServiceConnection[] {
         name: svc.label || svc.id,
         category: 'Outros serviços',
         description: svc.connected
-          ? `Conectado · ${phone}`
-          : `Pendente — clique para autorizar · ${phone}`,
+          ? `Conectado · ${svc.description || phone}`
+          : `${svc.description || 'Pendente — clique para autorizar'} · ${phone}`,
         status: svc.connected ? 'OK' : 'Desconectado',
         icon: svc.icon || 'hub',
       });

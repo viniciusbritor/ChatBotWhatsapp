@@ -120,7 +120,7 @@ class TestGuardModule:
         guard = {"verdict": "deny", "reason": "not_owner", "capability": "calendar"}
         result = blocked_response(guard)
         assert result["metadata"]["blocked"] is True
-        assert "proprietario" in result["reply"].lower()
+        assert "administrador" in result["reply"].lower()
 
     def test_blocked_response_oauth(self):
         from pipelines._guard import blocked_response

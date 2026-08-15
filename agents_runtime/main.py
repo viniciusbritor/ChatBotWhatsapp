@@ -1689,23 +1689,170 @@ async def _enrich_user_connections(user: Dict[str, Any]) -> None:
     try:
         from tools.composio_connect import get_status
 
+        _COMPOSIO_FRIENDLY_CATALOG = {
+            "googledocs": {
+                "label": "Google Docs",
+                "icon": "description",
+                "description": "Criação, leitura e edição de documentos",
+            },
+            "linkedin": {
+                "label": "LinkedIn",
+                "icon": "share",
+                "description": "Publicação de posts e engajamento profissional",
+            },
+            "youtube": {
+                "label": "YouTube",
+                "icon": "smart_display",
+                "description": "Pesquisa de vídeos e detalhes de canais",
+            },
+            "notion": {
+                "label": "Notion",
+                "icon": "edit_note",
+                "description": "Leitura e criação de páginas e notas corporativas",
+            },
+            "github": {
+                "label": "GitHub",
+                "icon": "code",
+                "description": "Repositórios, PRs e issues de código",
+            },
+            "onedrive": {
+                "label": "Microsoft OneDrive",
+                "icon": "cloud",
+                "description": "Acesso a arquivos e pastas na nuvem",
+            },
+        }
+        _COMPOSIO_EXCLUDED = {"googlecalendar", "gmail", "googledrive", "google_maps"}
+
         status = await get_status(str(user.get("phone") or ""))
         apps = (status or {}).get("apps") or {}
-        user["composio"] = {
-            "services": [
-                {
-                    "id": slug,
-                    "label": (data or {}).get("name") or slug,
-                    "icon": "hub",
-                    "connected": bool((data or {}).get("connected")),
-                    "needs_connect": True,
-                }
-                for slug, data in apps.items()
-            ]
-        }
+        comp_services = []
+        for slug, data in apps.items():
+            if slug in _COMPOSIO_EXCLUDED:
+                continue
+            meta = _COMPOSIO_FRIENDLY_CATALOG.get(slug, {
+                "label": (data or {}).get("name") or slug.replace("_", " ").title(),
+                "icon": "hub",
+                "description": f"Conexão com {slug}",
+            })
+            comp_services.append({
+                "id": slug,
+                "label": meta["label"],
+                "icon": meta["icon"],
+                "description": meta["description"],
+                "connected": bool((data or {}).get("connected")),
+                "needs_connect": True,
+            })
+        user["composio"] = {"services": comp_services}
     except Exception as exc:  # noqa: BLE001
         user["composio"] = {"services": []}
         logger.debug("enrich_composio_skipped phone=%s exc=%s", user.get("phone"), exc)
+
+
+@app.get("/admin/approve-user", response_class=HTMLResponse)
+async def admin_approve_user_get(request: Request, phone: str = "", token: str = ""):
+    """Endpoint de aprovação em 1 clique acionado pelo Admin no WhatsApp."""
+    from core.admin_notify import parse_approval_token
+    from agent_loader import _canonical_phone, save_user, _now_iso
+    from core.magic_link import build_magic_link_url
+    from core.evolution_client import send_text
+    from core.auth import resolve_caller_profile
+
+    approved_phone = parse_approval_token(token)
+    if not approved_phone:
+        try:
+            caller = resolve_caller_profile(request)
+            if caller.get("is_admin") and phone:
+                approved_phone = phone
+        except Exception:
+            pass
+
+    if not approved_phone:
+        return HTMLResponse(
+            content="""<!DOCTYPE html><html><body style="background:#0f172a;color:#ef4444;font-family:sans-serif;text-align:center;padding:40px;">
+            <h2>Link de Aprovação Inválido ou Expirado</h2><p>Solicite uma nova aprovação ou configure diretamente no painel do administrador.</p>
+            </body></html>""",
+            status_code=403,
+        )
+
+    canonical = _canonical_phone(approved_phone) or approved_phone
+    save_user(canonical, {
+        "role": "analyst",
+        "is_approved": True,
+        "approved_at": _now_iso(),
+        "approved_by": "admin_whatsapp_link",
+    })
+
+    link_url = build_magic_link_url(canonical)
+    message = (
+        "🎉 *Acesso Liberado!*\n\n"
+        "O administrador liberou seu acesso como *Analista* à Jennifer.\n\n"
+        "Para conectar suas contas seguras (Google Agenda, Gmail, Drive, GitHub ou LinkedIn), acesse o link abaixo:\n\n"
+        f"👉 {link_url}\n\n"
+        "_Agora você já pode pedir resumos de agenda, e-mails e tarefas para a Jennifer no WhatsApp!_"
+    )
+    try:
+        await send_text(phone=canonical, text=message, instance="Jennifer")
+    except Exception as exc:
+        logger.warning("welcome_msg_send_failed phone=%s exc=%s", canonical, exc)
+
+    html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Acesso Liberado | Coherence AI</title>
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }}
+    .card {{ background: #1e293b; border: 1px solid #334155; border-radius: 24px; padding: 36px 28px; max-width: 440px; width: 100%; text-align: center; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }}
+    .icon {{ width: 68px; height: 68px; background: rgba(16,185,129,0.15); border: 2px solid #10b981; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 34px; color: #10b981; }}
+    h1 {{ font-size: 22px; margin: 0 0 10px; color: #fff; font-weight: 700; }}
+    p {{ font-size: 14px; color: #94a3b8; line-height: 1.6; margin: 0 0 24px; }}
+    .badge {{ display: inline-block; background: #0284c7; color: white; font-weight: 600; padding: 6px 16px; border-radius: 20px; font-size: 13px; margin-bottom: 20px; letter-spacing: 0.5px; }}
+    .btn {{ display: block; background: #2563eb; color: white; text-decoration: none; font-weight: 600; padding: 14px 24px; border-radius: 12px; transition: background 0.2s; }}
+    .btn:hover {{ background: #1d4ed8; }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">✓</div>
+    <div class="badge">Analista Aprovado</div>
+    <h1>Acesso Concedido com Sucesso!</h1>
+    <p>O usuário <strong>+{canonical}</strong> foi aprovado como <strong>Analista</strong>.<br>Uma notificação com o link de conexões já foi enviada no WhatsApp dele.</p>
+    <a href="/admin" class="btn">Abrir Painel de Controle</a>
+  </div>
+</body>
+</html>"""
+    return HTMLResponse(content=html_content)
+
+
+@app.post("/admin/me/phone")
+async def admin_me_phone_update(request: Request):
+    """Vincula o telefone WhatsApp do usuário autenticado no Portal via Google SSO."""
+    from core.auth import resolve_caller_profile
+    from agent_loader import _canonical_phone, save_user, _now_iso
+
+    caller = resolve_caller_profile(request)
+    email = caller.get("email")
+    if not email:
+        raise HTTPException(status_code=401, detail="unauthenticated")
+
+    body = await request.json()
+    new_phone = body.get("phone", "")
+    canonical = _canonical_phone(new_phone)
+    if not canonical:
+        raise HTTPException(status_code=422, detail="invalid_phone")
+
+    save_user(canonical, {
+        "email": email.lower().strip(),
+        "phone": canonical,
+        "name": caller.get("name") or "",
+        "picture": caller.get("picture") or "",
+        "firebase_uid": caller.get("uid") or "",
+        "role": "analyst",
+        "is_approved": True,
+        "updated_at": _now_iso(),
+    })
+    return JSONResponse(content={"status": "ok", "phone": canonical})
 
 
 @app.get("/admin/users/{phone}")
@@ -1736,9 +1883,16 @@ async def admin_users_invite(phone: str, request: Request):
     _require_admin(request)
     from core.magic_link import build_magic_link_url
     from core.evolution_client import send_text
-    from agent_loader import _canonical_phone
+    from agent_loader import _canonical_phone, save_user, _now_iso
 
     canonical = _canonical_phone(phone) or phone
+    save_user(canonical, {
+        "role": "analyst",
+        "is_approved": True,
+        "approved_at": _now_iso(),
+        "approved_by": "admin_portal_invite",
+    })
+
     link_url = build_magic_link_url(canonical)
     message = (
         "👋 *Olá!*\n\n"

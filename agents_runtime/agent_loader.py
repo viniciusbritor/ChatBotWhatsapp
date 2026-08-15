@@ -652,6 +652,36 @@ def save_user(phone: str, data: Dict[str, Any]) -> bool:
         return False
 
 
+def is_user_approved(phone: str) -> bool:
+    """Verifica se o usuario esta aprovado como admin ou analista.
+
+    1. Owner da instancia e admin sempre sao aprovados.
+    2. Usuario com is_approved=True ou token Google / email vinculado no Portal.
+    3. Retorna False se o usuario for guest ou nao aprovado.
+    """
+    canonical = _canonical_phone(phone)
+    if not canonical:
+        return False
+    if canonical == resolve_owner_phone() or _is_instance_owner(canonical):
+        return True
+
+    user = get_user(canonical)
+    if not user:
+        return False
+    if user.get("is_approved") is True:
+        return True
+    if user.get("google_oauth_token") or user.get("approved_by"):
+        return True
+    if user.get("email"):
+        coherence_role = get_coherence_module_role(user["email"])
+        if coherence_role in ("admin", "agent_user", "analyst", "analista"):
+            return True
+    role = str(user.get("role", "")).strip().lower()
+    if role in ("admin", "analyst", "analista", "agent_user") and role != "guest":
+        return True
+    return False
+
+
 def ensure_user_registered(phone: str, sender_name: str = "", instance: str = "jennifer") -> bool:
     """Garante que qualquer contato que interaja com a Jennifer fique registrado em usuarios/{phone}."""
     canonical = _canonical_phone(phone)
@@ -673,7 +703,8 @@ def ensure_user_registered(phone: str, sender_name: str = "", instance: str = "j
             payload["push_name"] = sender_name
         if not doc.exists:
             payload["created_at"] = _now_iso()
-            payload["role"] = "agent_user"
+            payload["role"] = "guest"
+            payload["is_approved"] = False
             doc_ref.set(payload)
         else:
             existing = doc.to_dict() or {}

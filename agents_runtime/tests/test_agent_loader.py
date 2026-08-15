@@ -142,7 +142,8 @@ class TestEnsureUserRegistered:
             payload = args[0]
             assert payload["phone"] == "5511988776655"
             assert payload["name"] == "João Silva"
-            assert payload["role"] == "agent_user"
+            assert payload["role"] == "guest"
+            assert payload["is_approved"] is False
 
     def test_ensure_user_registered_updates_existing_name(self):
         from unittest.mock import MagicMock

@@ -1,3 +1,31 @@
+## 14/08/2026 (21:00 BRT) — Onboarding Seguro: Aprovação em 1 Clique no WhatsApp do Admin, Whitelist Anti-Abuso & Nomes Amigáveis Composio
+
+### Contexto & Regras de Negócio (FinOps & Segurança)
+1. **Risco de Abuso / Custo Descontrolado de Contas Conectadas**: Se contatos aleatórios enviassem mensagens para a Jennifer solicitando ferramentas, ela emitia links OAuth/Composio automaticamente, gerando contas conectadas pagas no Composio e chamadas de LLM.
+2. **Nomes Incompreensíveis do Composio no Módulo Agents**: Serviços chegavam com slugs técnicos (`googledocs`, `notion`, `github`, `onedrive`) e descrições genéricas sem ícones representativos.
+3. **Necessidade de Aprovação em Tempo Real via WhatsApp do Admin**: O Admin (Vinicius) precisava ser notificado instantaneamente quando alguém pedisse acesso e poder liberar em 1 clique direto pelo celular sem precisar abrir computadores.
+
+### Soluções Implementadas
+- **Whitelist & Role Guest Inicial (`agent_loader.py` & `access_guardian.py`)**:
+  - Novos contatos que interagem com o bot iniciam como `role: "guest"`, `is_approved: False`.
+  - Ao solicitar ferramentas pessoais, o Access Guardian bloqueia como `unapproved_guest` e a Jennifer responde a frase exata:
+    > *"Oi! Sou a Jennifer, assistente inteligente da Coherence. Para ter acesso à secretária pessoal e conectar suas contas, seu número precisa ser liberado pelo administrador."*
+- **Notificação Instantânea no WhatsApp do Admin (`core/admin_notify.py`)**:
+  - Ao ser acionada por um visitante, a Jennifer envia automaticamente um alerta no WhatsApp do Admin (`5511966830020` - Vinicius) com nome, telefone, mensagem e um link assinado via HMAC SHA-256 (`/admin/approve-user?phone=...&token=...`).
+- **Aprovação em 1 Clique (`GET /admin/approve-user` em `main.py`)**:
+  - Ao clicar no link, o sistema define o usuário como `role: "analyst"`, `is_approved: True`.
+  - Dispara automaticamente uma mensagem no WhatsApp do usuário com o Magic Link para conectar suas contas.
+  - Exibe tela de confirmação web com design dark mode para o Admin.
+- **Auto-Vínculo de Telefone no Portal Coherence (`POST /admin/me/phone`)**:
+  - Usuários autorizados via Google SSO podem vincular/atualizar seu WhatsApp diretamente pelo Portal.
+- **Padronização dos Nomes dos Serviços Composio**:
+  - Catálogo configurado com `Google Docs`, `LinkedIn`, `YouTube`, `Notion`, `GitHub`, `Microsoft OneDrive` com ícones dedicados e descrições de funcionalidade, filtrando serviços Google redundantes.
+
+### Validação e Testes
+- **Testes Unitários Dedicados**: `tests/test_admin_approval.py` (7/7 passed).
+- **Suíte Geral Pytest**: 100% verde (1175 passed).
+- **Frontend React**: Build do Vite compilado em 631ms sem erros.
+
 ## 14/08/2026 (20:15 BRT) — Resolução Universal de Telefones Internacionais (+41 Suíça / +55 Brasil), Tokens Multi-Tenant e Onboarding
 
 ### Contexto & Causa-Raiz (Evidências Erik +41783430540 e Maycon)

@@ -71,6 +71,20 @@ async def check_google_access(
             )
             if group_decision is not None:
                 return group_decision
+        if decision.verdict == "unapproved_guest":
+            try:
+                import asyncio
+                from core.admin_notify import notify_admin_access_request
+                asyncio.create_task(
+                    notify_admin_access_request(
+                        phone=phone,
+                        message_text=original_text,
+                        instance=instance,
+                    )
+                )
+            except Exception as e:
+                logger.debug("notify_admin_access_request failed: %s", e)
+
         return {
             "verdict": decision.verdict,
             "reason": decision.reason,
@@ -180,18 +194,19 @@ def blocked_response(guard: Dict[str, Any]) -> Dict[str, Any]:
                 "blocked_reason": guard.get("reason", "request_oauth"),
             },
         }
-    if verdict == "deny":
+    if verdict in ("deny", "unapproved_guest"):
         return {
             "reply": (
-                "Oi! Essa acao so pode ser executada pelo proprietario "
-                "da conta WhatsApp."
+                "Oi! Sou a Jennifer, assistente inteligente da Coherence. "
+                "Para ter acesso à secretária pessoal e conectar suas contas, "
+                "seu número precisa ser liberado pelo administrador."
             ),
             "delay_ms": 0,
             "presence": "composing",
             "metadata": {
                 "agent_id": "access_guardian",
                 "blocked": True,
-                "blocked_reason": guard.get("reason", "deny"),
+                "blocked_reason": guard.get("reason", "unapproved_guest"),
             },
         }
     return {}

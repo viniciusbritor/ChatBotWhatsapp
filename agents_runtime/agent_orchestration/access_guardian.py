@@ -145,6 +145,16 @@ def decide_guardian(
 
     granted = token_data.get("scopes") or []
     if not granted:
+        from agent_loader import is_user_approved
+
+        if not is_user_approved(phone):
+            return GuardianDecision(
+                verdict="unapproved_guest",
+                capability=capability,
+                instance=instance,
+                phone=phone,
+                reason="user_not_approved_by_admin",
+            )
         return GuardianDecision(
             verdict="request_oauth",
             capability=capability,

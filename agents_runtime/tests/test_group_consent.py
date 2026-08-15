@@ -190,12 +190,36 @@ class TestMultiTenantUserAccess:
 
         with patch("agent_orchestration.access_guardian.resolve_owner", return_value=mock_resolution):
             with patch("agent_orchestration.access_guardian.get_user_oauth", return_value=None):
-                decision = decide_guardian(
-                    instance="Jennifer",
-                    phone="5511888888888",
-                    capability="calendar.list_events",
-                )
+                with patch("agent_loader.is_user_approved", return_value=True):
+                    decision = decide_guardian(
+                        instance="Jennifer",
+                        phone="5511888888888",
+                        capability="calendar.list_events",
+                    )
         assert decision.verdict == "request_oauth"
         assert decision.reason == "oauth_missing"
         assert "5511888888888" in decision.oauth_link
+
+    def test_unapproved_guest_returns_unapproved_guest(self):
+        """Visitante não aprovado recebe unapproved_guest sem link direto."""
+        from agent_orchestration.access_guardian import decide_guardian
+        from core.owner import OwnerResolution
+
+        mock_resolution = OwnerResolution(
+            owner_phone="5511966830020",
+            owner_uid="vinicius",
+            account_id="acc1",
+            instance="Jennifer",
+        )
+
+        with patch("agent_orchestration.access_guardian.resolve_owner", return_value=mock_resolution):
+            with patch("agent_orchestration.access_guardian.get_user_oauth", return_value=None):
+                with patch("agent_loader.is_user_approved", return_value=False):
+                    decision = decide_guardian(
+                        instance="Jennifer",
+                        phone="5511888888888",
+                        capability="calendar.list_events",
+                    )
+        assert decision.verdict == "unapproved_guest"
+        assert decision.reason == "user_not_approved_by_admin"
 
