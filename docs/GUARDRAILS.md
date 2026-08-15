@@ -35,6 +35,20 @@
   3. **Alerta FinOps no WhatsApp do Admin:** Disparar notificação imediata para o Admin (`5511966830020`) com o custo acumulado em USD e reais (`estimate_cost_usd`), quantidade de mensagens e link assinado de desbloqueio em 1 clique.
   4. **Painel de Controle:** Disponibilizar no Portal Omnichannel (`FinOpsView.tsx`) visualização de custos e opção de bloqueio/desbloqueio manual de usuários.
 
+### §0.7 — Fluxo Obrigatório de Branch, CI/CD e Merge para Deploy
+- **Regra:** Todo desenvolvimento e correção de bugs DEVE OBRIGATORIAMENTE seguir o fluxo estruturado de branches antes do deploy em produção/staging:
+  1. **Criação de Branch:** Criar uma branch temática (ex: `feat/...` ou `fix/...`) a partir do branch base.
+  2. **Commit e Push:** Realizar o commit dos arquivos modificados e testes, e fazer o push para o repositório remoto (`git push origin <branch>`).
+  3. **Merge e CI/CD:** Realizar o merge da branch para o branch de destino (`test` ou `main`), disparando a esteira automatizada do Cloud Build.
+  4. **Proibição:** É proibido aplicar mudanças diretas em produção sem criar a branch de trabalho e validar a esteira.
+
+### §0.8 — Escopo Exclusivo de Secretária Executiva e Foco Anti-Uso Genérico em Grupos
+- **Regra:** A Jennifer atua estritamente como Secretária Executiva e Assistente Corporativa (Agenda, E-mails, Documentos/Drive, Atas, Tarefas e Base de Conhecimento). Em grupos de WhatsApp, ela NÃO deve responder dúvidas enciclopédicas de conhecimentos gerais, lições de casa, questões escolares ou curiosidades aleatórias (ex: teoria da evolução, trigonometria, matemática escolar, cotação/origem de bitcoin, piadas).
+- **Ações Obrigatórias:**
+  1. **Recusa Concisa:** Em perguntas fora de escopo corporativo em grupos, recusar educadamente em 1 a 2 frases curtas direcionando para ferramentas de busca e reafirmando seu foco em tarefas de trabalho.
+  2. **Anti-Desperdício:** Nunca gerar redações, tratados científicos ou resoluções de problemas escolares para economizar tokens de LLM.
+
+
 
 
 

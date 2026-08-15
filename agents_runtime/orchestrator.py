@@ -2905,11 +2905,17 @@ async def _execute_agent(
             current_group_ctx = (
                 f"[GRUPO ATUAL DO WHATSAPP]\n"
                 f"Voce esta respondendo DENTRO do grupo do WhatsApp: '{g_name_str}' (JID: {remote_jid}).\n"
+                f"- PAPEL: Voce atua neste grupo ESTRITAMENTE como SECRETARIA EXECUTIVA DA COHERENCE (agenda, reunioes, e-mails, documentos, atas, tarefas e rotinas da equipe).\n"
+                f"- GUARDRAIL DE ESCOPO & FINOPS: Voce NAO e um ChatGPT para tirar duvidas de conhecimentos gerais, resolver questoes escolares, licoes de casa, matematica/trigonometria, curiosidades aleatorias ou enciclopedia. "
+                f"Se membros do grupo fizerem perguntas fora do escopo corporativo (ex: 'quem teorizou a evolucao', 'o que e bitcoin', 'calcule raiz quadrada/seno/cosseno', 'piadas'), "
+                f"recuse educadamente em 1 a 2 frases curtas: 'Como secretária executiva da equipe, meu foco por aqui é ajudar com agenda, e-mails, atas, documentos e tarefas de trabalho. Para dúvidas de conhecimentos gerais ou estudos, recomendo ferramentas de busca! Em que posso ajudar no trabalho hoje?'.\n"
+                f"- NUNCA gere redacoes longas ou tratados cientificos para perguntas fora de escopo.\n"
                 f"- Quando o usuario perguntar 'qual grupo voce esta', 'onde estou mandando mensagem' ou pedir acoes/cumprimentos no grupo atual, "
                 f"responda que voce esta no grupo '{g_name_str}'.\n"
                 f"- NUNCA confunda o ID de um usuario/bot (ex: 75793925419076) com o ID do grupo.\n"
                 f"- NUNCA responda com relatorios tecnicos de banco de dados (ex: 'sincronizacao foi concluida para X grupos'). Responda em tom amigavel, humano e natural."
             )
+
             if remote_jid and phone:
                 sender_name = str(payload.get("sender_name") or "")
                 if sender_name and sender_name != "user":
