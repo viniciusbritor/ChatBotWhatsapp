@@ -65,16 +65,29 @@ def test_admin_approve_user_endpoint():
     client = TestClient(app)
 
     token = create_approval_token("5511944443333")
-    with patch("agent_loader.save_user", return_value=True) as mock_save:
-        with patch("core.evolution_client.send_text", AsyncMock(return_value=True)):
-            res = client.get(f"/admin/approve-user?phone=5511944443333&token={token}")
-            assert res.status_code == 200
-            assert "Analista Aprovado" in res.text
-            assert "5511944443333" in res.text
-            mock_save.assert_called_once()
-            saved_data = mock_save.call_args[0][1]
-            assert saved_data["role"] == "analyst"
-            assert saved_data["is_approved"] is True
+    with patch("agent_loader.get_user", return_value={"name": "Carlos Teste", "phone": "5511944443333"}):
+        with patch("agent_loader.save_user", return_value=True) as mock_save:
+            with patch("core.evolution_client.send_text", AsyncMock(return_value=True)) as mock_send:
+                # 1. GET renderiza tela de confirmação (anti-crawler)
+                res_get = client.get(f"/admin/approve-user?phone=5511944443333&token={token}")
+                assert res_get.status_code == 200
+                assert "Solicitação de Acesso" in res_get.text
+                assert "Carlos Teste" in res_get.text
+                mock_save.assert_not_called()
+                mock_send.assert_not_called()
+
+                # 2. POST executa a aprovação e dispara WhatsApp
+                res_post = client.post(
+                    "/admin/approve-user",
+                    data={"phone": "5511944443333", "token": token},
+                )
+                assert res_post.status_code == 200
+                assert "Analista Aprovado" in res_post.text
+                mock_save.assert_called_once()
+                mock_send.assert_called_once()
+                saved_data = mock_save.call_args[0][1]
+                assert saved_data["role"] == "analyst"
+                assert saved_data["is_approved"] is True
 
 
 def test_admin_me_phone_update_endpoint():

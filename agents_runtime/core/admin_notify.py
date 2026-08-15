@@ -105,7 +105,14 @@ async def notify_admin_access_request(
         return False
 
     approval_url = generate_approval_url(clean_phone)
-    name_display = sender_name.strip() if sender_name and sender_name != "user" else "Novo Contato"
+    if not sender_name or sender_name.strip().lower() in ("user", "usuario", "usuário", "none", "null") or sender_name.startswith("+") or sender_name.isdigit():
+        try:
+            from agent_loader import get_user
+            u = get_user(clean_phone) or {}
+            sender_name = u.get("name") or u.get("push_name") or "Novo Contato"
+        except Exception:
+            sender_name = "Novo Contato"
+    name_display = sender_name.strip() if sender_name else "Novo Contato"
     snippet = message_text.strip().replace("\n", " ")[:150]
     if len(snippet) == 150:
         snippet += "..."

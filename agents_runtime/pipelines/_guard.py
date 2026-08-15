@@ -158,10 +158,12 @@ async def _handle_group_member_access(
     }
 
 
-def blocked_response(guard: Dict[str, Any]) -> Dict[str, Any]:
+def blocked_response(guard: Dict[str, Any], envelope: Dict[str, Any] = None) -> Dict[str, Any]:
     """Formata resposta de bloqueio para o usuário."""
     verdict = guard.get("verdict", "deny")
     capability = guard.get("capability", "")
+    envelope = envelope or {}
+
     if verdict == "needs_group_consent":
         return {
             "reply": (
@@ -195,9 +197,14 @@ def blocked_response(guard: Dict[str, Any]) -> Dict[str, Any]:
             },
         }
     if verdict in ("deny", "unapproved_guest"):
+        sender_name = str(envelope.get("sender_name") or "").strip()
+        first_name = ""
+        if sender_name and not sender_name.isdigit() and not sender_name.startswith("+") and sender_name.lower() not in ("user", "usuario", "usuário", "none", "null"):
+            first_name = sender_name.split()[0]
+        saudacao = f"Oi, {first_name}!" if first_name else "Oi!"
         return {
             "reply": (
-                "Oi! Sou a Jennifer, assistente inteligente da Coherence. "
+                f"{saudacao} Sou a Jennifer, assistente inteligente da Coherence. "
                 "Para ter acesso à secretária pessoal e conectar suas contas, "
                 "seu número precisa ser liberado pelo administrador."
             ),

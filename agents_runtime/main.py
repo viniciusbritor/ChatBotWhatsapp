@@ -1740,7 +1740,6 @@ async def _enrich_user_connections(user: Dict[str, Any]) -> None:
                 "icon": meta["icon"],
                 "description": meta["description"],
                 "connected": bool((data or {}).get("connected")),
-                "needs_connect": True,
             })
         user["composio"] = {"services": comp_services}
     except Exception as exc:  # noqa: BLE001
@@ -1748,14 +1747,26 @@ async def _enrich_user_connections(user: Dict[str, Any]) -> None:
         logger.debug("enrich_composio_skipped phone=%s exc=%s", user.get("phone"), exc)
 
 
-@app.get("/admin/approve-user", response_class=HTMLResponse)
-async def admin_approve_user_get(request: Request, phone: str = "", token: str = ""):
-    """Endpoint de aprovação em 1 clique acionado pelo Admin no WhatsApp."""
+@app.api_route("/admin/approve-user", methods=["GET", "POST"])
+async def admin_approve_user(
+    request: Request,
+    phone: str = "",
+    token: str = "",
+):
+    """Aprova acesso de novo usuário e dispara WhatsApp com link de conexões."""
     from core.admin_notify import parse_approval_token
-    from agent_loader import _canonical_phone, save_user, _now_iso
+    from agent_loader import _canonical_phone, save_user, _now_iso, get_user, enrich_user_from_all_sources
     from core.magic_link import build_magic_link_url
     from core.evolution_client import send_text
     from core.auth import resolve_caller_profile
+
+    if request.method == "POST":
+        try:
+            form = await request.form()
+            token = token or str(form.get("token") or "")
+            phone = phone or str(form.get("phone") or "")
+        except Exception:
+            pass
 
     approved_phone = parse_approval_token(token)
     if not approved_phone:
@@ -1775,17 +1786,59 @@ async def admin_approve_user_get(request: Request, phone: str = "", token: str =
         )
 
     canonical = _canonical_phone(approved_phone) or approved_phone
+    user_info = get_user(canonical) or {}
+    user_name = user_info.get("name") or user_info.get("push_name") or ""
+    display_name = user_name if user_name and not user_name.isdigit() and not user_name.startswith("+") else "Novo Contato"
+
+    confirm = request.query_params.get("confirm", "")
+    if request.method == "GET" and confirm != "1":
+        html_confirm = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aprovar Usuário | Coherence AI</title>
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }}
+    .card {{ background: #1e293b; border: 1px solid #334155; border-radius: 24px; padding: 36px 28px; max-width: 440px; width: 100%; text-align: center; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }}
+    .icon {{ width: 68px; height: 68px; background: rgba(59,130,246,0.15); border: 2px solid #3b82f6; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 34px; color: #3b82f6; }}
+    h1 {{ font-size: 22px; margin: 0 0 10px; color: #fff; font-weight: 700; }}
+    p {{ font-size: 14px; color: #94a3b8; line-height: 1.6; margin: 0 0 24px; }}
+    .user-badge {{ display: inline-block; background: #334155; color: #38bdf8; font-weight: 600; padding: 10px 20px; border-radius: 20px; font-size: 15px; margin-bottom: 24px; }}
+    .btn {{ display: block; width: 100%; background: #16a34a; color: white; border: none; font-size: 16px; font-weight: 600; padding: 14px 24px; border-radius: 12px; cursor: pointer; transition: background 0.2s; box-sizing: border-box; }}
+    .btn:hover {{ background: #15803d; }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">👤</div>
+    <h1>Solicitação de Acesso</h1>
+    <p>Você deseja liberar o acesso como <strong>Analista</strong> para:</p>
+    <div class="user-badge">{display_name} (+{canonical})</div>
+    <form method="POST" action="/admin/approve-user">
+      <input type="hidden" name="phone" value="{canonical}">
+      <input type="hidden" name="token" value="{token}">
+      <button type="submit" class="btn">✓ Confirmar e Liberar Acesso</button>
+    </form>
+  </div>
+</body>
+</html>"""
+        return HTMLResponse(content=html_confirm)
+
     save_user(canonical, {
         "role": "analyst",
         "is_approved": True,
         "approved_at": _now_iso(),
         "approved_by": "admin_whatsapp_link",
     })
+    enrich_user_from_all_sources(canonical)
 
+    first_name = display_name.split()[0] if display_name and display_name != "Novo Contato" else ""
+    greeting = f"Olá, {first_name}!" if first_name else "Olá!"
     link_url = build_magic_link_url(canonical)
     message = (
-        "🎉 *Acesso Liberado!*\n\n"
-        "O administrador liberou seu acesso como *Analista* à Jennifer.\n\n"
+        f"🎉 *Acesso Liberado!*\n\n"
+        f"{greeting} O administrador liberou seu acesso como *Analista* à Jennifer.\n\n"
         "Para conectar suas contas seguras (Google Agenda, Gmail, Drive, GitHub ou LinkedIn), acesse o link abaixo:\n\n"
         f"👉 {link_url}\n\n"
         "_Agora você já pode pedir resumos de agenda, e-mails e tarefas para a Jennifer no WhatsApp!_"
@@ -1817,7 +1870,7 @@ async def admin_approve_user_get(request: Request, phone: str = "", token: str =
     <div class="icon">✓</div>
     <div class="badge">Analista Aprovado</div>
     <h1>Acesso Concedido com Sucesso!</h1>
-    <p>O usuário <strong>+{canonical}</strong> foi aprovado como <strong>Analista</strong>.<br>Uma notificação com o link de conexões já foi enviada no WhatsApp dele.</p>
+    <p>O usuário <strong>{display_name} (+{canonical})</strong> foi aprovado como <strong>Analista</strong>.<br>Uma notificação com o link de conexões já foi enviada no WhatsApp dele.</p>
     <a href="/admin" class="btn">Abrir Painel de Controle</a>
   </div>
 </body>
