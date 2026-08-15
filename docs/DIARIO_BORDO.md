@@ -1,3 +1,24 @@
+## 15/08/2026 (00:15 BRT) — Correção Definitiva de Busca no Gmail, Unificação de ACKs e Eliminação de Loops
+
+### Contexto & Causa-Raiz
+1. **Gmail Search Retornando Zero Mensagens**:
+   - `core/owner_guard.py::post_filter_tool_result` continha uma cláusula legada que descartava qualquer mensagem/arquivo se o usuário não possuísse uma entrada na tabela de permissões estáticas de pasta (`folder_permissions`).
+   - No modelo multi-tenant via per-user OAuth, o usuário já é dono dos próprios dados. O filtro zerava a lista de e-mails (`{"messages": [], "count": 0}`), fazendo a Jennifer achar que não havia e-mails do DeepSeek.
+2. **Loop de Múltiplos ACKs ("Só um instante...") no WhatsApp**:
+   - Como o Gmail retornava zero mensagens, o modelo tentava múltiplas queries secundárias e chamava ferramentas auxiliares (`get_gmail_thread`).
+   - Cada ferramenta individual em `deepagent_layer/tools.py` chamava `_fire_ack`, gerando até 7 mensagens seguidas no WhatsApp do usuário.
+
+### Soluções Implementadas
+- **Bypass de Whitelist no `post_filter_tool_result` (`core/owner_guard.py`)**:
+  - Quando não há restrição de pasta configurada ou o usuário possui wildcard (`*`), os dados reais retornados pela API Google são preservados na íntegra.
+- **Eliminação de ACKs Micro-Tools (`deepagent_layer/tools.py`)**:
+  - Removido `_fire_ack` de todas as ferramentas do DeepAgent (Calendar, Gmail, Drive, RAG, Web).
+  - O envio de notificação de espera foi centralizado no pipeline inicial (`send_ack`) com controle rigoroso de cooldown (20s) por usuário.
+
+### Validação e Testes
+- **Suite Pytest**: 1184/1184 testes 100% verdes no Cloud Build.
+- **Cloud Run Deploy**: Revisão ativa `agents-runtime-test-00451-n66` no `us-central1`.
+
 ## 14/08/2026 (22:15 BRT) — Proteção Anti-Crawler na Aprovação, Personalização com Nome Real e Instant Tool ACK Universal
 
 ### Contexto & Causa-Raiz
