@@ -1,3 +1,35 @@
+## 14/08/2026 (22:15 BRT) — Proteção Anti-Crawler na Aprovação, Personalização com Nome Real e Instant Tool ACK Universal
+
+### Contexto & Causa-Raiz
+1. **Aprovação Prematura por Link Preview / Crawlers no WhatsApp**:
+   - Ao receber o link de aprovação no WhatsApp do Admin (`/admin/approve-user?phone=...&token=...`), o WhatsApp/iOS disparava uma requisição `GET` oculta para gerar a pré-visualização do link (Link Preview).
+   - A versão anterior executava a mutação de estado e disparava o WhatsApp de boas-vindas logo no primeiro `GET`, fazendo com que a usuária (ex: Vivian Young `5511973391993`) recebesse *"🎉 Acesso Liberado!"* antes de o Admin clicar em aprovar.
+2. **Sensação de Lentidão / Travamento sem Feedback Intermediário**:
+   - Quando o usuário pedia consultas em ferramentas Google (Calendar, Gmail, Drive) ou Composio (YouTube, LinkedIn, GitHub, Notion, etc.), a Jennifer executava a chamada da API na nuvem (2-5 segundos) sem enviar nenhuma mensagem intermediária, dando a impressão de que o bot havia congelado.
+
+### Soluções Implementadas
+- **Proteção Anti-Crawler & Confirmação Explícita (`main.py`)**:
+  - `GET /admin/approve-user`: Agora é uma operação idempotente e segura que apenas renderiza uma página de confirmação no tema dark mode com os dados do solicitante e o botão `[✓ Confirmar e Liberar Acesso]`.
+  - `POST /admin/approve-user`: A aprovação efetiva no Firestore (`role: "analyst"`, `is_approved: True`) e o disparo do WhatsApp de boas-vindas com o Magic Link ocorrem **exclusivamente** após o submit deliberado do formulário pelo Admin.
+- **Personalização de Saudação por Nome (`pipelines/_guard.py` & `main.py`)**:
+  - O sistema extrai o primeiro nome real do solicitante (`Oi, Vivian!`, `Olá, Vivian!`) tanto na mensagem de bloqueio para visitantes quanto na mensagem pós-liberação e no alerta para o Admin.
+- **Instant Tool ACK Universal (`pipelines/_ack.py`, `deepagent_layer/tools.py` e `orchestrator.py`)**:
+  - Implementado catálogo universal de mensagens humanizadas de espera com envio instantâneo (`delay_ms=0` e typing presence) no exato instante em que qualquer ferramenta Google ou Composio é invocada:
+    - Calendar: *"Só um instante. Vou ver sua agenda... 📅"*
+    - Gmail: *"Só um instante. Vou buscar seus e-mails... 📧"*
+    - Drive: *"Só um instante. Vou procurar no Google Drive... 📁"*
+    - YouTube: *"Só um instante. Vou buscar no YouTube... 🎥"*
+    - LinkedIn: *"Só um instante. Vou consultar o LinkedIn... 💼"*
+    - GitHub: *"Só um instante. Vou verificar o GitHub... 🐙"*
+    - Notion: *"Só um instante. Vou consultar o Notion... 📝"*
+    - OneDrive: *"Só um instante. Vou buscar no Microsoft OneDrive... ☁️"*
+    - Maps / Contatos / RAG / etc.
+  - Deduplicação inteligente por `message_id` para evitar mensagens repetidas dentro do mesmo turno.
+
+### Validação e Testes
+- **Testes Unitários & Pipelines**: 100% aprovados (`pytest tests/test_admin_approval.py` [7/7] e `pytest tests/pipelines/` [112/112]).
+- **Cloud Run Deploy**: Revisão ativa `agents-runtime-test-00449-pzs` no `us-central1`.
+
 ## 14/08/2026 (21:00 BRT) — Onboarding Seguro: Aprovação em 1 Clique no WhatsApp do Admin, Whitelist Anti-Abuso & Nomes Amigáveis Composio
 
 ### Contexto & Regras de Negócio (FinOps & Segurança)
