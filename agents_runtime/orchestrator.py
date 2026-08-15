@@ -734,8 +734,10 @@ async def _handle_attachment(
             },
         }
 
-    await _send_ack("ok. pode deixar")
-    await _send_ack("estou memorizando o conteudo")
+    # FIX Bug #1A (15/08/2026): consolidado para 1 unico ack para evitar
+    # que o usuario receba 3+ mensagens (ack + ack + reply) no WhatsApp
+    # quando pede para memorizar/salvar um arquivo.
+    await _send_ack("ok. pode deixar, estou memorizando o conteudo")
 
     extracted = await _extract_text_from_attachment(payload)
     if not extracted or not extracted.get("text"):
@@ -752,6 +754,13 @@ async def _handle_attachment(
         }
 
     save_to_rag = is_save
+    logger.info(
+        "attachment_routing phone=%s decision=%s save_to_rag=%s source=%s",
+        phone,
+        "rag" if save_to_rag else "drive",
+        save_to_rag,
+        extracted.get("source_name", "?"),
+    )
     persist = await _persist_attachment(payload, extracted, save_to_rag)
     if persist.get("error"):
         reply = (

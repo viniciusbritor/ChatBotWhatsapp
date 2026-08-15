@@ -179,11 +179,57 @@ def _build_email_tools() -> List[Any]:
 def _build_drive_tools() -> List[Any]:
     from tools import google_drive
 
+    async def _apply_default_filter(
+        result: Dict[str, Any],
+        phone: str,
+        query: str,
+    ) -> Dict[str, Any]:
+        """FIX Bug #1B (15/08/2026): quando o usuario ja marcou um arquivo
+        como padrao via memory.save_fact(key=curriculo_padrao), prioriza
+        esse arquivo no topo do resultado. Nao esconde os outros - apenas
+        reordena para que o LLM nao precise adivinhar entre copias.
+        """
+        if not isinstance(result, dict) or not result.get("files"):
+            return result
+        query_norm = str(query or "").strip().lower()
+        fact_keys = ("curriculo_padrao",)
+        if not any(kw in query_norm for kw in ("curriculo", "currículo", "resum", "cv ")):
+            return result
+        try:
+            from tools.memory import get_fact_by_key
+
+            default_filename = None
+            for key in fact_keys:
+                default_filename = await get_fact_by_key(key, phone)
+                if default_filename:
+                    break
+            if not default_filename:
+                return result
+            files = list(result.get("files") or [])
+            default_norm = default_filename.strip().lower()
+            prioritized = []
+            others = []
+            for f in files:
+                fname = str(f.get("name") or "").strip().lower()
+                if fname == default_norm:
+                    prioritized.append(f)
+                else:
+                    others.append(f)
+            if prioritized:
+                result["files"] = prioritized + others
+                result["default_file_id"] = prioritized[0].get("id", "")
+                result["default_file_name"] = prioritized[0].get("name", "")
+            return result
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("apply_default_filter_skipped exc=%s", exc)
+            return result
+
     @tool
     async def search_drive_files(
         phone: str,
         query: str,
         max_results: int = 20,
+        apply_default_filter: bool = True,
     ) -> Dict[str, Any]:
         """Search Google Drive files by name or content.
 
@@ -191,12 +237,19 @@ def _build_drive_tools() -> List[Any]:
             phone: User phone for per-user OAuth.
             query: Free-text search query.
             max_results: Maximum number of files to return. Default 20.
+            apply_default_filter: Quando True (default) e o usuario tem
+                um arquivo padrao marcado (memory.save_fact com
+                key=curriculo_padrao), prioriza esse arquivo no topo
+                do resultado sem esconder os outros.
         """
-        return await google_drive.search_files(
+        result = await google_drive.search_files(
             phone=phone,
             query=query,
             max_results=max_results,
         )
+        if apply_default_filter:
+            result = await _apply_default_filter(result, phone, query)
+        return result
 
     @tool
     async def list_drive_folder(

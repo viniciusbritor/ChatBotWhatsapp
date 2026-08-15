@@ -413,6 +413,37 @@ def extract_envelope(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if bot_lid_digits and f"@{bot_lid_digits}" in text:
             text = text.replace(f"@{bot_lid_digits}", "@Jennifer")
 
+        # ========================
+        # SANITIZACAO DE LIDs DE PESSOAS (15/08/2026)
+        # Quando alguem digita '@Nome' o WhatsApp grava o LID cru
+        # (ex: '@94756306710762') no texto. Esta etapa substitui
+        # o LID pelo nome real do membro usando o snapshot
+        # group_members/{group_jid}. Sem isso a LLM recebe o @LID
+        # cru e replica verbatim nas respostas, vazando o id
+        # interno do contato.
+        # ========================
+        group_mentioned = mentioned_jids if is_group else []
+        if group_mentioned:
+            try:
+                from tools.group import resolve_mentioned
+
+                resolved_members = resolve_mentioned(remote_jid, group_mentioned) or []
+                for member in resolved_members:
+                    member_name = str(member.get("name") or "").strip()
+                    if not member_name:
+                        continue
+                    member_lid_raw = str(member.get("lid") or "").split("@")[0]
+                    member_phone = str(member.get("phone") or "")
+                    member_phone_digits = "".join(c for c in member_phone if c.isdigit())
+                    if member_lid_raw and member_lid_raw == bot_lid_digits:
+                        continue
+                    if member_phone_digits and member_phone_digits == bot_lid_digits:
+                        continue
+                    if member_lid_raw and f"@{member_lid_raw}" in text:
+                        text = text.replace(f"@{member_lid_raw}", f"@{member_name}")
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("person_lid_sanitization_skipped exc=%s", exc)
+
     from core.message_ledger import deterministic_request_id
 
     request_id = message_id or deterministic_request_id(

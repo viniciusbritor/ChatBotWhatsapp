@@ -1,3 +1,52 @@
+## 15/08/2026 (02:30 BRT) — Sanitizacao de LIDs de Pessoas + Acks Consolidados + Filtro de Curriculo Padrao
+
+### Contexto & Causa-Raiz
+Em conversa real no grupo `120363410899121605@g.us` (3 mensagens), 3 bugs distintos foram identificados pelos logs do Cloud Run (`agents-runtime-test`):
+
+1. **Bot chamava pessoa pelo LID cru** (`@94756306710762`) em vez do nome (`@Erik`).
+   - O `core/evolution_webhook.py:410-414` substituia apenas `@<bot_lid_digits>` por `@Jennifer`. Os LIDs das pessoas mencionadas permaneciam literais no `text` enviado a LLM, que replicava verbatim.
+   - O `_resolve_group_mentions` em `orchestrator.py:293` adicionava contexto auxiliar ("Pessoas mencionadas: Erik") mas nao forçava a substituicao do @LID literal.
+
+2. **Memorizar arquivo disparava 3+ mensagens no WhatsApp** (ack + ack + reply).
+   - O `_handle_attachment` em `orchestrator.py:737-738` chamava `_send_ack` duas vezes ("ok. pode deixar" + "estou memorizando o conteudo") antes do reply final.
+
+3. **`search_drive_files` retornava 3 arquivos** (2 copias + 1 antigo) quando o usuario tinha `memory.save_fact(key=curriculo_padrao)` ja marcado.
+   - O DeepAgent (`manager-drive`) chamava `drive.search_files` 6x em sequencia (`04:41:15-21` UTC).
+   - O fact `curriculo_padrao` existia mas nenhum pre-filtro era aplicado.
+
+### Solucoes Implementadas
+
+- **Bug #2 — Sanitizacao de LIDs de Pessoas** (`core/evolution_webhook.py:416-444`):
+  - Novo bloco apos a sanitizacao do bot LID.
+  - Usa `tools.group.resolve_mentioned` para mapear cada mentionedJid ao nome real.
+  - Substitui `@<member_lid_digits>` por `@<member_name>` no `text` antes de chegar a LLM.
+  - Try/except com log `person_lid_sanitization_skipped` para fallback seguro.
+
+- **Bug #1A — Acks Consolidados** (`orchestrator.py:737-739`):
+  - Substituiu 2 `_send_ack` por 1 unico: "ok. pode deixar, estou memorizando o conteudo".
+  - Adicionou log estruturado `attachment_routing phone=... decision=rag|drive save_to_rag=... source=...` para diagnostico.
+
+- **Bug #1B — Filtro de Curriculo Padrao**:
+  - Nova funcao `tools/memory.get_fact_by_key(key, phone)` que le direto do Firestore.
+  - `deepagent_layer/tools.py::search_drive_files` ganhou parametro `apply_default_filter: bool = True`.
+  - Quando `apply_default_filter=True` e query contem "curriculo/cv/resumo":
+    - Le `curriculo_padrao` via `get_fact_by_key`.
+    - Move o arquivo marcado para o topo da lista de resultados.
+    - Adiciona campos `default_file_id` e `default_file_name` no retorno.
+    - Os outros arquivos continuam presentes (nao esconde).
+  - Prompt do `manager-drive` em `deepagent_layer/agents.py` atualizado.
+
+### Validacao e Testes
+
+- **Testes Unitarios Novos (18 testes, 100% verde)**:
+  - `tests/test_lid_sanitization.py` (6 testes).
+  - `tests/test_attachment_acks_consolidated.py` (4 testes).
+  - `tests/test_drive_search_default_filter.py` (8 testes).
+
+- **Suite Geral**:
+  - `pytest tests/` — 1011 testes passing (excluindo 41 pre-existentes que requerem libs nao instaladas).
+  - `scripts/check_lgpd_compliance.py` — **LGPD compliance checks passed**.
+
 ## 15/08/2026 (00:45 BRT) — Implementação do Guardrail Anti-Duplicação (Impedir Envio Duplo em Formatos Distintos)
 
 ### Contexto & Causa-Raiz

@@ -66,6 +66,41 @@ async def save_fact(
         return {"error": str(exc)[:200], "saved": False}
 
 
+async def get_fact_by_key(key: str, phone: str = "") -> Optional[str]:
+    """Le um fato especifico do usuario pelo key exato.
+
+    Retorna o ``value`` do fact ou ``None`` se nao existir / firestore
+    indisponivel. Util para preferencias do tipo ``curriculo_padrao``
+    que precisam ser consultadas em hot path antes de aplicar
+    pre-filtros em outras tools (FIX Bug #1B, 15/08/2026).
+    """
+    if not phone or not key:
+        return None
+    db = _get_firestore()
+    if db is None:
+        return None
+    try:
+        normalized = _normalize_phone(phone)
+        doc_id = str(key or "").strip().lower().replace(" ", "_")[:100]
+        if not doc_id:
+            return None
+        doc = (
+            db.collection("usuarios")
+            .document(normalized)
+            .collection(FACTS_SUBCOLLECTION)
+            .document(doc_id)
+            .get()
+        )
+        if not doc.exists:
+            return None
+        data = doc.to_dict() or {}
+        value = str(data.get("value") or "").strip()
+        return value or None
+    except Exception as exc:
+        logger.debug("memory_get_fact_by_key_failed phone=%s key=%s exc=%s", phone, key, exc)
+        return None
+
+
 async def search_facts(
     query: str = "",
     category: str = "",
