@@ -2906,6 +2906,20 @@ async def _execute_agent(
             return json.dumps({"error": f"Tool '{tool_name}' not found"})
         effective_args = _bind_tool_args(tool_name, tool_args, phone, payload.get("instance", ""))
         logger.info("tool_invoking tool=%s args=%s", tool_name, list(effective_args.keys()))
+
+        try:
+            from pipelines._ack import send_instant_tool_ack
+            asyncio.create_task(
+                send_instant_tool_ack(
+                    tool_name=tool_name,
+                    phone=phone,
+                    instance=str(payload.get("instance", "") or "Jennifer"),
+                    extra=extra,
+                )
+            )
+        except Exception:
+            pass
+
         try:
             coro = tool_fn(**effective_args)
             if asyncio.iscoroutine(coro) or asyncio.iscoroutinefunction(tool_fn):
