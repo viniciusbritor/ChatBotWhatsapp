@@ -734,11 +734,6 @@ async def _handle_attachment(
             },
         }
 
-    # FIX Bug #1A (15/08/2026): consolidado para 1 unico ack para evitar
-    # que o usuario receba 3+ mensagens (ack + ack + reply) no WhatsApp
-    # quando pede para memorizar/salvar um arquivo.
-    await _send_ack("ok. pode deixar, estou memorizando o conteudo")
-
     extracted = await _extract_text_from_attachment(payload)
     if not extracted or not extracted.get("text"):
         reply = "Nao consegui extrair texto desse arquivo. Pode tentar de outro formato?"
@@ -752,6 +747,9 @@ async def _handle_attachment(
                 "error": "text_extraction_failed",
             },
         }
+
+    # Consolidado para 1 unico ack antes da indexação pesada
+    await _send_ack("ok. pode deixar, estou memorizando o conteudo")
 
     save_to_rag = is_save
     logger.info(

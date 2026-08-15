@@ -66,18 +66,27 @@ async def dispatch_with_ledger(
         }
 
     claim_snapshot = claim(message_id)
-    if not claim_snapshot:
-        if snapshot and lease_alive(snapshot):
-            logger.info(
-                "pubsub_dispatch_lease_busy message_id=%s state=%s",
-                message_id,
-                snapshot.get("state"),
-            )
-            return {
-                "status": "lease_busy",
-                "message_id": message_id,
-            }
-        claim_snapshot = snapshot or {}
+    if claim_snapshot is not None and is_terminal(claim_snapshot):
+        logger.info(
+            "pubsub_dispatch_duplicate message_id=%s state=%s",
+            message_id,
+            claim_snapshot.get("state"),
+        )
+        return {
+            "status": "duplicate",
+            "message_id": message_id,
+            "ledger_state": claim_snapshot.get("state"),
+        }
+
+    if claim_snapshot is None and snapshot is not None and lease_alive(snapshot):
+        logger.info(
+            "pubsub_dispatch_lease_busy message_id=%s",
+            message_id,
+        )
+        return {
+            "status": "lease_busy",
+            "message_id": message_id,
+        }
 
     renew_task: Optional[asyncio.Task] = None
     stop_event = asyncio.Event()
