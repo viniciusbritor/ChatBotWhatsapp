@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { CurrentUser } from '../../types';
+import { api } from '../../api/client';
 import { ShieldAlert, ShieldCheck, DollarSign, MessageSquare, Users, AlertTriangle, RefreshCw, Lock, Unlock, Search } from 'lucide-react';
 
 interface FinOpsUser {
@@ -51,9 +52,8 @@ export const FinOpsView: React.FC<FinOpsViewProps> = ({
       const url = selectedInstance === 'all'
         ? '/admin/finops/overview'
         : `/admin/finops/overview?instance=${encodeURIComponent(selectedInstance)}`;
-      const res = await fetch(url);
-      if (res.ok) {
-        const json = await res.json();
+      const json = await api<FinOpsOverview>(url);
+      if (json) {
         setData(json);
       }
     } catch (err) {
@@ -72,15 +72,11 @@ export const FinOpsView: React.FC<FinOpsViewProps> = ({
     setActionMessage(null);
     try {
       const endpoint = currentlyBlocked ? `/admin/users/${phone}/unblock` : `/admin/users/${phone}/block`;
-      const res = await fetch(endpoint, { method: 'POST' });
-      if (res.ok) {
-        setActionMessage(`Usuário +${phone} ${currentlyBlocked ? 'desbloqueado' : 'bloqueado'} com sucesso!`);
-        await fetchFinOps();
-      } else {
-        setActionMessage(`Erro ao alterar status de +${phone}`);
-      }
+      await api(endpoint, { method: 'POST' });
+      setActionMessage(`Usuário +${phone} ${currentlyBlocked ? 'desbloqueado' : 'bloqueado'} com sucesso!`);
+      await fetchFinOps();
     } catch (err) {
-      setActionMessage(`Falha na comunicação com o servidor`);
+      setActionMessage(`Erro ao alterar status de +${phone}`);
     } finally {
       setActionLoading(null);
       setTimeout(() => setActionMessage(null), 4000);
@@ -88,6 +84,7 @@ export const FinOpsView: React.FC<FinOpsViewProps> = ({
   };
 
   const q = (searchQuery || '').toLowerCase();
+
 
   const filteredUsers = (data?.users || []).filter((u) => {
     const matchSearch =
