@@ -1,7 +1,6 @@
 # Arquitetura — ChatBotWhatsapp (Agentes Omnichannel)
 
-> Última revisão: **2026-08-14** — FinOps Total: DeepSeek V3 Primário com Prompt Caching Ativo + Fallback Groq (Llama 3.3 70B / 3.1 8B).
-> Poda de Retorno de Ferramentas (teto de 1.500 chars), desativação do `proactive_worker`.
+> Última revisão: **2026-08-15** — Multi-Tenant OAuth, Anti-Duplicação (Guardrail §0.5), Poda de ACKs e Suporte Ollama/DeepSeek.
 > Transcrição de áudios via Groq Whisper (Free) -> OpenAI Whisper-1 -> Gemini STT.
 > Esteira CI/CD estrita via Cloud Build triggers no GitHub (push em `test` / `main`).
 > Ver `docs/DIARIO_BORDO.md` para o histórico completo do dia.
