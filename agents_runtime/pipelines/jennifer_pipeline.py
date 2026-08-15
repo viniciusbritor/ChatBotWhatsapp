@@ -26,7 +26,7 @@ async def run(payload: Dict[str, Any]) -> Dict[str, Any]:
     from pipelines._executor import run_agent
 
     return await run_agent(
-        "jennifier",
+        "manager-jennifier",
         text,
         payload,
         extra,

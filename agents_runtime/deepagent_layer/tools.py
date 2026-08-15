@@ -31,6 +31,12 @@ def _build_langchain_tools_for(manager_id: str) -> List[Any]:
         return _build_group_rag_tools()
     if manager_id == "manager-web":
         return _build_web_tools()
+    if manager_id == "manager-jennifier":
+        # Agente conversacional geral: nao tem tools. Retorna lista vazia
+        # explicitamente para evitar o warning 'unknown manager_id'.
+        # FIX (15/08/2026): bug pre-existente causava loop de fallback porque
+        # _build_agent rejeitava manager-jennifier por falta de entry aqui.
+        return []
     logger.warning("unknown manager_id=%s", manager_id)
     return []
 

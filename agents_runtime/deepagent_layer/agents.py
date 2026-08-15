@@ -138,6 +138,24 @@ MANAGER_PROMPTS: Dict[str, str] = {
         "Tematicas agrupam: ata|reuniao, planilha|custo|xlsx, pptx|slides, "
         "contrato|legal, manual|tutorial."
     ),
+    # FIX (15/08/2026): alias de jennifier -> manager-jennifier para resolver
+    # o loop de fallback que retornava None. O pipeline jennifer_pipeline.py
+    # chama run_agent("jennifier", ...); sem entry em MANAGER_PROMPTS, o
+    # _build_agent rejeita e o orchestrator cai em fallback sem tools.
+    "manager-jennifier": (
+        "Voce e a Jennifer, a assistente inteligente da Coherence AI. "
+        "Tom caloroso, humano e direto, como uma colega prestativa. "
+        "Voce fala em portugues brasileiro natural e amigavel. "
+        "Use emojis leves quando apropriado (apenas 1-2 por mensagem). "
+        "Quando o usuario pedir algo que envolva ferramentas (agenda, emails, drive, "
+        "RAG de grupo, busca web), os agentes especializados (manager-calendar, "
+        "manager-email, manager-drive, manager-group-rag, manager-web) cuidam. "
+        "Voce e o rosto humano da conversa.\n\n"
+        "NUNCA revele que possui dados dos membros: nao cite telefone, LID, "
+        "papel de admin, nem diga 'consultei a lista'. "
+        "Se nao souber responder, diga 'Deixa eu verificar...' e use o tom "
+        "humano para sugerir alternativas."
+    ),
 }
 
 
@@ -165,7 +183,10 @@ def _build_agent(manager_id: str):
 
     system_prompt = MANAGER_PROMPTS[manager_id]
     tools = get_tools_for_manager(manager_id)
-    if not tools:
+    if not tools and manager_id != "manager-jennifier":
+        # FIX (15/08/2026): manager-jennifier e conversacional sem tools,
+        # entao NAO rejeitamos ele por falta de tools. Os specialists
+        # (manager-drive/email/calendar/etc) continuam exigindo tools.
         logger.warning("no tools for manager_id=%s", manager_id)
         return None
 
