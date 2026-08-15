@@ -66,7 +66,7 @@ _ACK_MAP: Dict[str, str] = {
     "translate": "Só um instante. Vou traduzir... 🌐",
 }
 
-_ACKED_MESSAGES: Dict[str, float] = {}
+_ACKED_PHONES: Dict[str, float] = {}
 
 
 def get_tool_ack_message(tool_name: str) -> str:
@@ -95,29 +95,35 @@ async def send_instant_tool_ack(
     phone: str,
     instance: str = "Jennifer",
     extra: Optional[Dict[str, Any]] = None,
+    force: bool = False,
 ) -> bool:
-    """Dispara IMEDIATAMENTE a mensagem de busca no WhatsApp antes de executar a tool."""
+    """Dispara IMEDIATAMENTE a mensagem de busca no WhatsApp antes de executar a tool.
+
+    Possui cooldown de 20s por telefone para garantir que o usuário receba
+    EXATAMENTE UMA mensagem de busca por turno, mesmo que o agente realize
+    múltiplas chamadas de ferramentas internamente.
+    """
     if not phone:
         return False
     clean_phone = re.sub(r"\D", "", str(phone))
     if not clean_phone:
         return False
 
-    extra = extra or {}
-    msg_id = extra.get("message_id") or extra.get("id") or extra.get("turn_id")
-    if msg_id:
-        now = time.time()
-        if msg_id in _ACKED_MESSAGES and (now - _ACKED_MESSAGES[msg_id]) < 12:
+    now = time.time()
+    if not force:
+        last_ack = _ACKED_PHONES.get(clean_phone, 0)
+        if (now - last_ack) < 20:
             return False
-        _ACKED_MESSAGES[msg_id] = now
+    _ACKED_PHONES[clean_phone] = now
 
-        if len(_ACKED_MESSAGES) > 500:
-            cutoff = now - 60
-            for k in list(_ACKED_MESSAGES.keys()):
-                if _ACKED_MESSAGES[k] < cutoff:
-                    del _ACKED_MESSAGES[k]
+    if len(_ACKED_PHONES) > 500:
+        cutoff = now - 60
+        for k in list(_ACKED_PHONES.keys()):
+            if _ACKED_PHONES[k] < cutoff:
+                del _ACKED_PHONES[k]
 
     text = get_tool_ack_message(tool_name)
+    extra = extra or {}
     remote_jid = extra.get("remote_jid", "")
 
     try:
@@ -153,4 +159,5 @@ async def send_ack(
         phone=phone,
         instance=instance,
         extra=extra,
+        force=True,
     )

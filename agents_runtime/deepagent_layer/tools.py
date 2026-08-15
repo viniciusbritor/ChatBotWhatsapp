@@ -47,7 +47,9 @@ def _fire_ack(tool_name: str, phone: str) -> None:
     try:
         import asyncio
         from pipelines._ack import send_instant_tool_ack
-        asyncio.create_task(send_instant_tool_ack(tool_name=tool_name, phone=phone))
+        from core.runtime_context import get_instance
+        instance = get_instance() or "Jennifer"
+        asyncio.create_task(send_instant_tool_ack(tool_name=tool_name, phone=phone, instance=instance))
     except Exception:
         pass
 
