@@ -139,3 +139,120 @@ async def notify_admin_access_request(
     except Exception as exc:
         logger.warning("Failed to notify admin: %s", exc)
     return False
+
+
+def create_unblock_token(phone: str) -> str:
+    """Gera token assinado via HMAC SHA-256 para desbloqueio/liberação de usuário."""
+    clean_phone = re.sub(r"\D", "", str(phone or ""))
+    secret = _state_secret()
+    if not clean_phone or not secret:
+        return ""
+    payload = {
+        "phone": clean_phone,
+        "action": "unblock_user",
+        "expires_at": int(time.time()) + (7 * 24 * 3600),  # 7 dias
+    }
+    encoded = (
+        base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+        .decode("ascii")
+        .rstrip("=")
+    )
+    sig = hmac.new(secret.encode("utf-8"), encoded.encode("ascii"), hashlib.sha256).hexdigest()
+    return f"{encoded}.{sig}"
+
+
+def parse_unblock_token(token: str) -> Optional[str]:
+    """Valida o token assinado de desbloqueio e retorna o telefone liberado."""
+    secret = _state_secret()
+    if not token or not secret or "." not in token:
+        return None
+    encoded, sig = token.rsplit(".", 1)
+    expected = hmac.new(secret.encode("utf-8"), encoded.encode("ascii"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected):
+        return None
+    try:
+        padded = encoded + "=" * (-len(encoded) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+        if int(payload.get("expires_at", 0)) < int(time.time()):
+            return None
+        if payload.get("action") != "unblock_user":
+            return None
+        return re.sub(r"\D", "", str(payload.get("phone", "")))
+    except Exception as exc:
+        logger.warning("parse_unblock_token failed: %s", exc)
+        return None
+
+
+def generate_unblock_url(phone: str) -> str:
+    """Gera a URL completa de liberacao/desbloqueio para o WhatsApp do Admin."""
+    base = os.getenv(
+        "AGENTS_RUNTIME_PUBLIC_URL",
+        "https://agents-runtime-test-c5nbfc5meq-uc.a.run.app",
+    ).rstrip("/")
+    token = create_unblock_token(phone)
+    clean_phone = re.sub(r"\D", "", str(phone or ""))
+    return f"{base}/admin/unblock-user?phone={clean_phone}&token={token}"
+
+
+async def notify_admin_flood_alert(
+    phone: str,
+    sender_name: str = "",
+    group_name: str = "",
+    burst_count: int = 0,
+    cost_usd: float = 0.0,
+    cost_brl: float = 0.0,
+    instance: str = "Jennifer",
+    text_preview: str = "",
+) -> bool:
+    """Envia alerta de seguranca e FinOps no WhatsApp do Admin quando um ataque/flood e bloqueado."""
+    clean_phone = re.sub(r"\D", "", str(phone or ""))
+    if not clean_phone:
+        return False
+
+    now = time.time()
+    cache_key = f"flood_{clean_phone}"
+    last_notified = _NOTIFIED_PHONES_CACHE.get(cache_key, 0)
+    if (now - last_notified) < NOTIFY_COOLDOWN_SEC:
+        logger.info("Flood alert skipped for %s (cooldown active)", clean_phone)
+        return False
+    _NOTIFIED_PHONES_CACHE[cache_key] = now
+
+    from agent_loader import resolve_owner_phone
+    admin_phone = resolve_owner_phone()
+    if not admin_phone or admin_phone == clean_phone:
+        return False
+
+    unblock_url = generate_unblock_url(clean_phone)
+    name_display = sender_name.strip() if sender_name else "Usuário/Bot"
+    origin_display = f"Grupo: {group_name}" if group_name and not group_name.endswith("@s.whatsapp.net") else "Conversa Privada (DM)"
+    snippet = (text_preview or "").strip().replace("\n", " ")[:120]
+
+    msg = (
+        f"🚨 *ALERTA DE SEGURANÇA & FINOPS — FLOOD / BOT DETECTADO*\n\n"
+        f"Um usuário disparou uma rajada sequencial de mensagens e foi *bloqueado automaticamente* para proteger seus créditos e a estabilidade do sistema.\n\n"
+        f"👤 *Contato:* {name_display}\n"
+        f"📱 *Telefone:* +{clean_phone}\n"
+        f"👥 *Origem:* {origin_display}\n"
+        f"📊 *Mensagens na Rajada:* {burst_count} mensagens\n"
+        f"💰 *Custo Estimado Gerado:* {cost_usd:.4f} USD (~{cost_brl:.2f} reais)\n"
+        f"💬 *Última Mensagem:* \"{snippet}\"\n"
+        f"⚙️ *Instância:* {instance}\n\n"
+        f"A Jennifer parou de responder a este contato imediatamente.\n"
+        f"Para *liberar o usuário* a voltar a interagir, clique no link:\n"
+        f"👉 {unblock_url}"
+    )
+
+    try:
+        from core.evolution_client import send_text
+        success = await send_text(
+            phone=admin_phone,
+            text=msg,
+            instance=instance,
+        )
+        if success:
+            logger.info("Admin notified of flood attack from %s", clean_phone)
+            return True
+    except Exception as exc:
+        logger.warning("Failed to notify admin of flood attack: %s", exc)
+    return False
+

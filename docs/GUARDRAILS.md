@@ -27,6 +27,16 @@
   2. **Supressão de Texto Redundante:** Sempre que uma mídia/imagem com legenda for enviada com sucesso para o WhatsApp (`send_image`), o orquestrador DEVE marcar `delivered_as_image: True` e suprimir o envio posterior via `send_text` no `main.py`.
   3. **Deduplicação de Borda no Cliente:** `core/evolution_client.py::send_text` deve manter uma janela deslizante (4 segundos) que descarta envios consecutivos de mensagens idênticas para o mesmo número/grupo.
 
+### §0.6 — Proteção Anti-Flood, Anti-DDoS e Bloqueio de Custos Abusivos (FinOps Shield)
+- **Regra:** Em grupos ou conversas privadas (DM), o sistema DEVE interromper imediatamente o atendimento a qualquer usuário ou bot que envie rajadas de mensagens sequenciais abusivas para evitar esgotamento de créditos e sobrecarga de CPU.
+- **Ações Obrigatórias:**
+  1. **Sliding Window:** Se um contato enviar mais de 5 mensagens em 60s (ou 10 em 180s), ele entra automaticamente em quarentena (`is_quarantined = True`).
+  2. **Circuit Breaker:** Novas mensagens de usuários em quarentena são descartadas na borda (`/webhook` e `/pubsub/push`), sem invocar LLMs (zero custo).
+  3. **Alerta FinOps no WhatsApp do Admin:** Disparar notificação imediata para o Admin (`5511966830020`) com o custo acumulado em USD e reais (`estimate_cost_usd`), quantidade de mensagens e link assinado de desbloqueio em 1 clique.
+  4. **Painel de Controle:** Disponibilizar no Portal Omnichannel (`FinOpsView.tsx`) visualização de custos e opção de bloqueio/desbloqueio manual de usuários.
+
+
+
 
 
 ## Ǥ. Harness Global DeepSeek v4 (Flash e Pro) — QUEBRA SILENCIOSA

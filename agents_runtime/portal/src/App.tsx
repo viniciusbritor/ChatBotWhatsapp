@@ -26,7 +26,9 @@ import { OwnersView } from './components/views/OwnersView';
 import { IntegrationsView } from './components/views/IntegrationsView';
 import { ConnectionsView } from './components/views/ConnectionsView';
 import { KnowledgeView } from './components/views/KnowledgeView';
+import { FinOpsView } from './components/views/FinOpsView';
 import { StatusView } from './components/views/StatusView';
+
 
 import { EditPromptModal } from './components/modals/EditPromptModal';
 import { TestToolModal } from './components/modals/TestToolModal';
@@ -548,9 +550,17 @@ export default function App() {
             />
           )}
 
+          {activeTab === 'finops' && (
+            <FinOpsView
+              currentUser={currentUser}
+              searchQuery={searchQuery}
+            />
+          )}
+
           {activeTab === 'status' && (
             <StatusView metrics={statusMetrics} searchQuery={searchQuery} />
           )}
+
         </main>
       </div>
 

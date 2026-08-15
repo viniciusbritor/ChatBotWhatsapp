@@ -1,3 +1,25 @@
+## 15/08/2026 (07:05 BRT) — Implementação do Anti-Flood, Anti-DDoS, FinOps Shield & Painel de Custos Omnichannel
+
+### Contexto & Motivação
+Para proteger o ecossistema contra ataques de flood, bots maliciosos e usuários tentando derrubar o serviço ou exaurir créditos de LLM via rajadas de mensagens no WhatsApp (em DMs ou grupos), foi desenvolvido um mecanismo completo de segurança e controle de custos (FinOps Shield).
+
+### Soluções Implementadas
+1. **Engine de Rate Limiting & Sliding Window (`core/flood_protection.py`)**:
+   - Monitora janelas de tempo (5 mensagens em 60s ou 10 em 180s).
+   - Aciona quarentena automática (`is_quarantined = True`) com circuit breaker na borda (`/webhook` e `/pubsub/push`), descartando mensagens antes de invocar LLMs (zero custo).
+   - Registra métricas de uso de tokens e custo acumulado estimado (`estimate_cost_usd` e conversão em BRL) por usuário e grupo.
+2. **Notificação de 1 Clique no WhatsApp do Admin (`core/admin_notify.py`)**:
+   - Dispara alerta imediato no WhatsApp do Admin (`5511966830020`) com o custo acumulado em USD e reais, total de mensagens e link assinado com HMAC SHA-256 (`/admin/unblock-user?phone=...&token=...`) para liberação em 1 clique sem login.
+3. **Endpoint de Liberação Rápida (`main.py`)**:
+   - `GET /admin/unblock-user` e `POST /admin/users/{phone}/unblock` validam o token e liberam o usuário com tela personalizada Coherence AI.
+4. **Painel de Monitoramento & FinOps no Portal (`portal/src/components/views/FinOpsView.tsx`)**:
+   - Nova aba "FinOps & Custos" no Portal Omnichannel com métricas agregadas, tabela de gastos por usuário e grupo, quantidade de tokens/mensagens e botão de bloqueio/desbloqueio manual.
+
+### Validação & Testes
+- Suíte `tests/test_flood_protection.py` (8 testes, 100% verde).
+- Testes de FinOps e PubSub (`test_pricing.py`, `test_main_pubsub.py`, `test_pubsub_consumer.py` — 33 testes passing).
+- Build do portal Vite/TypeScript compilado com sucesso (`✓ built in 18.88s`).
+
 ## 15/08/2026 (04:00 BRT) — Fix Definitivo de Idempotência Pub/Sub e Eliminação de Respostas Concorrentes
 
 ### Contexto & Causa-Raiz

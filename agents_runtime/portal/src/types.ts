@@ -7,7 +7,9 @@ export type NavigationTab =
   | 'integracoes'
   | 'conexoes'
   | 'conhecimento'
+  | 'finops'
   | 'status';
+
 
 export interface WhatsAppAccount {
   id: string;

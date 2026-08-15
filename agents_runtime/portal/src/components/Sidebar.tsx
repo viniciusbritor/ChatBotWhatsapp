@@ -27,8 +27,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'integracoes', label: 'Integrações', icon: 'settings_input_component' },
     { id: 'conexoes', label: 'Conexões', icon: 'hub' },
     { id: 'conhecimento', label: 'Conhecimento', icon: 'menu_book' },
+    { id: 'finops', label: 'FinOps & Custos', icon: 'payments' },
     { id: 'status', label: 'Status', icon: 'signal_cellular_alt' }
   ];
+
 
   const visibleNavItems = currentUser && !currentUser.isAdmin
     ? navItems.filter((item) => {

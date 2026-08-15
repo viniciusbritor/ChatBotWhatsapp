@@ -2183,6 +2183,14 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
             "orchestration_timing instance=%s phone=%s total_ms=%d",
             instance, phone, _elapsed,
         )
+        try:
+            from core.flood_protection import record_usage_metrics
+            tracker = current_tracker()
+            costs = tracker.costs() if tracker else {}
+            remote_jid = payload.get("remote_jid") or extra.get("remote_jid", "")
+            record_usage_metrics(phone=phone, group_id=remote_jid, instance=instance, costs=costs)
+        except Exception as exc:
+            logger.debug("record_usage_metrics in orchestrate finally failed: %s", exc)
     return result
 
 
@@ -2191,6 +2199,43 @@ async def _orchestrate_inner(payload: Dict[str, Any], instance: str, phone: str,
     _tracker = new_tracker()
     set_current_tracker(_tracker)
     _tracker.add_costs(deepseek_input_tokens=0, deepseek_output_tokens=0)
+
+    # ========================
+    # ANTI-FLOOD / ANTI-DDOS / FINOPS SHIELD
+    # ========================
+    from core.flood_protection import check_and_record_message
+    remote_jid = payload.get("remote_jid") or extra.get("remote_jid", "")
+    group_name = extra.get("group_name", "")
+    is_blocked, flood_details = check_and_record_message(
+        phone=phone,
+        group_id=remote_jid,
+        instance=instance,
+        text=text,
+    )
+    if is_blocked:
+        if flood_details.get("quarantined"):
+            from core.admin_notify import notify_admin_flood_alert
+            asyncio.create_task(
+                notify_admin_flood_alert(
+                    phone=phone,
+                    sender_name=sender_name or phone,
+                    group_name=group_name or remote_jid,
+                    burst_count=flood_details.get("burst_count", 0),
+                    cost_usd=flood_details.get("estimated_cost_usd", 0.0),
+                    cost_brl=flood_details.get("estimated_cost_brl", 0.0),
+                    instance=instance,
+                    text_preview=text,
+                )
+            )
+        logger.warning("Message suppressed by flood protection phone=%s group=%s", phone, remote_jid)
+        return {
+            "reply": "",
+            "presence": "paused",
+            "metadata": {
+                "quarantined": True,
+                "error": "flood_protection_triggered",
+            },
+        }
 
     cache_key = _idempotency_key(payload)
     if cache_key and cache_key in _response_cache:
@@ -2210,6 +2255,7 @@ async def _orchestrate_inner(payload: Dict[str, Any], instance: str, phone: str,
 
     chat_context = await _get_context_for_prompt(phone, limit=10)
     payload["chat_context"] = chat_context
+
 
     # ========================
     # PENDING ACTIONS (pre-routing)

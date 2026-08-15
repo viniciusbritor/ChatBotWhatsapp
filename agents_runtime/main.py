@@ -352,6 +352,13 @@ async def evolution_webhook(request: Request):
 
     resolve_message_id(envelope)
     message_id = envelope["message_id"]
+    phone = envelope.get("phone", "")
+
+    from core.flood_protection import is_user_quarantined
+    if phone and is_user_quarantined(phone):
+        logger.info("webhook_ignored_quarantined phone=%s message_id=%s", phone, message_id)
+        return JSONResponse(content={"status": "ignored", "reason": "quarantined"})
+
     ledger_snapshot = register_or_load(message_id, {"payload": envelope, **envelope})
     if ledger_snapshot and ledger_snapshot.get("state") in {"response_ready", "delivered", "failed_terminal"}:
         _schedule_mark_read(envelope)
@@ -578,6 +585,12 @@ async def pubsub_push(request: Request):
     async def _process(p: Dict[str, Any]) -> Dict[str, Any]:
         from core.evolution_client import send_text
         from core.audio_pipeline import transcribe_envelope_audio
+        from core.flood_protection import is_user_quarantined
+
+        phone = p.get("phone", "")
+        if phone and is_user_quarantined(phone):
+            logger.info("pubsub_process_ignored_quarantined phone=%s", phone)
+            return {"reply": "", "delay_ms": 0, "presence": "paused", "metadata": {"quarantined": True}}
 
         result = None
         if (p.get("extra") or {}).get("has_audio"):
@@ -1892,6 +1905,140 @@ async def admin_approve_user(
 </body>
 </html>"""
     return HTMLResponse(content=html_content)
+
+
+@app.api_route("/admin/unblock-user", methods=["GET", "POST"])
+async def admin_unblock_user(
+    request: Request,
+    phone: str = "",
+    token: str = "",
+):
+    """Desbloqueia usuário colocado em quarentena por flood/segurança com 1 clique."""
+    from core.admin_notify import parse_unblock_token
+    from core.flood_protection import unquarantine_user, get_user_finops_metrics
+    from agent_loader import _canonical_phone
+    from core.auth import resolve_caller_profile
+
+    if request.method == "POST":
+        try:
+            body_bytes = await request.body()
+            if body_bytes:
+                import urllib.parse
+                import json
+                body_str = body_bytes.decode("utf-8", errors="ignore")
+                parsed_qs = urllib.parse.parse_qs(body_str)
+                if "token" in parsed_qs:
+                    token = parsed_qs["token"][0]
+                if "phone" in parsed_qs:
+                    phone = parsed_qs["phone"][0]
+                if not token and body_str.startswith("{"):
+                    json_data = json.loads(body_str)
+                    token = json_data.get("token", token)
+                    phone = json_data.get("phone", phone)
+        except Exception:
+            pass
+
+    if not token:
+        token = request.query_params.get("token", "")
+    if not phone:
+        phone = request.query_params.get("phone", "")
+
+    unblocked_phone = parse_unblock_token(token)
+    if not unblocked_phone:
+        try:
+            caller = resolve_caller_profile(request)
+            if caller.get("is_admin") and phone:
+                unblocked_phone = _canonical_phone(phone)
+        except Exception:
+            pass
+
+    if not unblocked_phone:
+        return HTMLResponse(
+            content="""<!DOCTYPE html><html><body style="background:#0f172a;color:#ef4444;font-family:sans-serif;text-align:center;padding:40px;">
+            <h2>Link de Liberação Inválido ou Expirado</h2><p>Solicite um novo link ou desbloqueie o usuário diretamente no painel FinOps do administrador.</p>
+            </body></html>""",
+            status_code=400,
+        )
+
+    canonical = _canonical_phone(unblocked_phone)
+    success = unquarantine_user(canonical)
+    metrics = get_user_finops_metrics(canonical)
+    display_name = metrics.get("name", f"+{canonical}")
+
+    html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Usuário Liberado | Coherence AI</title>
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }}
+    .card {{ background: #1e293b; border: 1px solid #334155; border-radius: 24px; padding: 36px 28px; max-width: 440px; width: 100%; text-align: center; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }}
+    .icon {{ width: 68px; height: 68px; background: rgba(16,185,129,0.15); border: 2px solid #10b981; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 34px; color: #10b981; }}
+    h1 {{ font-size: 22px; margin: 0 0 10px; color: #fff; font-weight: 700; }}
+    p {{ font-size: 14px; color: #94a3b8; line-height: 1.6; margin: 0 0 24px; }}
+    .badge {{ display: inline-block; background: #10b981; color: white; font-weight: 600; padding: 6px 16px; border-radius: 20px; font-size: 13px; margin-bottom: 20px; letter-spacing: 0.5px; }}
+    .btn {{ display: block; background: #2563eb; color: white; text-decoration: none; font-weight: 600; padding: 14px 24px; border-radius: 12px; transition: background 0.2s; }}
+    .btn:hover {{ background: #1d4ed8; }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">✓</div>
+    <div class="badge">Usuário Liberado</div>
+    <h1>Jennifer Desbloqueada com Sucesso!</h1>
+    <p>O usuário <strong>{display_name} (+{canonical})</strong> foi liberado.<br>A Jennifer voltará a responder às mensagens e comandos normalmente.</p>
+    <a href="/admin" class="btn">Abrir Painel Omnichannel</a>
+  </div>
+</body>
+</html>"""
+    return HTMLResponse(content=html_content)
+
+
+@app.get("/admin/finops/overview")
+async def admin_finops_overview(request: Request, instance: str = ""):
+    """Retorna visão geral de custos, mensagens e usuários para o painel FinOps."""
+    from core.auth import resolve_caller_profile
+    from core.flood_protection import get_all_finops_overview
+
+    caller = resolve_caller_profile(request)
+    if not caller.get("is_admin"):
+        raise HTTPException(status_code=403, detail="admin_only")
+
+    overview = get_all_finops_overview(instance=instance)
+    return JSONResponse(content=overview)
+
+
+@app.post("/admin/users/{phone}/unblock")
+async def admin_user_unblock_api(phone: str, request: Request):
+    """Desbloqueia um usuário manualmente pelo painel."""
+    from core.auth import resolve_caller_profile
+    from core.flood_protection import unquarantine_user
+    from agent_loader import _canonical_phone
+
+    caller = resolve_caller_profile(request)
+    if not caller.get("is_admin"):
+        raise HTTPException(status_code=403, detail="admin_only")
+
+    canonical = _canonical_phone(phone)
+    success = unquarantine_user(canonical)
+    return JSONResponse(content={"status": "ok", "unblocked": success, "phone": canonical})
+
+
+@app.post("/admin/users/{phone}/block")
+async def admin_user_block_api(phone: str, request: Request):
+    """Bloqueia/coloca um usuário em quarentena manualmente pelo painel."""
+    from core.auth import resolve_caller_profile
+    from core.flood_protection import quarantine_user
+    from agent_loader import _canonical_phone
+
+    caller = resolve_caller_profile(request)
+    if not caller.get("is_admin"):
+        raise HTTPException(status_code=403, detail="admin_only")
+
+    canonical = _canonical_phone(phone)
+    quarantine_user(canonical, reason="admin_manual_block")
+    return JSONResponse(content={"status": "ok", "blocked": True, "phone": canonical})
 
 
 @app.post("/admin/me/phone")
