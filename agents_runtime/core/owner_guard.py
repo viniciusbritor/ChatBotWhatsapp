@@ -244,7 +244,6 @@ async def _invoke_with_guard(
                     f for f in result["files"]
                     if not isinstance(f, dict)
                     or any(p in " ".join(str(f.get(k, "")) for k in ("name", "id", "parent_id", "parents")) for p in allowed)
-                    or not _extract_patterns_for_capability(capability, kwargs)
                 ]
                 result = {**result, "files": filtered, "count": len(filtered)}
             elif "messages" in result and isinstance(result["messages"], list):
@@ -252,7 +251,6 @@ async def _invoke_with_guard(
                     m for m in result["messages"]
                     if not isinstance(m, dict)
                     or any(p in " ".join(str(m.get(k, "")) for k in ("from", "subject", "to")) for p in allowed)
-                    or not _extract_patterns_for_capability(capability, kwargs)
                 ]
                 result = {**result, "messages": filtered, "count": len(filtered)}
     except Exception as exc:
@@ -291,31 +289,10 @@ async def post_filter_tool_result(
         if tool not in {"drive", "gmail"}:
             return result
         from core.folder_permissions import get_user_allowed_tools
-
-        # 1. Multi-tenant / Per-user OAuth bypass: não filtra dados de quem tem OAuth próprio
-        from core.oauth_per_user import get_user_oauth as _guo
-        _tok = _guo(phone)
-        if _tok and _tok.get("scopes"):
-            return result
-
-        # 2. Owner bypass: não filtra resultados do proprietário
-        from agent_loader import resolve_owner_phone
-        if phone and phone == resolve_owner_phone():
-            return result
-
-        from core.runtime_context import get_instance as _rti2
-        from core.owner import resolve_owner as _ro2
-        _inst2 = _rti2() or str(kwargs.get("instance") or kwargs.get("_instance") or "")
-        if _inst2:
-            _res2 = _ro2(_inst2, fallback_phone=phone)
-            if _res2 and _res2.owner_phone == phone:
-                return result
-
         allowed = get_user_allowed_tools(phone).get(tool, [])
-        if not allowed:
-            return {**result, "files": [], "count": 0} if "files" in result else (
-                {**result, "messages": [], "count": 0} if "messages" in result else result
-            )
+        if not allowed or "*" in allowed:
+            # Sem whitelist restritiva configurada ou com wildcard * -> acesso total
+            return result
 
         def _drive_match(f: Any) -> bool:
             if not isinstance(f, dict):

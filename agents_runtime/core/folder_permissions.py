@@ -51,9 +51,7 @@ def _get_firestore_client():
     try:
         from google.cloud import firestore
 
-        project = os.getenv("GCP_PROJECT") or os.getenv("GCLOUD_PROJECT")
-        if not project or os.getenv("FIRESTORE_EMULATOR_HOST"):
-            return None
+        project = os.getenv("GCP_PROJECT") or os.getenv("GCLOUD_PROJECT") or "coherence-ominichannel-fs"
         return firestore.Client(project=project)
     except Exception as exc:
         logger.warning("folder_permissions firestore unavailable: %s", exc)
