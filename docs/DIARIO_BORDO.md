@@ -1,3 +1,19 @@
+## 15/08/2026 (00:45 BRT) — Implementação do Guardrail Anti-Duplicação (Impedir Envio Duplo em Formatos Distintos)
+
+### Contexto & Causa-Raiz
+1. **Envio Duplo em Formatos Distintos (Imagem + Texto Puro)**:
+   - Ao executar buscas (Gmail, Calendar, Drive), a função `orchestrator._detect_tabular_payload` identificava a estrutura tabular e o recurso de relatórios visuais gerava uma imagem PNG via `_auto_send_image` e a despachava com o texto completo como legenda (`caption`).
+   - Imediatamente após, o handler `/pubsub/push` em `main.py` recebia o retorno do `orchestrate()` e executava `send_text()` com o mesmo conteúdo de texto, fazendo o usuário receber a mesma informação duas vezes consecutivas no WhatsApp (1ª como Imagem com Legenda, 2ª como Mensagem de Texto pura).
+
+### Soluções Implementadas & Guardrails Estabelecidos
+- **Guardrail §0.5 — Anti-Duplicação**:
+  1. **Opt-in Estrito para Relatórios Visuais**: A geração de imagens PNG agora ocorre exclusivamente quando o usuário pedir explicitamente (`_user_requested_image`: *"em tabela"*, *"como imagem"*, *"em gráfico"*, *"em png"*). `IMAGE_REPORT_AUTO` passa a ter default `false`.
+  2. **Supressão de Envio Textual Redundante**: Quando `_auto_send_image` entrega uma imagem com legenda, o orquestrador sinaliza `delivered_as_image: True` e limpa `result["reply"] = ""`. O `main.py` verifica a flag e não dispara `send_text()`.
+  3. **Deduplicação de Borda no Cliente (`core/evolution_client.py`)**: `send_text` implementa uma janela deslizante (4 segundos) que descarta chamadas idênticas consecutivas destinadas ao mesmo número/grupo.
+
+### Validação e Testes
+- **Testes Unitários**: 25/25 testes em `test_image_report_auto.py` e 112/112 testes em `tests/pipelines/` 100% aprovados.
+
 ## 15/08/2026 (00:15 BRT) — Correção Definitiva de Busca no Gmail, Unificação de ACKs e Eliminação de Loops
 
 ### Contexto & Causa-Raiz

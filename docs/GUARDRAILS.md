@@ -20,6 +20,13 @@
 ### §0.4 — Desativação Total de Workers Proativos
 - **Regra:** O `proactive_worker` deve permanecer estritamente desativado (`PROACTIVE_DISABLED: "true"`). Nenhuma rotina em cron ou Cloud Scheduler deve invocar LLMs em background sem uma mensagem explícita do usuário.
 
+### §0.5 — Guardrail Anti-Duplicação (Proibição de Envio Duplo em Formatos Distintos)
+- **Regra:** É **TERMINANTEMENTE PROIBIDO** enviar a mesma resposta ou dados em dois formatos diferentes no mesmo turno (ex: enviar uma imagem renderizada com legenda e, logo em seguida, enviar uma mensagem de texto simples com o mesmo conteúdo).
+- **Ações Obrigatórias:**
+  1. **Opt-in de Imagens:** O pipeline NÃO deve gerar imagens de tabelas automaticamente para consultas gerais. Imagens (`_auto_send_image`) só devem ser geradas quando o usuário pedir **explicitamente** (ex: *"em tabela"*, *"como imagem"*, *"em gráfico"*, *"como print"*, *"em png"*).
+  2. **Supressão de Texto Redundante:** Sempre que uma mídia/imagem com legenda for enviada com sucesso para o WhatsApp (`send_image`), o orquestrador DEVE marcar `delivered_as_image: True` e suprimir o envio posterior via `send_text` no `main.py`.
+  3. **Deduplicação de Borda no Cliente:** `core/evolution_client.py::send_text` deve manter uma janela deslizante (4 segundos) que descarta envios consecutivos de mensagens idênticas para o mesmo número/grupo.
+
 
 
 ## Ǥ. Harness Global DeepSeek v4 (Flash e Pro) — QUEBRA SILENCIOSA
