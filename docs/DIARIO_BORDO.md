@@ -1,3 +1,19 @@
+## 15/08/2026 (04:00 BRT) — Fix Definitivo de Idempotência Pub/Sub e Eliminação de Respostas Concorrentes
+
+### Contexto & Causa-Raiz
+Durante testes ativos no WhatsApp, foi observada duplicação de respostas com variações leves de texto (ex: buscas no Drive gerando 2 respostas simultâneas) e consumo triplicado de tokens. Investigação nos logs do Cloud Run revelou duas causas-raiz:
+1. **Erro 400 no Firestore em `mark_response` (`core/message_ledger.py`):** O objeto retornado pela orquestração continha estruturas não serializáveis / binárias que causavam falha na gravação do estado `response_ready`. Com isso, retentativas do Pub/Sub continuavam considerando a mensagem pendente e reinvocavam o orquestrador do zero (3x chamadas DeepSeek).
+2. **Brecha de Concorrência em `pubsub_dispatcher.py`:** Quando duas requisições chegavam quase no mesmo instante da Evolution API, `claim()` retornava `None` para a segunda instância, mas o fallback executava `handler(envelope)` em paralelo.
+
+### Soluções Implementadas
+- **Sanitização de Retorno (`core/message_ledger.py`):** Criada a função `_sanitize_reply_for_firestore` que filtra bytes e normaliza dicionários antes de persistir no Firestore, garantindo sucesso imediato de `mark_response`.
+- **Trava Estrita de Idempotência (`core/pubsub_dispatcher.py`):** Eliminação do fallback permissivo; se `claim` retorna ocupado (`None`), a requisição secundária é abortada imediatamente com `status: lease_busy` ou `duplicate`.
+- **Ajuste de Acks em Anexos (`orchestrator.py`):** ACK de memorização movido para após a validação de extração de texto, evitando envio de promessa falsa seguido de erro imediato.
+
+### Validação
+- Suíte de 16 testes em `tests/test_main_pubsub.py` e `tests/test_pubsub_consumer.py` passando (100% verde).
+- Deploy realizado no Cloud Run via Cloud Build (`3144bf02` -> Revisão `agents-runtime-test-00458-x2s` ativa).
+
 ## 15/08/2026 (02:30 BRT) — Sanitizacao de LIDs de Pessoas + Acks Consolidados + Filtro de Curriculo Padrao
 
 ### Contexto & Causa-Raiz
