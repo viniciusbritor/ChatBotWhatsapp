@@ -1,33 +1,26 @@
-"""LangChain 1.x tool wrappers for Google Calendar, Gmail, Drive, and Web search.
+"""LangChain `@tool` wrappers for DeepAgent Manager specialists.
 
-Each function is wrapped with the LangChain ``@tool`` decorator (via
-``langchain_adapter``) so that DeepAgents (built on LangGraph 1.x) can
-call them as native tools. The underlying business logic stays in
-``tools/google_*.py`` and the owner guard is preserved.
+Exposes tools for:
+- manager-calendar: list_calendar_events, create_calendar_event, calendar_freebusy
+- manager-email: search_gmail, get_gmail_thread, send_gmail
+- manager-drive: search_drive_files, list_drive_folder, create_drive_folder,
+  read_drive_file_content, deep_search_drive_files
+- manager-group-rag: index_group_document, search_group_knowledge
+- manager-web: web_search_tool
 
-Fase M (25/07/2026): langchain 0.3 -> 1.4 + deepagents 0.6.12.
+Auth is handled at runtime via per-user OAuth tokens (Fase D).
 """
 from __future__ import annotations
 
 import logging
 from typing import Any, Dict, List, Optional
 
-from langchain_adapter import tool
+from langchain_core.tools import tool
 
 logger = logging.getLogger(__name__)
 
 
 def _build_langchain_tools_for(manager_id: str) -> List[Any]:
-    """Build the LangChain tool list for a given manager.
-
-    Returns the list of wrapped tools. Each tool is a
-    ``langchain_core.tools.BaseTool`` instance that can be passed directly
-    to ``create_deep_agent``.
-
-    Args:
-        manager_id: One of ``manager-calendar``, ``manager-email``,
-            ``manager-drive``, ``manager-web``. Other values return [].
-    """
     if manager_id == "manager-calendar":
         return _build_calendar_tools()
     if manager_id == "manager-email":
@@ -40,18 +33,6 @@ def _build_langchain_tools_for(manager_id: str) -> List[Any]:
         return _build_web_tools()
     logger.warning("unknown manager_id=%s", manager_id)
     return []
-
-
-def _fire_ack(tool_name: str, phone: str) -> None:
-    """Dispara mensagem instantânea de busca no WhatsApp antes de executar a API."""
-    try:
-        import asyncio
-        from pipelines._ack import send_instant_tool_ack
-        from core.runtime_context import get_instance
-        instance = get_instance() or "Jennifer"
-        asyncio.create_task(send_instant_tool_ack(tool_name=tool_name, phone=phone, instance=instance))
-    except Exception:
-        pass
 
 
 def _build_calendar_tools() -> List[Any]:
@@ -72,7 +53,6 @@ def _build_calendar_tools() -> List[Any]:
             time_max: End of the time window in ISO 8601.
             max_results: Maximum number of events to return. Default 50.
         """
-        _fire_ack("calendar", phone)
         return await google_calendar.list_events(
             phone=phone,
             time_min=time_min,
@@ -99,7 +79,6 @@ def _build_calendar_tools() -> List[Any]:
             description: Optional event description.
             location: Optional event location.
         """
-        _fire_ack("create_calendar_event", phone)
         return await google_calendar.create_event(
             phone=phone,
             start=start,
@@ -122,7 +101,6 @@ def _build_calendar_tools() -> List[Any]:
             time_min: Start of the time window in ISO 8601.
             time_max: End of the time window in ISO 8601.
         """
-        _fire_ack("calendar_freebusy", phone)
         return await google_calendar.freebusy(
             phone=phone,
             time_min=time_min,
@@ -148,7 +126,6 @@ def _build_email_tools() -> List[Any]:
             query: Gmail search query (e.g. "in:inbox newer_than:30d", "from:user@example.com").
             max_results: Maximum number of messages to return. Default 10.
         """
-        _fire_ack("email", phone)
         return await google_gmail.search_messages(
             phone=phone,
             query=query,
@@ -166,7 +143,6 @@ def _build_email_tools() -> List[Any]:
             phone: User phone for per-user OAuth.
             thread_id: Gmail thread ID.
         """
-        _fire_ack("get_message", phone)
         return await google_gmail.get_thread(
             phone=phone,
             thread_id=thread_id,
@@ -189,7 +165,6 @@ def _build_email_tools() -> List[Any]:
             body: Email body (plain text).
             thread_id: Optional Gmail thread ID to reply into.
         """
-        _fire_ack("send_email", phone)
         return await google_gmail.send_message(
             phone=phone,
             to=to,
@@ -217,7 +192,6 @@ def _build_drive_tools() -> List[Any]:
             query: Free-text search query.
             max_results: Maximum number of files to return. Default 20.
         """
-        _fire_ack("drive", phone)
         return await google_drive.search_files(
             phone=phone,
             query=query,
@@ -235,7 +209,6 @@ def _build_drive_tools() -> List[Any]:
             phone: User phone for per-user OAuth.
             folder_id: Google Drive folder ID.
         """
-        _fire_ack("drive", phone)
         return await google_drive.list_folder(
             phone=phone,
             folder_id=folder_id,
@@ -252,7 +225,6 @@ def _build_drive_tools() -> List[Any]:
             phone: User phone for per-user OAuth.
             name: Folder name.
         """
-        _fire_ack("drive", phone)
         return await google_drive.create_folder(
             phone=phone,
             name=name,
@@ -286,7 +258,6 @@ def _build_drive_tools() -> List[Any]:
             Dict with file_id, file_name, mime_type, content (extracted text),
             truncated (bool), parser (which parser was used).
         """
-        _fire_ack("read_file_content", phone)
         return await google_drive.read_file_content(
             phone=phone,
             file_id=file_id,
@@ -326,7 +297,6 @@ def _build_drive_tools() -> List[Any]:
         Returns:
             Dict with files, count, scanned_folders, max_depth_reached.
         """
-        _fire_ack("drive", phone)
         return await google_drive.deep_search_drive(
             phone=phone,
             query=query,
@@ -369,7 +339,6 @@ def _build_group_rag_tools() -> List[Any]:
             source_name: Original file name.
             force_overwrite: Set True if user confirmed overwriting existing doc.
         """
-        _fire_ack("rag", phone)
         return await group.index_group_document(
             phone=phone, group_jid=group_jid, text=text,
             visibility=visibility, source_name=source_name,
@@ -395,7 +364,6 @@ def _build_group_rag_tools() -> List[Any]:
             query: Search text.
             limit: Max results (default 5).
         """
-        _fire_ack("rag", phone)
         return await group.search_group_knowledge(
             group_jid=group_jid, query=query, limit=limit, phone=phone,
         )
@@ -417,7 +385,6 @@ def _build_web_tools() -> List[Any]:
             query: Search query.
             max_results: Maximum number of results. Default 5.
         """
-        _fire_ack("web", "")
         return await web_search.search(query=query, max_results=max_results)
 
     return [web_search_tool]
