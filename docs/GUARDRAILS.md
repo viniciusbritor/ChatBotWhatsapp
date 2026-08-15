@@ -35,12 +35,14 @@
   3. **Alerta FinOps no WhatsApp do Admin:** Disparar notificação imediata para o Admin (`5511966830020`) com o custo acumulado em USD e reais (`estimate_cost_usd`), quantidade de mensagens e link assinado de desbloqueio em 1 clique.
   4. **Painel de Controle:** Disponibilizar no Portal Omnichannel (`FinOpsView.tsx`) visualização de custos e opção de bloqueio/desbloqueio manual de usuários.
 
-### §0.7 — Fluxo Obrigatório de Branch, CI/CD e Merge para Deploy
-- **Regra:** Todo desenvolvimento e correção de bugs DEVE OBRIGATORIAMENTE seguir o fluxo estruturado de branches antes do deploy em produção/staging:
-  1. **Criação de Branch:** Criar uma branch temática (ex: `feat/...` ou `fix/...`) a partir do branch base.
-  2. **Commit e Push:** Realizar o commit dos arquivos modificados e testes, e fazer o push para o repositório remoto (`git push origin <branch>`).
-  3. **Merge e CI/CD:** Realizar o merge da branch para o branch de destino (`test` ou `main`), disparando a esteira automatizada do Cloud Build.
-  4. **Proibição:** É proibido aplicar mudanças diretas em produção sem criar a branch de trabalho e validar a esteira.
+### §0.7 — Fluxo Obrigatório de Branch, Pull Request e Merge Remoto no GitHub (CI/CD)
+- **Regra:** É **TERMINANTEMENTE PROIBIDO** fazer merge local direto na máquina de desenvolvimento e dar push direto em `test` ou `main`. Todo merge que dispara deploy DEVE OBRIGATORIAMENTE ocorrer **dentro do repositório remoto no GitHub** via Pull Request (PR):
+  1. **Criação de Branch:** Criar uma branch de trabalho local (`git checkout -b feat/...` ou `fix/...`).
+  2. **Commit e Push:** Realizar o commit das alterações e testes, e fazer o push da branch para o GitHub (`git push -u origin <branch>`).
+  3. **Abertura de Pull Request:** Abrir o PR no GitHub apontando para o branch alvo (`gh pr create --base test --head <branch> --title "..." --body "..."`).
+  4. **Merge Remoto no GitHub:** Realizar o merge do PR via GitHub CLI (`gh pr merge --merge --auto` ou `gh pr merge --merge --delete-branch`) ou pela interface web do GitHub, o que acionará o trigger do Cloud Build.
+  5. **Sincronização Local:** Trocar para a branch base e sincronizar (`git checkout test && git pull origin test`).
+
 
 ### §0.8 — Escopo Exclusivo de Secretária Executiva e Foco Anti-Uso Genérico em Grupos
 - **Regra:** A Jennifer atua estritamente como Secretária Executiva e Assistente Corporativa (Agenda, E-mails, Documentos/Drive, Atas, Tarefas e Base de Conhecimento). Em grupos de WhatsApp, ela NÃO deve responder dúvidas enciclopédicas de conhecimentos gerais, lições de casa, questões escolares ou curiosidades aleatórias (ex: teoria da evolução, trigonometria, matemática escolar, cotação/origem de bitcoin, piadas).
