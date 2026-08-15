@@ -1384,6 +1384,28 @@ async def _prefetch_drive(phone: str, query_text: str = "", instance: str = "") 
         files = result.get("files", [])
         if not files:
             return None
+        # FIX (15/08/2026): aplicar o filtro de curriculo_padrao tambem no
+        # prefetch para manter consistencia com a tool search_drive_files
+        # (do DeepAgent). Sem isso, o prefetch retorna 3 arquivos enquanto a
+        # tool prioriza 1, gerando inconsistencias no prompt do LLM.
+        try:
+            from tools.memory import get_fact_by_key
+            default_filename = await get_fact_by_key("curriculo_padrao", phone)
+            if default_filename:
+                query_norm = (query_text or "").strip().lower()
+                if any(kw in query_norm for kw in ("curriculo", "currículo", "resum", "cv ")):
+                    prioritized, others = [], []
+                    default_norm = default_filename.strip().lower()
+                    for f in files:
+                        fname = str(f.get("name") or "").strip().lower()
+                        if fname == default_norm:
+                            prioritized.append(f)
+                        else:
+                            others.append(f)
+                    if prioritized:
+                        files = prioritized + others
+        except Exception as exc:
+            logger.debug("prefetch_curriculo_filter_skipped: %s", exc)
         return json.dumps(files, ensure_ascii=False, indent=2)
     except Exception as e:
         logger.warning(f"Prefetch drive failed: {e}")
@@ -2062,7 +2084,14 @@ async def _classify_intent_llm(text: str) -> str:
     from core.secrets import get_secret
 
     valid = {"juridicas", "editais", "academica", "anotacoes", "ferramentas", "conversa"}
-    prompt = _CLASSIFIER_PROMPT.format(text=text[:500])
+    # FIX (15/08/2026): garantir que o texto com acentuacao PT-BR nao quebre
+    # o encode ASCII no cliente httpx/OpenAI para Groq. Forcar ASCII-safe
+    # via transliteracao (unidecode fallback para caracteres que httpx
+    # nao consegue serializar em UTF-8).
+    import unicodedata
+    text_nfkd = unicodedata.normalize("NFKD", text[:500])
+    text_ascii_safe = text_nfkd.encode("ascii", errors="ignore").decode("ascii")
+    prompt = _CLASSIFIER_PROMPT.format(text=text_ascii_safe)
 
     # 1. Groq (Zero-cost se GROQ_API_KEY configurada)
     groq_key = get_secret("GROQ_API_KEY") or os.getenv("GROQ_API_KEY", "")
