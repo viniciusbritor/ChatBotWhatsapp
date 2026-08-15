@@ -2409,13 +2409,64 @@ async def oauth_callback(request: Request):
             "expiry": str(time.time() + token_response.get("expires_in", 3600)),
             "linked_at": now_brt_dt.isoformat(),
         }
-        from agent_loader import save_user
-        saved = save_user(phone, {
+        from agent_loader import save_user, sync_user_profile, enrich_user_from_all_sources
+        
+        # Enriquecer perfil via Gmail / ID token / Portal Coherence
+        user_email = ""
+        user_name = ""
+        user_picture = ""
+        
+        # 1. Tentar ler Gmail Profile
+        try:
+            gm_res = requests.get(
+                "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+                headers={"Authorization": f"Bearer {token_response['access_token']}"},
+                timeout=5,
+            )
+            if gm_res.status_code == 200:
+                user_email = gm_res.json().get("emailAddress", "")
+        except Exception:
+            pass
+
+        # 2. Tentar ID token se disponivel
+        id_token = token_response.get("id_token")
+        if id_token and "." in id_token:
+            try:
+                import base64
+                import json
+                payload_part = id_token.split(".")[1]
+                payload_part += "=" * (-len(payload_part) % 4)
+                claims = json.loads(base64.urlsafe_b64decode(payload_part.encode()).decode("utf-8"))
+                if not user_email:
+                    user_email = claims.get("email", "")
+                if not user_name:
+                    user_name = claims.get("name", "")
+                if not user_picture:
+                    user_picture = claims.get("picture", "")
+            except Exception:
+                pass
+
+        user_update: Dict[str, Any] = {
             "phone": phone,
             "google_oauth_token": token_data,
             "scopes": granted_scopes,
             "google_oauth_linked_at": now_brt_dt.isoformat(),
-        })
+            "role": "analyst",
+            "is_approved": True,
+        }
+        if user_email:
+            user_update["email"] = user_email.lower().strip()
+        if user_name:
+            user_update["name"] = user_name
+            user_update["display_name"] = user_name
+        if user_picture:
+            user_update["picture"] = user_picture
+
+        saved = save_user(phone, user_update)
+        if user_email:
+            sync_user_profile(phone, email=user_email, name=user_name, picture=user_picture, role="analyst")
+        enrich_user_from_all_sources(phone)
+
         if not saved:
             return HTMLResponse(content="<h2>Erro ao salvar autorizacao</h2>", status_code=503)
         return HTMLResponse(content="""

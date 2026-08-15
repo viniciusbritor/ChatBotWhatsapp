@@ -682,8 +682,148 @@ def is_user_approved(phone: str) -> bool:
     return False
 
 
+def _is_placeholder_name(name: Any) -> bool:
+    """True se o nome e um placeholder generico, numero, vazio ou indefinido."""
+    if not name or not isinstance(name, str):
+        return True
+    s = name.strip()
+    if not s:
+        return True
+    if s.isdigit():
+        return True
+    if s.startswith("+"):
+        return True
+    lower = s.lower()
+    if lower.startswith("contato") or lower in ("user", "usuario", "usuário", "none", "null", "guest", "undefined"):
+        return True
+    return False
+
+
+def _lookup_portal_profile_for_phone_or_name(db, phone: str, name: str = "", email: str = "") -> Dict[str, Any]:
+    """Busca informacoes ricas de perfil na colecao users do Portal Coherence."""
+    if db is None:
+        return {}
+    res: Dict[str, Any] = {}
+    try:
+        clean_email = str(email or "").strip().lower()
+        if clean_email and "@" in clean_email:
+            u_doc = db.collection("users").document(clean_email).get()
+            if u_doc.exists:
+                u_data = u_doc.to_dict() or {}
+                if u_data.get("name") and not _is_placeholder_name(u_data.get("name")):
+                    res["name"] = str(u_data["name"]).strip()
+                    res["display_name"] = str(u_data["name"]).strip()
+                if u_data.get("picture"):
+                    res["picture"] = u_data["picture"]
+                if u_data.get("global_role") in ("analyst", "super-admin") or u_data.get("role") in ("analyst", "admin"):
+                    res["role"] = "analyst"
+                    res["is_approved"] = True
+                return res
+
+        clean_name_lower = str(name or "").strip().lower()
+        for doc in db.collection("users").stream():
+            u_data = doc.to_dict() or {}
+            doc_email = str(u_data.get("email") or doc.id).strip().lower()
+            doc_name = str(u_data.get("name") or "").strip()
+            if clean_name_lower and doc_name and (clean_name_lower in doc_name.lower() or doc_name.lower() in clean_name_lower):
+                if doc_name and not _is_placeholder_name(doc_name):
+                    res["name"] = doc_name
+                    res["display_name"] = doc_name
+                if doc_email and "@" in doc_email:
+                    res["email"] = doc_email
+                if u_data.get("picture"):
+                    res["picture"] = u_data["picture"]
+                if u_data.get("global_role") in ("analyst", "super-admin") or u_data.get("role") in ("analyst", "admin"):
+                    res["role"] = "analyst"
+                    res["is_approved"] = True
+                return res
+    except Exception as exc:
+        logger.debug("lookup_portal_profile failed: %s", exc)
+    return res
+
+
+def enrich_user_from_all_sources(phone: str) -> bool:
+    """Enriquece o usuario no Firestore usando WhatsApp push_name, Portal users e Google API."""
+    canonical = _canonical_phone(phone)
+    if not canonical:
+        return False
+    db = _get_firestore_client()
+    if db is None:
+        return False
+    try:
+        doc_ref = db.collection("usuarios").document(canonical)
+        doc = doc_ref.get()
+        if not doc.exists:
+            return False
+        data = doc.to_dict() or {}
+        curr_name = str(data.get("name") or "").strip()
+        curr_email = str(data.get("email") or "").strip().lower()
+        push_name = str(data.get("push_name") or "").strip()
+        
+        updates: Dict[str, Any] = {}
+        
+        if push_name and not _is_placeholder_name(push_name) and _is_placeholder_name(curr_name):
+            updates["name"] = push_name
+            updates["display_name"] = push_name
+            curr_name = push_name
+            
+        portal_info = _lookup_portal_profile_for_phone_or_name(db, canonical, name=curr_name, email=curr_email)
+        if portal_info:
+            updates.update(portal_info)
+            if portal_info.get("name"):
+                curr_name = portal_info["name"]
+            if portal_info.get("email"):
+                curr_email = portal_info["email"]
+
+        if data.get("google_oauth_token") and (not curr_email or _is_placeholder_name(curr_name)):
+            try:
+                from core.oauth_per_user import get_valid_user_token
+                import requests
+                tok = get_valid_user_token(canonical)
+                if tok:
+                    gm_res = requests.get(
+                        "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+                        headers={"Authorization": f"Bearer {tok}"},
+                        timeout=5,
+                    )
+                    if gm_res.status_code == 200:
+                        gm_email = str(gm_res.json().get("emailAddress") or "").strip().lower()
+                        if gm_email and "@" in gm_email:
+                            updates["email"] = gm_email
+                            p_info = _lookup_portal_profile_for_phone_or_name(db, canonical, email=gm_email)
+                            if p_info:
+                                updates.update(p_info)
+            except Exception:
+                pass
+                
+        if updates:
+            updates["updated_at"] = _now_iso()
+            doc_ref.set(updates, merge=True)
+            return True
+        return False
+    except Exception as exc:
+        logger.debug("enrich_user_from_all_sources failed for %s: %s", phone, exc)
+        return False
+
+
+def enrich_all_registered_users() -> int:
+    """Varre e enriquece todos os usuarios cadastrados no Firestore."""
+    db = _get_firestore_client()
+    if db is None:
+        return 0
+    count = 0
+    try:
+        for doc in db.collection("usuarios").stream():
+            phone = str(doc.to_dict().get("phone") or doc.id)
+            if enrich_user_from_all_sources(phone):
+                count += 1
+    except Exception as exc:
+        logger.error("enrich_all_registered_users failed: %s", exc)
+    return count
+
+
 def ensure_user_registered(phone: str, sender_name: str = "", instance: str = "jennifer") -> bool:
-    """Garante que qualquer contato que interaja com a Jennifer fique registrado em usuarios/{phone}."""
+    """Garante que qualquer contato que interaja com a Jennifer fique registrado em usuarios/{phone} com nome real enriquecido."""
     canonical = _canonical_phone(phone)
     if not canonical:
         return False
@@ -698,18 +838,41 @@ def ensure_user_registered(phone: str, sender_name: str = "", instance: str = "j
             "updated_at": _now_iso(),
             "instance": instance,
         }
-        if sender_name and sender_name != "user":
-            payload["name"] = sender_name
-            payload["push_name"] = sender_name
+        clean_sender = str(sender_name or "").strip()
+        has_valid_sender = bool(clean_sender and not _is_placeholder_name(clean_sender))
+        if has_valid_sender:
+            payload["push_name"] = clean_sender
+            payload["name"] = clean_sender
+            payload["display_name"] = clean_sender
+
         if not doc.exists:
             payload["created_at"] = _now_iso()
             payload["role"] = "guest"
             payload["is_approved"] = False
+            
+            portal_info = _lookup_portal_profile_for_phone_or_name(db, canonical, name=clean_sender)
+            if portal_info:
+                payload.update(portal_info)
+                
             doc_ref.set(payload)
         else:
             existing = doc.to_dict() or {}
-            if sender_name and sender_name != "user" and not existing.get("name"):
-                doc_ref.set(payload, merge=True)
+            curr_name = str(existing.get("name") or "").strip()
+            if has_valid_sender and _is_placeholder_name(curr_name):
+                payload["name"] = clean_sender
+                payload["display_name"] = clean_sender
+                
+            if not existing.get("email") or not existing.get("picture") or _is_placeholder_name(curr_name):
+                portal_info = _lookup_portal_profile_for_phone_or_name(
+                    db,
+                    canonical,
+                    name=clean_sender or curr_name,
+                    email=existing.get("email", ""),
+                )
+                if portal_info:
+                    payload.update(portal_info)
+                    
+            doc_ref.set(payload, merge=True)
         return True
     except Exception as exc:
         logger.debug("ensure_user_registered failed for phone=%s: %s", phone, exc)
