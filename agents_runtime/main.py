@@ -618,9 +618,9 @@ async def pubsub_push(request: Request):
 
         reply = result.get("reply", "")
         phone = p.get("phone", "") or (p.get("extra") or {}).get("phone", "")
-        delivered = False
+        delivered = bool(result.get("delivered_as_image"))
         delivery_error = ""
-        if reply and phone:
+        if reply and phone and not result.get("delivered_as_image"):
             try:
                 await send_text(
                     instance=p.get("instance", "Jennifer"),

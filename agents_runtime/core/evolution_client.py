@@ -112,6 +112,10 @@ def _request_timeout(default: float = 30.0) -> httpx.Timeout:
         return httpx.Timeout(default)
 
 
+_RECENT_SENT_TEXT: Dict[str, float] = {}
+_DEDUP_WINDOW_SECONDS = 4.0
+
+
 async def send_text(
     instance: str,
     phone: str,
@@ -124,12 +128,28 @@ async def send_text(
         raise EvolutionDeliveryError("invalid_message")
     base_url, api_key = _config()
     instance = _resolve_instance_name() if instance.lower() == (os.getenv("INSTANCE") or "jennifer").lower() else instance
+    target = _target(phone, remote_jid)
+
+    # Guardrail Anti-Duplicação: Impede envio repetido da mesma mensagem na mesma janela
+    now = time.time()
+    for k in list(_RECENT_SENT_TEXT.keys()):
+        if now - _RECENT_SENT_TEXT[k] > 30.0:
+            _RECENT_SENT_TEXT.pop(k, None)
+    dedup_key = f"{instance}:{target}:{hash(text.strip())}"
+    if dedup_key in _RECENT_SENT_TEXT and (now - _RECENT_SENT_TEXT[dedup_key]) < _DEDUP_WINDOW_SECONDS:
+        logger.warning(
+            "evolution_send_text_suppressed_duplicate instance=%s target=%s text_prefix=%s",
+            instance, target, text[:40],
+        )
+        return {"status": "suppressed_duplicate"}
+    _RECENT_SENT_TEXT[dedup_key] = now
+
     logger.debug("evolution_send_text instance=%s phone=%s", instance, phone)
     async with httpx.AsyncClient(timeout=_request_timeout(30)) as client:
         response = await client.post(
             f"{base_url}/message/sendText/{instance}",
             json={
-                "number": _target(phone, remote_jid),
+                "number": target,
                 "text": text,
                 "delay": max(0, min(int(delay_ms), 15000)),
                 "presence": presence,

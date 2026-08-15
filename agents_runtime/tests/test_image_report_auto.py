@@ -445,3 +445,48 @@ def test_user_requested_image_keywords():
     assert _user_requested_image("") is False
     # Acentos normalizados
     assert _user_requested_image("em gráfico") is True
+
+
+def test_anti_duplication_guardrail_suppresses_redundant_text():
+    """Quando a imagem com legenda é despachada, reply textual deve ser suprimido."""
+    from orchestrator import _auto_send_image
+    from unittest.mock import AsyncMock, patch
+
+    payload = {"instance": "Jennifer", "phone": "5511966830020"}
+    tabular = {"title": "Teste", "headers": ["A"], "rows": [["1"]], "emoji_header": "📁"}
+
+    with patch("core.evolution_client.send_image", new_callable=AsyncMock) as mock_send:
+        mock_send.return_value = {"status": "accepted"}
+        import asyncio
+        ok = asyncio.run(_auto_send_image(payload, tabular, "Legenda da imagem"))
+        assert ok is True
+        mock_send.assert_called_once()
+
+
+def test_send_text_deduplication_guardrail():
+    """send_text deve suprimir envios consecutivos da mesma mensagem na mesma janela."""
+    import asyncio
+    from unittest.mock import patch, MagicMock
+    from core.evolution_client import send_text, _RECENT_SENT_TEXT
+    import httpx
+
+    _RECENT_SENT_TEXT.clear()
+
+    class _StubClient:
+        def __init__(self, *args, **kwargs):
+            pass
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *exc):
+            return None
+        async def post(self, url, **kwargs):
+            return httpx.Response(200, json={"ok": True})
+
+    with patch("core.evolution_client.get_secret", return_value="token"):
+        with patch("core.evolution_client.httpx.AsyncClient", _StubClient):
+            res1 = asyncio.run(send_text("Jennifer", "5511966830020", "Mensagem de teste"))
+            assert res1 == {"ok": True}
+            # Segunda chamada imediata com o mesmo texto -> suprimida pelo Guardrail
+            res2 = asyncio.run(send_text("Jennifer", "5511966830020", "Mensagem de teste"))
+            assert res2 == {"status": "suppressed_duplicate"}
+

@@ -188,15 +188,22 @@ async def _finalize_orchestration(
 
     if (
         reply_text
-        and os.getenv("IMAGE_REPORT_AUTO", "true").lower() == "true"
         and payload.get("phone")
     ):
         try:
             tabular_payload = _detect_tabular_payload(result)
             user_force_image = _user_requested_image(masked_text)
+            auto_image_enabled = os.getenv("IMAGE_REPORT_AUTO", "false").lower() == "true"
             skip_image = bool(metadata.get("skip_image_report")) and not user_force_image
-            if tabular_payload and not skip_image:
-                await _auto_send_image(payload, tabular_payload, reply_text)
+            # Guardrail Anti-Duplicação: Envia imagem apenas se explicitamente requisitada pelo usuário
+            # ou se IMAGE_REPORT_AUTO=true configurado no ambiente.
+            if tabular_payload and not skip_image and (user_force_image or auto_image_enabled):
+                sent_ok = await _auto_send_image(payload, tabular_payload, reply_text)
+                if sent_ok:
+                    # Guardrail: Se a imagem com legenda já foi despachada, suprime o envio de texto duplicado
+                    result["delivered_as_image"] = True
+                    result["original_reply"] = reply_text
+                    result["reply"] = ""
         except Exception as exc:
             logger.warning("auto_render_failed: %s", exc)
 
@@ -484,7 +491,7 @@ async def _auto_send_image(
     payload: Dict[str, Any],
     tabular: Dict[str, Any],
     caption: str,
-) -> None:
+) -> bool:
     """Render and dispatch the tabular payload as a PNG to WhatsApp."""
     from core.evolution_client import send_image
     from tools.image_report import render_report
@@ -497,12 +504,12 @@ async def _auto_send_image(
         footer=caption[:120],
     )
     if not rendered or rendered.get("error"):
-        return
+        return False
     extra = payload.get("extra", {}) or {}
     instance = payload.get("instance", "Jennifer")
     phone = payload.get("phone", "")
     if not phone:
-        return
+        return False
     try:
         await send_image(
             instance=instance,
@@ -512,8 +519,10 @@ async def _auto_send_image(
             caption=caption[:1024],
             remote_jid=extra.get("remote_jid", ""),
         )
+        return True
     except Exception as exc:
         logger.warning("auto_send_image_failed: %s", exc)
+        return False
 
 
 def get_recent_interactions(limit: int = 5) -> List[Dict[str, Any]]:
