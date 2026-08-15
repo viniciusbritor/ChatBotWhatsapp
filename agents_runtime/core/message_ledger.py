@@ -262,15 +262,35 @@ def release_lease(message_id: str) -> None:
         logger.debug("ledger lease release failed: %s", exc)
 
 
+def _sanitize_reply_for_firestore(obj: Any) -> Any:
+    """Higieniza o retorno da orquestração para evitar erro 400 no Firestore."""
+    if isinstance(obj, dict):
+        clean = {}
+        for k, v in obj.items():
+            if str(k).startswith("_") or k in {"png_bytes", "image_bytes", "bytes"}:
+                continue
+            clean[str(k)] = _sanitize_reply_for_firestore(v)
+        return clean
+    elif isinstance(obj, (list, tuple, set)):
+        return [_sanitize_reply_for_firestore(x) for x in obj]
+    elif isinstance(obj, (str, int, float, bool, type(None))):
+        return obj
+    elif isinstance(obj, bytes):
+        return f"<bytes len={len(obj)}>"
+    else:
+        return str(obj)
+
+
 def mark_response(message_id: str, reply: Dict[str, Any]) -> None:
     db = _get_firestore()
     if db is None:
         return
     doc_ref = db.collection(_LEDGER_COLLECTION).document(_doc_id(message_id))
+    safe_reply = _sanitize_reply_for_firestore(reply or {})
     updates = {
         "state": "response_ready",
-        "reply": reply or {},
-        "response_id": (reply or {}).get("request_id", message_id),
+        "reply": safe_reply,
+        "response_id": safe_reply.get("request_id", message_id),
         "lease_owner": "",
         "lease_expires_at": 0.0,
         "updated_at": _now_iso(),

@@ -34,3 +34,30 @@ class TestClaimTransaction:
         with patch("core.message_ledger._get_firestore", return_value=mock_db):
             result = claim("test-message-id")
         assert result == {"state": "response_ready"}
+
+    def test_mark_response_sanitizes_complex_reply(self):
+        """mark_response sanitiza objetos não-serializáveis e bytes para evitar erro 400."""
+        from core.message_ledger import mark_response, _sanitize_reply_for_firestore
+
+        raw = {
+            "reply": "ok",
+            "_internal": "skip",
+            "png_bytes": b"fake_png",
+            "nested": {"bytes": b"data", "clean": 123},
+        }
+        sanitized = _sanitize_reply_for_firestore(raw)
+        assert "_internal" not in sanitized
+        assert "png_bytes" not in sanitized
+        assert sanitized["nested"] == {"clean": 123}
+
+        mock_db = MagicMock()
+        mock_doc_ref = MagicMock()
+        mock_db.collection.return_value.document.return_value = mock_doc_ref
+
+        with patch("core.message_ledger._get_firestore", return_value=mock_db):
+            mark_response("msg-123", raw)
+        mock_doc_ref.update.assert_called_once()
+        updates = mock_doc_ref.update.call_args[0][0]
+        assert updates["state"] == "response_ready"
+        assert "_internal" not in updates["reply"]
+
