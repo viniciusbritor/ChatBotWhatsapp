@@ -43,7 +43,7 @@ class TestBase64Decode:
         b64 = base64.b64encode(audio_bytes).decode("ascii")
 
         async def fake_transcribe(audio, mime, instance):
-            return {"transcript": "hello world", "provider": "minimax", "reason": ""}
+            return {"transcript": "hello world", "provider": "groq:whisper-large-v3-turbo", "reason": ""}
 
         with patch("core.audio_transcribe.transcribe_bytes", side_effect=fake_transcribe):
             import asyncio
@@ -58,7 +58,7 @@ class TestBase64Decode:
             import asyncio
             asyncio.run(transcribe_base64("not-valid-base64!@#", "audio/ogg", "Jennifer"))
 
-    def test_accepts_minimax_format(self):
+    def test_accepts_groq_format(self):
         from core.audio_transcribe import transcribe_base64
 
         audio_bytes = b"\xff\xfe\xfd" * 50
@@ -66,7 +66,7 @@ class TestBase64Decode:
 
         async def fake_transcribe(audio, mime, instance):
             assert len(audio) == 150
-            return {"transcript": "ok", "provider": "minimax", "reason": ""}
+            return {"transcript": "ok", "provider": "groq:whisper-large-v3-turbo", "reason": ""}
 
         with patch("core.audio_transcribe.transcribe_bytes", side_effect=fake_transcribe):
             import asyncio
@@ -87,7 +87,7 @@ class TestSizeValidation:
         from core.audio_transcribe import transcribe_bytes
 
         def fake_transcribe(audio, mime, instance):
-            return {"transcript": "ok", "provider": "minimax", "reason": ""}
+            return {"transcript": "ok", "provider": "groq:whisper-large-v3-turbo", "reason": ""}
 
         async def fake_to_thread(func, *args, **kwargs):
             return func(*args, **kwargs)
