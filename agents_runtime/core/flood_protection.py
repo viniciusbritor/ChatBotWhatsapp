@@ -316,12 +316,13 @@ def get_all_finops_overview(instance: str = "") -> Dict[str, Any]:
     try:
         for doc in db.collection("usuarios").stream():
             data = doc.to_dict() or {}
-            phone = doc.id
-            if not phone or not phone.isdigit():
+            phone = str(doc.id).strip()
+            if not phone or not phone.isdigit() or len(phone) < 8:
                 continue
 
             # Se filtrou por instância, checa
-            if instance and data.get("instance") and data.get("instance").lower() != instance.lower():
+            doc_instance = str(data.get("instance") or "Jennifer")
+            if instance and instance.lower() != "all" and doc_instance.lower() != instance.lower():
                 continue
 
             u_cost_usd = float(data.get("estimated_cost_usd", 0.0))
@@ -335,9 +336,19 @@ def get_all_finops_overview(instance: str = "") -> Dict[str, Any]:
                 quarantined_count += 1
 
             name = data.get("name") or data.get("push_name") or data.get("display_name") or f"+{phone}"
-            groups = data.get("group_memberships") or []
-            if data.get("last_group_id") and data.get("last_group_id") not in groups:
-                groups.append(data.get("last_group_id"))
+            raw_groups = data.get("group_memberships") or []
+            groups: List[str] = []
+            for g in raw_groups:
+                if isinstance(g, dict):
+                    g_label = g.get("subject") or g.get("gid") or ""
+                    if g_label and g_label not in groups:
+                        groups.append(str(g_label))
+                elif isinstance(g, str) and g and g not in groups:
+                    groups.append(g)
+
+            last_gid = data.get("last_group_id")
+            if last_gid and str(last_gid) not in groups:
+                groups.append(str(last_gid))
 
             users_list.append({
                 "phone": phone,
@@ -354,8 +365,9 @@ def get_all_finops_overview(instance: str = "") -> Dict[str, Any]:
                 "quarantined_at": data.get("quarantined_at", ""),
                 "last_active_at": data.get("last_active_at", data.get("updated_at", "")),
                 "groups": groups,
-                "instance": data.get("instance", "Jennifer"),
+                "instance": doc_instance,
             })
+
 
         # Ordena por maior custo primeiro
         users_list.sort(key=lambda x: x["estimated_cost_usd"], reverse=True)
