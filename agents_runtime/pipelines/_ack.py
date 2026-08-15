@@ -154,10 +154,11 @@ async def send_ack(
     extra: Dict[str, Any],
 ) -> None:
     """Envia typing indicator + mensagem de espera no WhatsApp."""
+    force = bool(extra and extra.get("force"))
     await send_instant_tool_ack(
         tool_name=ack_type,
         phone=phone,
         instance=instance,
         extra=extra,
-        force=True,
+        force=force,
     )

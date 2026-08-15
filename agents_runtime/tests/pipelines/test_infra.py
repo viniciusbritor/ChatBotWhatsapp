@@ -187,7 +187,8 @@ class TestPrefetchModule:
 class TestAckModule:
     @pytest.mark.asyncio
     async def test_send_ack_calendar_dispatches(self):
-        from pipelines._ack import send_ack
+        from pipelines._ack import send_ack, _ACKED_PHONES
+        _ACKED_PHONES.clear()
 
         with patch(
             "core.evolution_client.send_presence", new_callable=AsyncMock
