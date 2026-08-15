@@ -94,7 +94,10 @@ export const FinOpsView: React.FC<FinOpsViewProps> = ({
       (u.name || '').toLowerCase().includes(q) ||
       (u.phone || '').includes(q) ||
       (u.email || '').toLowerCase().includes(q) ||
-      u.groups.some(g => (g || '').toLowerCase().includes(q));
+      (u.groups || []).some(g => {
+        const str = typeof g === 'object' && g ? ((g as any).subject || (g as any).gid || '') : String(g || '');
+        return str.toLowerCase().includes(q);
+      });
 
     if (!matchSearch) return false;
 
@@ -102,6 +105,7 @@ export const FinOpsView: React.FC<FinOpsViewProps> = ({
     if (statusFilter === 'quarantined') return u.is_quarantined;
     return true;
   });
+
 
   return (
     <div className="space-y-6">
@@ -301,11 +305,14 @@ export const FinOpsView: React.FC<FinOpsViewProps> = ({
                       <td className="py-4 px-6">
                         {u.groups && u.groups.length > 0 ? (
                           <div className="flex flex-wrap gap-1 max-w-xs">
-                            {u.groups.slice(0, 2).map((g, idx) => (
-                              <span key={idx} className="bg-slate-800 text-slate-300 text-[11px] px-2 py-0.5 rounded-md border border-slate-700 truncate max-w-[140px]">
-                                {g.replace('@g.us', '').slice(0, 14)}...
-                              </span>
-                            ))}
+                            {u.groups.slice(0, 2).map((g, idx) => {
+                              const gName = typeof g === 'object' && g ? ((g as any).subject || (g as any).gid || '') : String(g || '');
+                              return (
+                                <span key={idx} className="bg-slate-800 text-slate-300 text-[11px] px-2 py-0.5 rounded-md border border-slate-700 truncate max-w-[140px]">
+                                  {gName.replace('@g.us', '').slice(0, 16)}
+                                </span>
+                              );
+                            })}
                             {u.groups.length > 2 && (
                               <span className="text-[10px] text-slate-400 self-center">+{u.groups.length - 2}</span>
                             )}
@@ -314,6 +321,7 @@ export const FinOpsView: React.FC<FinOpsViewProps> = ({
                           <span className="text-xs text-slate-500">Apenas DM</span>
                         )}
                       </td>
+
 
                       {/* Mensagens */}
                       <td className="py-4 px-6 text-slate-300 font-medium">
