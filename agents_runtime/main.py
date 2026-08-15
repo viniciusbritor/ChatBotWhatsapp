@@ -257,7 +257,7 @@ async def chat(request: Request):
                 })
         else:
             body["text"] = audio["transcript"]
-            extra["audio_provider"] = audio.get("provider", "minimax:MiniMax-M3")
+            extra["audio_provider"] = audio.get("provider", "groq:whisper-large-v3-turbo")
             extra["audio_provider_reason"] = audio.get("reason", "")
             extra["audio_transcribed"] = True
             extra["audio_source"] = audio.get("source", "url")

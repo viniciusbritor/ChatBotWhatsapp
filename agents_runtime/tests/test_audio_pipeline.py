@@ -21,12 +21,12 @@ async def test_sem_audio_retorna_transcript_none():
 @pytest.mark.asyncio
 async def test_audio_url_transcreve_e_mascara():
     async def fake_transcribe(url, mime, instance=None):
-        return {"transcript": "meu email e fulano@exemplo.com", "provider": "minimax:MiniMax-M3", "reason": ""}
+        return {"transcript": "meu email e fulano@exemplo.com", "provider": "groq:whisper-large-v3-turbo", "reason": ""}
 
     payload = {"instance": "Jennifer", "extra": {"has_audio": True, "audio_url": "https://evolution.coherenceai.com.br/chat/getMedia/Jennifer?messageId=x"}}
     with patch("core.audio_transcribe.transcribe_url", side_effect=fake_transcribe):
         result = await transcribe_envelope_audio(payload)
-    assert result["provider"] == "minimax:MiniMax-M3"
+    assert result["provider"] == "groq:whisper-large-v3-turbo"
     assert result["source"] == "url"
     assert "fulano@exemplo.com" not in result["transcript"]  # PII mascarado
 
@@ -78,7 +78,7 @@ async def test_baixa_base64_via_evolution_quando_tem_message_id():
         return {"base64": "QUFBQQ==", "mimetype": "audio/ogg"}
 
     async def fake_transcribe_base64(b64, mime, instance=None):
-        return {"transcript": "ola", "provider": "minimax:MiniMax-M3", "reason": ""}
+        return {"transcript": "ola", "provider": "groq:whisper-large-v3-turbo", "reason": ""}
 
     payload = {
         "instance": "Jennifer",

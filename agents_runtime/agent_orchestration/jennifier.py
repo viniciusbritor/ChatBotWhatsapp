@@ -87,7 +87,7 @@ class TurnContext:
 
 
 def get_jennifer_model_id() -> str:
-    return os.getenv("JENNIFER_MODEL_ID", "MiniMax-M2.7-highspeed")
+    return os.getenv("JENNIFER_MODEL_ID", "deepseek-v4-flash")
 
 
 def get_jennifer_fallback_model_id() -> str:
