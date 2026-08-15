@@ -1762,11 +1762,27 @@ async def admin_approve_user(
 
     if request.method == "POST":
         try:
-            form = await request.form()
-            token = token or str(form.get("token") or "")
-            phone = phone or str(form.get("phone") or "")
+            body_bytes = await request.body()
+            if body_bytes:
+                import urllib.parse
+                import json
+                body_str = body_bytes.decode("utf-8", errors="ignore")
+                parsed_qs = urllib.parse.parse_qs(body_str)
+                if "token" in parsed_qs:
+                    token = parsed_qs["token"][0]
+                if "phone" in parsed_qs:
+                    phone = parsed_qs["phone"][0]
+                if not token and body_str.startswith("{"):
+                    json_data = json.loads(body_str)
+                    token = json_data.get("token", token)
+                    phone = json_data.get("phone", phone)
         except Exception:
             pass
+
+    if not token:
+        token = request.query_params.get("token", "")
+    if not phone:
+        phone = request.query_params.get("phone", "")
 
     approved_phone = parse_approval_token(token)
     if not approved_phone:
