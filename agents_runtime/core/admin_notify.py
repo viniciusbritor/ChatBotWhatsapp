@@ -88,29 +88,51 @@ async def notify_admin_access_request(
 ) -> bool:
     """Envia notificacao no WhatsApp do Admin quando um visitante pede acesso."""
     clean_phone = re.sub(r"\D", "", str(phone or ""))
-    if not clean_phone:
-        return False
-
-    # Evita flood de notificacoes para o admin
-    now = time.time()
-    last_notified = _NOTIFIED_PHONES_CACHE.get(clean_phone, 0)
-    if (now - last_notified) < NOTIFY_COOLDOWN_SEC:
-        logger.info("Admin notification skipped for %s (cooldown active)", clean_phone)
-        return False
-    _NOTIFIED_PHONES_CACHE[clean_phone] = now
-
-    from agent_loader import resolve_owner_phone
-    admin_phone = resolve_owner_phone()
-    if not admin_phone or admin_phone == clean_phone:
-        return False
-
-    approval_url = generate_approval_url(clean_phone)
     if not sender_name or sender_name.strip().lower() in ("user", "usuario", "usuário", "none", "null") or sender_name.startswith("+") or sender_name.isdigit():
         try:
             from core.owner_name import resolve_owner_name
             sender_name = resolve_owner_name(clean_phone)
         except Exception:
             sender_name = ""
+    if not clean_phone:
+        logger.warning(
+            "notify_admin_skipped_invalid_phone phone=%s",
+            phone,
+            extra={"event_name": "notify_admin_skipped_invalid_phone", "reason": "empty_or_invalid"},
+        )
+        return False
+
+    # Evita flood de notificacoes para o admin
+    now = time.time()
+    last_notified = _NOTIFIED_PHONES_CACHE.get(clean_phone, 0)
+    if (now - last_notified) < NOTIFY_COOLDOWN_SEC:
+        logger.info(
+            "notify_admin_skipped_cooldown phone=%s seconds_until_retry=%d",
+            clean_phone,
+            int(NOTIFY_COOLDOWN_SEC - (now - last_notified)),
+            extra={"event_name": "notify_admin_skipped_cooldown", "reason": "cooldown_active"},
+        )
+        return False
+    _NOTIFIED_PHONES_CACHE[clean_phone] = now
+
+    from agent_loader import resolve_owner_phone
+    admin_phone = resolve_owner_phone()
+    if not admin_phone:
+        logger.warning(
+            "notify_admin_skipped_no_admin_phone phone=%s instance=%s",
+            clean_phone, instance,
+            extra={"event_name": "notify_admin_skipped_no_admin_phone", "reason": "resolve_owner_phone_returned_none"},
+        )
+        return False
+    if admin_phone == clean_phone:
+        logger.warning(
+            "notify_admin_skipped_same_phone phone=%s admin_phone=%s",
+            clean_phone, admin_phone,
+            extra={"event_name": "notify_admin_skipped_same_phone", "reason": "user_is_admin_themselves"},
+        )
+        return False
+
+    approval_url = generate_approval_url(clean_phone)
     name_display = sender_name.strip() if sender_name else "Novo Contato"
     snippet = message_text.strip().replace("\n", " ")[:150]
     if len(snippet) == 150:
@@ -133,11 +155,25 @@ async def notify_admin_access_request(
             instance=instance,
         )
         if success:
-            logger.info("Admin notified of access request from %s", clean_phone)
+            logger.info(
+                "notify_admin_send_ok phone=%s admin_phone=%s instance=%s",
+                clean_phone, admin_phone, instance,
+                extra={"event_name": "notify_admin_send_ok", "decision": "notified"},
+            )
             return True
+        logger.warning(
+            "notify_admin_send_returned_false phone=%s admin_phone=%s instance=%s",
+            clean_phone, admin_phone, instance,
+            extra={"event_name": "notify_admin_send_failed", "decision": "send_returned_false"},
+        )
+        return False
     except Exception as exc:
-        logger.warning("Failed to notify admin: %s", exc)
-    return False
+        logger.warning(
+            "notify_admin_send_exception phone=%s exc=%s",
+            clean_phone, exc,
+            extra={"event_name": "notify_admin_send_failed", "reason": "exception"},
+        )
+        return False
 
 
 def create_unblock_token(phone: str) -> str:
