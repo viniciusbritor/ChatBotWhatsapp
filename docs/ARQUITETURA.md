@@ -686,7 +686,9 @@ Continua dentro do `agents-runtime` em `/admin/dashboard`. Agora:
 
 ## 9. Custos e limites
 
-- Cascade LLM com MiniMax M2.7 Highspeed como entrada minimiza tokens.
+- LLM único **DeepSeek V4 Flash** com prompt cache (0.014 USD/1M cache hit, 0.14 USD/1M miss). Removido cascade MiniMax em 25/07/2026 (Fase N).
+- Classificador zero-custo: Groq `llama-3.1-8b-instant` (free tier) → NVIDIA NIM → DeepSeek.
+- STT cascade: Groq Whisper Large v3 Turbo (free) → OpenAI Whisper-1 → Gemini 2.5 Flash.
 - Limite diário de fallback Gemini (20/dia) impede surpresas de billing.
 - Pub/Sub: idempotência garantida pelo ledger evita a antiga tempestade de 44k
   requisições/dia.
