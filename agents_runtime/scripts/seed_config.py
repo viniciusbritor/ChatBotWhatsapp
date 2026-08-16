@@ -48,7 +48,7 @@ db.collection("config").document("proactivity").set({
     "quiet_hours_end": 9,
     "min_relevance": 0.75,
     "triggers": ["calendar_1h", "followup_2h", "birthday"],
-    "owner_phones": ["+5511966830020"],
+    "owner_phones": ["+5511967389901"],
     "updated_at": now,
 }, merge=True)
 print("config/proactivity seeded")

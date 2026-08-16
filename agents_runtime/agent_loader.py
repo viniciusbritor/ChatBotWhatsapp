@@ -521,10 +521,10 @@ def _is_instance_owner(phone: str) -> bool:
 
 
 def resolve_owner_phone() -> str:
-    """Retorna o owner_phone da instancia Evolution (fallback 5511966830020)."""
+    """Retorna o owner_phone da instancia Evolution (fallback 5511967389901)."""
     db = _get_firestore_client()
     if db is None:
-        return "5511966830020"
+        return "5511967389901"
     try:
         for doc in db.collection("whatsapp_accounts").stream():
             data = doc.to_dict() or {}
@@ -534,7 +534,7 @@ def resolve_owner_phone() -> str:
                 return digits
     except Exception:
         pass
-    return "5511966830020"
+    return "5511967389901"
 
 
 def sync_user_profile(

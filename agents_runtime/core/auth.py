@@ -172,7 +172,7 @@ def resolve_caller_profile(request) -> dict:
     if expected and isinstance(expected, str) and hmac.compare_digest(token, expected):
         return {
             "role": "admin",
-            "phone": "5511966830020",
+            "phone": "5511967389901",
             "email": "admin@coherence.ai",
             "name": "Service Account",
             "picture": "",
