@@ -52,7 +52,7 @@ steps:
       - "deploy"
       - "agents-runtime-test"
       - "--image=gcr.io/$PROJECT_ID/agents-runtime:$BUILD_ID"
-      - "--region=us-central1"
+      - "--region=southamerica-east1"
       - "--platform=managed"
       - "--allow-unauthenticated"
       - "--cpu=2"
