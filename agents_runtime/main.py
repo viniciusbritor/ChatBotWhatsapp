@@ -1774,10 +1774,13 @@ async def _enrich_user_connections(user: Dict[str, Any]) -> None:
         for slug, data in apps.items():
             if slug in _COMPOSIO_EXCLUDED:
                 continue
+            # Sempre usar label derivado do slug (slug.replace('_', ' ').title())
+            # NUNCA usar data["name"] pois Composio anexa sufixo random (ex: "one_drive-efzpr7")
+            friendly_label = slug.replace("_", " ").title()
             meta = _COMPOSIO_FRIENDLY_CATALOG.get(slug, {
-                "label": (data or {}).get("name") or slug.replace("_", " ").title(),
+                "label": friendly_label,
                 "icon": "hub",
-                "description": f"Conexão com {slug}",
+                "description": f"Conexão com {slug.replace('_', ' ')}",
             })
             comp_services.append({
                 "id": slug,
