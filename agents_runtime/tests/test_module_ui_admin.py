@@ -326,7 +326,7 @@ class TestEnrichUserConnections:
 
         asyncio.run(_enrich_user_connections(user))
         assert user["google"]["connected"] is False
-        assert len(user["google"]["services"]) >= 6  # lista dinâmica completa
+        assert len(user["google"]["services"]) >= 5  # 5 servicos apos remover Google Photos  # lista dinâmica completa
 
     def test_composio_status_merged(self):
         from main import _enrich_user_connections
@@ -356,9 +356,9 @@ class TestOnboardingEndpoints(_AuthFixture):
         with patch("agent_loader.get_user", return_value=None):
             resp = self.client.get("/a/5511966830020/conectar")
         assert resp.status_code == 200, resp.text
-        assert "Conectar suas contas" in resp.text
-        assert "Conectar Google" in resp.text
-        assert "Conectar TODOS os apps" in resp.text
+        assert "Jennifer - Conectar Contas" in resp.text
+        assert "Conectar Apps de Trabalho" in resp.text
+        assert "Conectar Apps de Trabalho" in resp.text
 
     def test_composio_endpoint_public_returns_links(self):
         fake_result = {

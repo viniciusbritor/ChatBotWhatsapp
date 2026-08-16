@@ -2528,40 +2528,132 @@ async def onboarding_conectar(phone: str, request: Request):
     )
     html = """<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Conectar contas</title>
-    <style>body{font-family:Inter,system-ui,sans-serif;background:#f9fafb;margin:0;padding:40px 16px}
-    .card{max-width:520px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:32px}
-    h1{font-size:22px;color:#111827} .sec{margin:24px 0} .sec h2{font-size:15px;color:#374151;margin-bottom:12px}
-    .hint{font-size:13px;color:#6b7280;margin-top:10px;line-height:1.5}
-    #comp-status{font-size:13px;color:#6b7280;margin-top:12px}
-    .ok{color:#16a34a;font-weight:600}</style></head><body><div class="card">
-    <h1>Conectar suas contas</h1>
-    <p style="color:#6b7280;font-size:14px">Autorize o acesso para que a Jennifer consiga usar seus serviços. São 2 cliques.</p>
-    <div class="sec"><h2>🔵 Google</h2>{google_html}
-      <p class="hint">Calendário, Gmail e Drive — após autorizar, o browser volta para cá.</p></div>
-    <div class="sec"><h2>🟣 Apps (Composio)</h2>
-      <button onclick="conectarComposio()" style="background:#111827;color:#fff;border:0;padding:14px 28px;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer">Conectar TODOS os apps</button>
-      <div id="comp-status"></div>
-      <p class="hint">YouTube, LinkedIn, GitHub, Notion, GoogleDocs, OneDrive e mais. Cada app abre uma aba para autorizar.</p></div>
-    <p class="hint" style="margin-top:28px">Depois de conectar, volte ao WhatsApp e continue a conversa com a Jennifer. 🚀</p>
+    <title>Conectar contas | Jennifer - Coherence AI</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23196b52'/%3E%3Ctext x='50' y='62' font-size='52' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'%3EJ%3C/text%3E%3C/svg%3E">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body{font-family:Inter,system-ui,-apple-system,sans-serif;background:#f8fafc}
+      .card-hover{transition:all .2s ease}
+      .card-hover:hover{transform:translateY(-2px);box-shadow:0 8px 25px -5px rgba(0,0,0,0.1)}
+      .provider-icon{width:48px;height:48px;display:flex;align-items:center;justify-content:center;border-radius:12px;font-size:24px}
+      .status-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}
+      .connected{background:#16a34a}
+      .pending{background:#f59e0b}
+    </style>
+    </head><body class="min-h-screen py-12 px-4">
+    <div class="max-w-2xl mx-auto">
+
+      <div class="text-center mb-8">
+        <div class="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-[#196b52] to-[#2180c4] rounded-2xl mb-4 shadow-lg">
+          <span class="text-white font-bold text-3xl">J</span>
+        </div>
+        <h1 class="text-3xl font-bold text-slate-900 mb-2">Jennifer - Conectar Contas</h1>
+        <p class="text-slate-600">Autorize o acesso para que a Jennifer use seus servicos com seguranca.</p>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+
+        <div class="p-6 border-b border-slate-100">
+          <div class="flex items-start justify-between mb-4">
+            <div class="flex items-center gap-3">
+              <div class="provider-icon bg-blue-50">&#128309;</div>
+              <div>
+                <h2 class="text-lg font-semibold text-slate-900">Google</h2>
+                <p class="text-sm text-slate-500">Agenda, Gmail e Drive</p>
+              </div>
+            </div>
+            <span id="google-status" class="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-600">
+              <span class="status-dot pending"></span>Verificando...
+            </span>
+          </div>
+        <p class="text-xs text-slate-500 mt-3">Apos autorizar, seu browser volta para esta pagina.</p>
+        </div>
+
+        <div class="p-6 border-b border-slate-100">
+          <div class="flex items-start justify-between mb-4">
+            <div class="flex items-center gap-3">
+              <div class="provider-icon bg-purple-50">&#128995;</div>
+              <div>
+                <h2 class="text-lg font-semibold text-slate-900">Apps de Trabalho</h2>
+                <p class="text-sm text-slate-500">YouTube, LinkedIn, GitHub, Notion, Google Docs, OneDrive</p>
+              </div>
+            </div>
+            <span id="composio-status" class="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-600">
+              <span class="status-dot pending"></span>Nao conectado
+            </span>
+          </div>
+          <button onclick="conectarComposio()" id="composio-btn"
+            class="w-full bg-gradient-to-r from-slate-900 to-slate-700 hover:from-slate-800 hover:to-slate-600 text-white font-semibold py-3 px-6 rounded-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed">
+            Conectar Apps de Trabalho
+          </button>
+          <div id="comp-status" class="mt-3"></div>
+        </div>
+
+        <div class="p-6 bg-gradient-to-br from-slate-50 to-slate-100 text-center">
+          <p class="text-sm text-slate-600">
+            &#128274; Apos conectar, volte ao WhatsApp e continue a conversa com a Jennifer.
+          </p>
+          <p class="text-xs text-slate-400 mt-2">Conexoes criptografadas - OAuth 2.0 - Sem armazenamento de senhas</p>
+        </div>
+      </div>
+
+      <div id="status-banner" class="mt-4 hidden"></div>
+
     </div>
+
     <script>
     const BASE = {base_js};
     const PHONE = {phone_js};
+    const compBtn = document.getElementById('composio-btn');
+    const compStatus = document.getElementById('comp-status');
+    const compStatusBadge = document.getElementById('composio-status');
+
     async function conectarComposio() {
-      const st = document.getElementById('comp-status');
-      st.innerHTML = 'Gerando links de conexão…';
+      compBtn.disabled = true;
+      compBtn.textContent = 'Gerando links de conexao...';
+      compStatus.innerHTML = '<p class="text-sm text-slate-500">Abrindo abas para autorizacao...</p>';
       try {
         const res = await fetch(BASE + '/a/' + PHONE + '/composio', {method:'POST'});
         const data = await res.json();
-        const links = data.links || [];
-        const pendentes = links.filter(l => l.url);
-        if (!pendentes.length) { st.innerHTML = '<span class="ok">Todos os apps já estão conectados! ✅</span>'; return; }
-        st.innerHTML = 'Abra ' + pendentes.length + ' aba(s) e autorize cada app. Depois volte aqui.';
-        pendentes.forEach(l => window.open(l.url, '_blank'));
-      } catch (e) { st.innerHTML = 'Erro: ' + e.message; }
+        const links = (data.links || []).filter(l => l.url);
+        const already = data.already_connected || 0;
+        const total = data.total || links.length;
+
+        if (!links.length) {
+          compStatus.innerHTML = '<p class="text-sm text-emerald-600 font-medium">&#9989; Todos os apps ja estao conectados!</p>';
+          compStatusBadge.innerHTML = '<span class="status-dot connected"></span>Conectado';
+          return;
+        }
+        let html = '<p class="text-sm text-slate-600 mb-2"><strong>' + already + '/' + total + '</strong> ja conectados, <strong>' + links.length + '</strong> pendentes:</p><ul class="space-y-1.5">';
+        links.forEach((l, idx) => {
+          const name = (l.toolkit || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+          html += '<li class="flex items-center gap-2 text-xs"><span class="text-slate-400">' + (idx + 1) + '.</span><a href="' + l.url + '" target="_blank" rel="noopener" class="text-blue-600 hover:underline">' + name + '</a></li>';
+        });
+        html += '</ul>';
+        compStatus.innerHTML = html;
+        compBtn.textContent = 'Atualizar Status';
+        compBtn.disabled = false;
+        window.open(links[0].url, '_blank');
+      } catch (e) {
+        compStatus.innerHTML = '<p class="text-sm text-red-600">Erro: ' + e.message + '</p>';
+        compBtn.disabled = false;
+        compBtn.textContent = 'Tentar Novamente';
+      }
     }
-    </script></body></html>"""
+
+    (async () => {{
+      try {{
+        const res = await fetch(BASE + '/admin/users/' + PHONE + '/status?token=');
+        const data = await res.json();
+        if (data && data.google && data.google.connected) {{
+          document.getElementById('google-status').innerHTML = '<span class="status-dot connected"></span>Conectado';
+        }} else {{
+          document.getElementById('google-status').innerHTML = '<span class="status-dot pending"></span>Nao conectado';
+        }}
+      }} catch (e) {{ /* silent */ }}
+    }})();
+    </script>
+    </body></html>"""
     html = (
         html.replace("{google_html}", google_html)
         .replace("{base_js}", json.dumps(base))
