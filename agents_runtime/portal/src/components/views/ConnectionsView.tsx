@@ -188,7 +188,7 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({
               </div>
 
               {conn.status === 'OK' ? (
-                <div className="bg-[#196b52]/10 px-3 py-1 rounded-full flex items-center gap-1.5 border border-[#196b52]/20">
+                <div className="bg-[#196b52]/10 px-3 py-1 rounded-full flex items-center gap-1.5 border border-[#196b52]/20 shrink-0">
                   <span className="w-1.5 h-1.5 rounded-full bg-[#196b52]"></span>
                   <span className="text-[11px] font-semibold text-[#196b52] tracking-wider">OK</span>
                 </div>
@@ -202,7 +202,7 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({
                     if (conn.category === 'Conta Google') onAuthorizeGoogle(phone);
                     else onAuthorizeComposio(phone, service);
                   }}
-                  className="text-[#0058be] font-semibold text-[12px] hover:bg-[#d8e2ff]/30 px-3 py-1 rounded-lg transition-colors border border-[#0058be]/20"
+                  className="text-[#0058be] font-semibold text-[12px] hover:bg-[#d8e2ff]/30 px-3 py-1 rounded-lg transition-colors border border-[#0058be]/20 shrink-0"
                 >
                   Conectar
                 </button>
