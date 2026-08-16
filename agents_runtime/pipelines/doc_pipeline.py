@@ -117,6 +117,12 @@ _DRIVE_ONLY_KEYWORDS = (
     "meu omnichannel",
 )
 
+_DRIVE_PRIORITY = (
+    "meu drive", "no drive", "no gdrive", "google drive",
+    "pasta omnichannel", "lista do drive", "meus arquivos",
+    "faca upload", "salva no drive", "guarda no drive",
+)
+
 
 def detect_drive_attachment(text: str) -> bool:
     """Keyword sub-detect para ferramentas → Drive."""
@@ -688,13 +694,23 @@ async def _run_drive(payload: Dict[str, Any]) -> Dict[str, Any]:
     except Exception:
         pass
 
+    from pipelines._intent import detect_with_confidence as _intent_detect, should_prefetch
     from pipelines._prefetch import prefetch_for_agent
 
     prefetch = None
-    try:
-        prefetch = await prefetch_for_agent(phone, instance, "drive", text=text)
-    except Exception:
-        pass
+    _matched, confidence = _intent_detect(
+        text, _DRIVE_PRIORITY, _DRIVE_KEYWORDS, _DOC_EXCLUDE_PATTERNS,
+    )
+    if should_prefetch(confidence, threshold=0.7):
+        try:
+            prefetch = await prefetch_for_agent(phone, instance, "drive", text=text)
+        except Exception:
+            pass
+    else:
+        logger.debug(
+            "prefetch_skipped_low_confidence agent=drive confidence=%.2f",
+            confidence,
+        )
 
     from pipelines._executor import run_agent
 

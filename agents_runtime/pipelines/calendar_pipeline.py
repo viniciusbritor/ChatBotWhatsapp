@@ -8,7 +8,7 @@ Usado apenas em conversas privadas ou grupos com membro confirmado.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -35,17 +35,14 @@ EXCLUDE_PATTERNS = (
 
 def detect(text: str) -> bool:
     """Prioridade: patterns exatos → keyword → false."""
-    t = text.lower()
-    for pat in CALENDAR_PRIORITY:
-        if pat in t:
-            return True
-    for kw in CALENDAR_KEYWORDS:
-        if kw in t:
-            has_exclusion = any(ex in t for ex in EXCLUDE_PATTERNS)
-            if has_exclusion:
-                return False
-            return True
-    return False
+    matched, _confidence = detect_with_confidence(text)
+    return matched
+
+
+def detect_with_confidence(text: str) -> Tuple[bool, float]:  # noqa: F811
+    """Compat: delega para helper compartilhado."""
+    from pipelines._intent import detect_with_confidence as _detect
+    return _detect(text, CALENDAR_PRIORITY, CALENDAR_KEYWORDS, EXCLUDE_PATTERNS)
 
 
 async def run(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -75,13 +72,21 @@ async def run(payload: Dict[str, Any]) -> Dict[str, Any]:
     except Exception:
         pass
 
+    from pipelines._intent import should_prefetch
     from pipelines._prefetch import prefetch_for_agent
 
     prefetch = None
-    try:
-        prefetch = await prefetch_for_agent(phone, instance, "calendar")
-    except Exception:
-        pass
+    _matched, confidence = detect_with_confidence(text)
+    if should_prefetch(confidence, threshold=0.7):
+        try:
+            prefetch = await prefetch_for_agent(phone, instance, "calendar")
+        except Exception:
+            pass
+    else:
+        logger.debug(
+            "prefetch_skipped_low_confidence agent=calendar confidence=%.2f",
+            confidence,
+        )
 
     from pipelines._executor import run_agent
 
