@@ -1,7 +1,7 @@
 # STATE.md — Estado da Sessão
 
 > Documento persistente para retomada de sessão após restart da IDE.
-> Última atualização: 2026-08-16 03:55 BRT
+> Última atualização: 2026-08-16 05:05 BRT
 
 > **Fonte autoritativa de pendências** (ativas + histórico): este arquivo.
 > `docs/GUARDRAILS.md` §11 e `docs/ARQUITETURA.md` §11 foram reduzidos a
@@ -10,10 +10,10 @@
 
 ## Resumo executivo
 
-**Branch atual:** `test` (sync com `origin/test`)
-**Último commit deployado:** `dc700bd` (PR #39 — FinOps light theme)
-**Último deploy em produção:** revision `agents-runtime-test-00002-wrd` em `southamerica-east1`
-**Status:** 9 deploys nesta sessão — FASE 1+2+3 (cleanup MiniMax, BR migration, 6 portal fixes)
+**Branch atual:** `feat/composio-progress-card` (idêntica a `test`; sem divergência)
+**Último commit em `test`:** `5954f11` (PR #42 — redesign onboarding HTML with Tailwind + status feedback, 16/08 04:38 BRT)
+**Último deploy em produção:** revision `agents-runtime-test-00008-qkg` em `southamerica-east1`
+**Status:** 10 deploys total — FASE 1+2+3 + PR #42 (onboarding HTML redesign)
 **URL atual:** https://agents-runtime-test-c5nbfc5meq-rj.a.run.app
 
 ## Pendências ativas (próximas fases)
