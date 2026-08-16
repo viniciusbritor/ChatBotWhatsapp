@@ -13,7 +13,7 @@ from typing import Dict, Any, Callable, Awaitable
 from tools import google_calendar, google_drive, google_gmail, web_search, nickname
 from tools import locomotion, youtube, group, correction, chat_history
 from tools import memory, weather, translate, vision
-from tools import google_tasks, google_people, google_photos
+from tools import google_tasks, google_people
 from tools import googlesheets_composio
 
 logger = logging.getLogger(__name__)
@@ -1289,34 +1289,7 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
             "required": ["phone"],
         },
     },
-    "photos.search": {
-        "function": google_photos.search_photos,
-        "implementation": "google_photos",
-        "description": "Busca fotos do usuario no Google Photos.",
-        "parameters_schema": {
-            "type": "object",
-            "properties": {
-                "phone": {"type": "string", "description": "Telefone do usuario para token OAuth"},
-                "query": {"type": "string", "description": "Texto de pesquisa (opcional)"},
-                "max_results": {"type": "integer", "description": "Maximo de fotos (default 5)"},
-            },
-            "required": ["phone"],
-        },
-    },
-    "photos.get_media": {
-        "function": google_photos.get_photo_base64,
-        "implementation": "google_photos",
-        "description": "Retorna uma foto do Google Photos em base64.",
-        "parameters_schema": {
-            "type": "object",
-            "properties": {
-                "phone": {"type": "string", "description": "Telefone do usuario para token OAuth"},
-                "media_id": {"type": "string", "description": "ID da foto"},
-            },
-            "required": ["phone", "media_id"],
-        },
-    },
-    "googlesheets.read_cells": {
+"googlesheets.read_cells": {
         "function": googlesheets_composio.read_cells,
         "implementation": "googlesheets_composio",
         "description": "Le celulas de uma planilha Google Sheets.",

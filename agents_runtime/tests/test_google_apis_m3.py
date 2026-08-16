@@ -155,19 +155,6 @@ class TestPeople:
         assert result["contacts"][0]["nome"] == "João"
 
 
-class TestPhotos:
-    @pytest.mark.asyncio
-    async def test_search_photos_sem_token(self):
-        from tools import google_photos
-
-        with patch("tools.google_photos._api", AsyncMock(return_value={"error": "user_google_oauth_required"})), \
-             patch("core.owner.resolve_owner", return_value=_fake_resolution()), \
-             patch("core.owner.deny_if_not_owner", return_value=None), \
-             patch("core.owner_guard.check_folder_permission", return_value=None), \
-             patch("core.owner_guard.post_filter_tool_result", new_async_pass):
-            result = await google_photos.search_photos("5511966830020", "praia")
-        assert "error" in result
-
 
 class TestSheetsComposio:
     @pytest.mark.asyncio
@@ -189,7 +176,6 @@ class TestRegistry:
             "translate.text", "translate.detect", "vision.ocr", "vision.detect_labels",
             "tasks.list", "tasks.create", "tasks.update",
             "people.search", "people.get_profile",
-            "photos.search", "photos.get_media",
             "googlesheets.read_cells", "googlesheets.write_cells", "googlesheets.create_spreadsheet",
         }
         missing = expected - ids

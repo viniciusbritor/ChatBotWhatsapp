@@ -14,10 +14,11 @@ from core.google_scopes import (
 
 
 def test_oauth_scopes_completo():
-    assert len(ALL_OAUTH_SCOPES) == 8
+    """Apos remocao do Google Photos (16/08/2026), sao 7 escopos."""
+    assert len(ALL_OAUTH_SCOPES) == 7
     assert "https://www.googleapis.com/auth/contacts.readonly" in ALL_OAUTH_SCOPES
     assert "https://www.googleapis.com/auth/tasks" in ALL_OAUTH_SCOPES
-    assert "https://www.googleapis.com/auth/photoslibrary.readonly" in ALL_OAUTH_SCOPES
+    assert "photoslibrary.readonly" not in " ".join(ALL_OAUTH_SCOPES)
 
 
 def test_people_connected_com_contacts_readonly():
@@ -27,12 +28,14 @@ def test_people_connected_com_contacts_readonly():
     ]
     assert service_is_connected("people", scopes) is True
     assert service_is_connected("tasks", scopes) is True
-    assert service_is_connected("photos", scopes) is False
+    # photos foi removido (16/08/2026) - service_is_connected agora retorna False
+    # mesmo com photoslibrary.readonly porque GOOGLE_SERVICES nao contem photos
 
 
-def test_photos_connected_com_photoslibrary():
-    scopes = ["https://www.googleapis.com/auth/photoslibrary.readonly"]
-    assert service_is_connected("photos", scopes) is True
+def test_google_services_nao_contem_photos():
+    """Google Photos foi removido do catalogo de servicos (16/08/2026)."""
+    service_ids = [s["id"] for s in GOOGLE_SERVICES]
+    assert "photos" not in service_ids
 
 
 def test_todo_fragmento_de_servico_aparece_na_lista_de_scopes():

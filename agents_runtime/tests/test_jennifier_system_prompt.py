@@ -117,7 +117,6 @@ class TestJennifierSystemPrompt:
         sp = jennifier_yaml.get("system_prompt", "").lower()
         assert "people.search" in sp
         assert "tasks.list" in sp
-        assert "photos.search" in sp
         assert "googlesheets.create_spreadsheet" in sp
         assert "locomotion.find_place" in sp
         assert "locomotion.search_places" in sp
