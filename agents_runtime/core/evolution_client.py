@@ -130,6 +130,13 @@ async def send_text(
     instance = _resolve_instance_name() if instance.lower() == (os.getenv("INSTANCE") or "jennifer").lower() else instance
     target = _target(phone, remote_jid)
 
+    # Regra global: encurtar links antes do envio (LINK_SHORTENER_ENABLED=true)
+    try:
+        from core.link_shortener import shorten_urls_in_text
+        text = shorten_urls_in_text(text)
+    except Exception as e:
+        logger.debug("link_shortener_unavailable_skipping text_err=%s", type(e).__name__)
+
     # Guardrail Anti-Duplicação: Impede envio repetido da mesma mensagem na mesma janela
     now = time.time()
     for k in list(_RECENT_SENT_TEXT.keys()):
@@ -247,6 +254,12 @@ async def send_image(
     if presence:
         payload["presence"] = presence
     if caption:
+        # Regra global: encurtar links na caption tambem
+        try:
+            from core.link_shortener import shorten_urls_in_text
+            caption = shorten_urls_in_text(caption)
+        except Exception as e:
+            logger.debug("link_shortener_caption_unavailable err=%s", type(e).__name__)
         payload["caption"] = caption[:1024]
     async with httpx.AsyncClient(timeout=_request_timeout(30)) as client:
         response = await client.post(
