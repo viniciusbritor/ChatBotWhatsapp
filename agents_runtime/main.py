@@ -515,7 +515,39 @@ def _log_mark_read_result(task: "asyncio.Task[Dict[str, Any]]") -> None:
         logger.warning(event_name, extra=extras)
 
 
-def _schedule_mark_read(envelope: Dict[str, Any]) -> "asyncio.Task[Dict[str, Any]]":
+_MARK_READ_DEDUP_WINDOW_SEC = 5.0
+_MARK_READ_DEDUP: Dict[str, float] = {}
+
+
+def _schedule_mark_read(envelope: Dict[str, Any]) -> Optional["asyncio.Task[Dict[str, Any]]"]:
+    """Dispara o ack de leitura como tarefa paralela sem bloquear o webhook.
+
+    Deduplicacao por (instance, remote_jid) com janela de 5s: se ja
+    houve uma chamada de mark_read para esse par nos ultimos 5s, retorna
+    None sem criar nova task. Isso reduz chamadas Evolution API em cenarios
+    de rajada (ex: usuario envia 5 msgs rapidas) sem perder o tick azul.
+    """
+    instance = envelope.get("instance", "")
+    remote_jid = envelope.get("remote_jid", "")
+    if not instance or not remote_jid:
+        return _schedule_mark_read_task(envelope)
+    dedup_key = f"{instance}:{remote_jid}"
+    now = time.monotonic()
+    last_call = _MARK_READ_DEDUP.get(dedup_key, 0.0)
+    for k in list(_MARK_READ_DEDUP.keys()):
+        if now - _MARK_READ_DEDUP[k] > 30.0:
+            _MARK_READ_DEDUP.pop(k, None)
+    if (now - last_call) < _MARK_READ_DEDUP_WINDOW_SEC:
+        logger.debug(
+            "evolution_mark_read_dedup instance=%s remote_jid=%s",
+            instance, remote_jid,
+        )
+        return None
+    _MARK_READ_DEDUP[dedup_key] = now
+    return _schedule_mark_read_task(envelope)
+
+
+def _schedule_mark_read_task(envelope: Dict[str, Any]) -> "asyncio.Task[Dict[str, Any]]":
     """Dispara o ack de leitura como tarefa paralela sem bloquear o webhook."""
     task = asyncio.create_task(_safe_mark_read(envelope))
     task.add_done_callback(_log_mark_read_result)

@@ -9,8 +9,17 @@ from main import (
     _log_mark_read_result,
     _safe_mark_read,
     _schedule_mark_read,
+    _MARK_READ_DEDUP,
     evolution_webhook,
 )
+
+
+@pytest.fixture(autouse=True)
+def _clear_mark_read_dedup():
+    """Limpa cache dedup antes de cada teste para evitar vazamento entre testes."""
+    _MARK_READ_DEDUP.clear()
+    yield
+    _MARK_READ_DEDUP.clear()
 
 
 VALID_PAYLOAD = {
