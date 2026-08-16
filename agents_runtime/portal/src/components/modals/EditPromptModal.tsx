@@ -66,16 +66,16 @@ export const EditPromptModal: React.FC<EditPromptModalProps> = ({ agent, onClose
             <label className="block text-[12px] font-semibold text-[#191b23] dark:text-white mb-1">
               Modelo LLM
             </label>
-            <select
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              className="w-full bg-[#f2f3fd] dark:bg-[#2e3038] border border-[#c2c6d6] rounded-lg px-3 py-2 text-[13px] font-mono text-[#191b23] dark:text-white"
-            >
-              <option value="deepseek-v4-flash">deepseek-v4-flash</option>
-              <option value="gpt-4-turbo">gpt-4-turbo</option>
-              <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-              <option value="claude-3-5-sonnet">claude-3-5-sonnet</option>
-            </select>
+            <div className="w-full bg-[#f2f3fd] dark:bg-[#2e3038] border border-[#c2c6d6] rounded-lg px-3 py-2 text-[13px] font-mono text-[#191b23] dark:text-white flex items-center justify-between">
+              <span>{model || 'deepseek-v4-flash'}</span>
+              <span className="text-[10px] text-[#727785] font-normal">
+                (provider unico: DeepSeek)
+              </span>
+            </div>
+            <input type="hidden" value={model} onChange={(e) => setModel(e.target.value)} />
+            <p className="text-[10px] text-[#727785] mt-1">
+              Provider unico configurado em runtime. Outros modelos (gpt-4, gemini, claude) nao estao em uso.
+            </p>
           </div>
 
           <div>
