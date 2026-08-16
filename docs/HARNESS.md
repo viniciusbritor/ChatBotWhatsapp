@@ -40,7 +40,11 @@
 ## GCP Project & Recursos
 
 - **Project:** `coherence-ominichannel-fs`
-- **Region:** `us-central1`
+- **Region:** `southamerica-east1` (São Paulo, BR) — **REGRA BR vigência 15/08/2026** (anterior: us-central1)
+  - Escopo: 100% usuários brasileiros (-150ms latência vs `us-central1`)
+  - Custo: idêntico (~1-3% variação Cloud Run)
+  - Firestore: precisa estar na mesma region (single-region `southamerica-east1`) para latência < 50ms
+  - **Antes de voltar pra us-central1**, abrir issue de justificativa + impact assessment
 - **Service Account operacional do projeto (Guardrail 59 — vigente 25/07/2026):**
   - **SA obrigatória:** `admin-omnichannel@coherence-ominichannel-fs.iam.gserviceaccount.com`.
   - Esta SA e usada por todos os Cloud Build triggers, deploys de Cloud Run, jobs de Cloud Run e scripts locais de manutencao (upload de secrets, Firestore ops, refresh de OAuth per-user).
@@ -102,17 +106,17 @@ Os repos `viniciusbritor/EvolutionWhatsapp` (hospeda o Evolution API) e `viniciu
 
 ## CI/CD (Cloud Build triggers)
 
-> **Modo operacional vigente (25/07/2026):** o trigger
+> **Modo operacional vigente (15/08/2026):** o trigger
 > `deploy-agents-runtime-test` está **ativo** (2nd-gen, região
-> `us-central1`). O fluxo correto para deploy em test é:
+> `southamerica-east1` — São Paulo, BR). O fluxo correto para deploy em test é:
 > `git commit` → `git push origin test` → trigger dispara automaticamente.
 > **É proibido executar `gcloud builds submit` manualmente** — ver
 > GUARDRAILS.md §10.
 
 | Trigger | Geração | Repo | Branch | Build config | Região | Status |
 |---|---|---|---|---|---|---|
-| `deploy-agents-runtime-test` | 2nd-gen | ChatBotWhatsapp | `^test$` | `agents_runtime/cloudbuild-test.yaml` | `us-central1` | **ativo** |
-| `deploy-agents-runtime-prod` | (a criar) | ChatBotWhatsapp | `^main$` | `agents_runtime/cloudbuild-prod.yaml` | `us-central1` | pendente |
+| `deploy-agents-runtime-test` | 2nd-gen | ChatBotWhatsapp | `^test$` | `agents_runtime/cloudbuild-test.yaml` | `southamerica-east1` | **ativo** (migrado 15/08/2026) |
+| `deploy-agents-runtime-prod` | (a criar) | ChatBotWhatsapp | `^main$` | `agents_runtime/cloudbuild-prod.yaml` | `southamerica-east1` | pendente |
 | `EvolutionWhatsapp-test` | 1st-gen | EvolutionWhatsapp | `^test$` | (do repo EvolutionWhatsapp) | global | monitorar |
 | `EvolutionWhatsapp-prod` | 1st-gen | EvolutionWhatsapp | `^main$` | (do repo EvolutionWhatsapp) | global | monitorar |
 | `deploy-monitoria-whisper-worker` | 1st-gen | `Monitoria_Chamadas` | `^test$` | (externo, fora de escopo) | global | **não modificar** |
