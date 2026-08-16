@@ -2418,25 +2418,27 @@ async def _orchestrate_inner(payload: Dict[str, Any], instance: str, phone: str,
     return await _finalize_orchestration(payload, masked_text, sender_name, result, path, cache_key)
 
 
-_MINIMAX_TOOL_CALL_RE = re.compile(r"<\s*tool_call\s*>.*?</\s*tool_call\s*>", re.DOTALL)
-_MINIMAX_TOOL_CALL_SELF_RE = re.compile(r"<\s*tool_call\s*/?\s*>")
-_MINIMAX_INVOKE_RE = re.compile(r"<\s*invoke\b[^>]*>.*?</\s*invoke\s*>", re.DOTALL)
-_MINIMAX_INVOKE_SELF_RE = re.compile(r"<\s*invoke\b[^>]*/?>")
-_MINIMAX_TAG_RE = re.compile(r"\[\s*<\s*minimax\s*>\s*\[|\]\s*<\s*/?\s*minimax\s*>\s*\]")
+_LEGACY_TOOL_CALL_RE = re.compile(r"<\s*tool_call\s*>.*?</\s*tool_call\s*>", re.DOTALL)
+_LEGACY_TOOL_CALL_SELF_RE = re.compile(r"<\s*tool_call\s*/?\s*>")
+_LEGACY_INVOKE_RE = re.compile(r"<\s*invoke\b[^>]*>.*?</\s*invoke\s*>", re.DOTALL)
+_LEGACY_INVOKE_SELF_RE = re.compile(r"<\s*invoke\b[^>]*/?>")
 
 
 def _strip_provider_artifacts(text: str) -> str:
-    """Safety net: remove MiniMax-style tags that may leak into `content`.
+    """Safety net: remove generic tool_call/invoke tags that may leak into `content`.
 
     `chat_with_tools` strips these when it parses inline tool calls, but if
     the parser is bypassed (e.g. provider returns clean `tool_calls`), a few
     fragments can still survive. We collapse them here as defense in depth.
+
+    NOTE: legacy MiniMax-specific tags (``[<minimax>[``, ``]<minimax>]``) were
+    removed 15/08/2026 along with the MiniMax provider (Fase N consolidated
+    DeepSeek V4 Flash as the sole LLM).
     """
-    cleaned = _MINIMAX_TOOL_CALL_RE.sub("", text)
-    cleaned = _MINIMAX_TOOL_CALL_SELF_RE.sub("", cleaned)
-    cleaned = _MINIMAX_INVOKE_RE.sub("", cleaned)
-    cleaned = _MINIMAX_INVOKE_SELF_RE.sub("", cleaned)
-    cleaned = _MINIMAX_TAG_RE.sub("", cleaned)
+    cleaned = _LEGACY_TOOL_CALL_RE.sub("", text)
+    cleaned = _LEGACY_TOOL_CALL_SELF_RE.sub("", cleaned)
+    cleaned = _LEGACY_INVOKE_RE.sub("", cleaned)
+    cleaned = _LEGACY_INVOKE_SELF_RE.sub("", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
 
@@ -3107,10 +3109,10 @@ async def _execute_agent(
             lowered = model_used.lower()
             if "deepseek" in lowered:
                 provider = "deepseek"
-            elif "minimax" in lowered or "minim" in lowered:
-                provider = "minimax"
             elif "gemini" in lowered:
                 provider = "gemini"
+            elif "groq" in lowered:
+                provider = "groq"
         from core import metrics
 
         metrics.record_provider_latency(provider, True, execution_started)

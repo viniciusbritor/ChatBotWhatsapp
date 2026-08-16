@@ -1,11 +1,11 @@
 """Pipeline de transcrição de áudio compartilhado entre /chat e /pubsub/push.
 
-A transcrição real (MiniMax primário + Gemini fallback, com guarda SSRF no
-download via URL da Evolution) fica em ``core.audio_transcribe``. Este módulo
-resolve o payload do envelope (``has_audio`` + ``audio_base64``/``audio_url``)
-em texto transcrito, para que o caminho de produção (/webhook → Pub/Sub →
-orquestrador) NÃO entregue ``[audio]`` direto ao LLM (que é texto puro e não
-transcreve).
+A transcrição real (Groq Whisper Large v3 Turbo primário + OpenAI Whisper-1 +
+Gemini 2.5 Flash fallback, com guarda SSRF no download via URL da Evolution)
+fica em ``core.audio_transcribe``. Este módulo resolve o payload do envelope
+(``has_audio`` + ``audio_base64``/``audio_url``) em texto transcrito, para que
+o caminho de produção (/webhook → Pub/Sub → orquestrador) NÃO entregue
+``[audio]`` direto ao LLM (que é texto puro e não transcreve).
 """
 from __future__ import annotations
 
@@ -78,12 +78,12 @@ async def transcribe_envelope_audio(payload: Dict[str, Any]) -> Dict[str, Any]:
     logger.info(
         "Audio transcribed: source=%s provider=%s chars=%s",
         source,
-        result.get("provider", "minimax:MiniMax-M3"),
+        result.get("provider", "groq:whisper-large-v3-turbo"),
         len(transcript),
     )
     return {
         "transcript": mask_pii(transcript),
-        "provider": result.get("provider", "minimax:MiniMax-M3"),
+        "provider": result.get("provider", "groq:whisper-large-v3-turbo"),
         "reason": result.get("reason", ""),
         "source": source,
     }
