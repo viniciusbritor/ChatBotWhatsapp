@@ -107,13 +107,13 @@ export const FinOpsView: React.FC<FinOpsViewProps> = ({
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900/50 p-6 rounded-2xl border border-slate-800 backdrop-blur-xl">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white dark:bg-[#191b23] p-6 rounded-2xl border border-[#c2c6d6]/40">
         <div>
-          <h2 className="text-2xl font-bold text-white flex items-center gap-3">
-            <DollarSign className="w-7 h-7 text-emerald-400" />
+          <h2 className="text-2xl font-bold text-[#191b23] dark:text-white flex items-center gap-3">
+            <DollarSign className="w-7 h-7 text-emerald-600" />
             FinOps & Escudo de Segurança (Anti-Flood)
           </h2>
-          <p className="text-slate-400 text-sm mt-1">
+          <p className="text-[#424754] dark:text-[#c2c6d6] text-sm mt-1">
             Monitoramento de custos em tempo real, detecção de ataques de bots e controle de bloqueio de usuários.
           </p>
         </div>
@@ -121,7 +121,7 @@ export const FinOpsView: React.FC<FinOpsViewProps> = ({
           <select
             value={selectedInstance}
             onChange={(e) => setSelectedInstance(e.target.value)}
-            className="bg-slate-800 border border-slate-700 text-slate-200 text-sm rounded-xl px-4 py-2.5 outline-none focus:border-emerald-500 transition-colors"
+            className="bg-[#f2f3fd] dark:bg-[#2e3038] border border-[#c2c6d6] text-[#191b23] dark:text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-emerald-500 transition-colors"
           >
             <option value="all">Todas as Contas (WhatsApp)</option>
             <option value="Jennifer">Instância Jennifer</option>
@@ -129,7 +129,7 @@ export const FinOpsView: React.FC<FinOpsViewProps> = ({
           <button
             onClick={fetchFinOps}
             disabled={loading}
-            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2.5 rounded-xl text-sm font-medium border border-slate-700 transition-colors disabled:opacity-50"
+            className="flex items-center gap-2 bg-[#ecedf7] dark:bg-[#2e3038] hover:bg-[#d8e2ff] dark:hover:bg-[#424754] text-[#191b23] dark:text-white px-4 py-2.5 rounded-xl text-sm font-medium border border-[#c2c6d6] transition-colors disabled:opacity-50"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             Atualizar
@@ -138,75 +138,75 @@ export const FinOpsView: React.FC<FinOpsViewProps> = ({
       </div>
 
       {actionMessage && (
-        <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 px-5 py-3 rounded-xl text-sm flex items-center justify-between animate-fadeIn">
+        <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 px-5 py-3 rounded-xl text-sm flex items-center justify-between">
           <span>{actionMessage}</span>
-          <button onClick={() => setActionMessage(null)} className="text-emerald-400 hover:text-white text-xs font-semibold">✕</button>
+          <button onClick={() => setActionMessage(null)} className="text-emerald-600 dark:text-emerald-400 hover:text-emerald-800 text-xs font-semibold">✕</button>
         </div>
       )}
 
       {/* Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Card 1: Custo Total */}
-        <div className="bg-slate-900/60 border border-slate-800 p-5 rounded-2xl relative overflow-hidden group hover:border-emerald-500/50 transition-all">
+        <div className="bg-white dark:bg-[#191b23] border border-[#c2c6d6]/40 p-5 rounded-2xl relative overflow-hidden group hover:border-emerald-500/50 transition-all">
           <div className="flex justify-between items-start">
             <div>
-              <p className="text-slate-400 text-xs font-semibold uppercase tracking-wider">Custo Total Estimado</p>
-              <h3 className="text-2xl font-bold text-white mt-1">
-                {data?.total_cost_usd?.toFixed(4) || '0.0000'} <span className="text-sm font-normal text-emerald-400">USD</span>
+              <p className="text-[#424754] dark:text-[#c2c6d6] text-xs font-semibold uppercase tracking-wider">Custo Total Estimado</p>
+              <h3 className="text-2xl font-bold text-[#191b23] dark:text-white mt-1">
+                {data?.total_cost_usd?.toFixed(4) || '0.0000'} <span className="text-sm font-normal text-emerald-600 dark:text-emerald-400">USD</span>
               </h3>
-              <p className="text-slate-400 text-xs mt-1">
+              <p className="text-[#424754] dark:text-[#c2c6d6] text-xs mt-1">
                 ≈ R$ {data?.total_cost_brl?.toFixed(2) || '0.00'} reais
               </p>
             </div>
-            <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400">
+            <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-600 dark:text-emerald-400">
               <DollarSign className="w-5 h-5" />
             </div>
           </div>
         </div>
 
         {/* Card 2: Total de Mensagens */}
-        <div className="bg-slate-900/60 border border-slate-800 p-5 rounded-2xl relative overflow-hidden group hover:border-blue-500/50 transition-all">
+        <div className="bg-white dark:bg-[#191b23] border border-[#c2c6d6]/40 p-5 rounded-2xl relative overflow-hidden group hover:border-blue-500/50 transition-all">
           <div className="flex justify-between items-start">
             <div>
-              <p className="text-slate-400 text-xs font-semibold uppercase tracking-wider">Mensagens Processadas</p>
-              <h3 className="text-2xl font-bold text-white mt-1">
+              <p className="text-[#424754] dark:text-[#c2c6d6] text-xs font-semibold uppercase tracking-wider">Mensagens Processadas</p>
+              <h3 className="text-2xl font-bold text-[#191b23] dark:text-white mt-1">
                 {data?.total_messages?.toLocaleString() || 0}
               </h3>
-              <p className="text-slate-400 text-xs mt-1">Interações no WhatsApp</p>
+              <p className="text-[#424754] dark:text-[#c2c6d6] text-xs mt-1">Interações no WhatsApp</p>
             </div>
-            <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl text-blue-400">
+            <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl text-blue-600 dark:text-blue-400">
               <MessageSquare className="w-5 h-5" />
             </div>
           </div>
         </div>
 
         {/* Card 3: Usuários em Quarentena */}
-        <div className="bg-slate-900/60 border border-slate-800 p-5 rounded-2xl relative overflow-hidden group hover:border-red-500/50 transition-all">
+        <div className="bg-white dark:bg-[#191b23] border border-[#c2c6d6]/40 p-5 rounded-2xl relative overflow-hidden group hover:border-red-500/50 transition-all">
           <div className="flex justify-between items-start">
             <div>
-              <p className="text-slate-400 text-xs font-semibold uppercase tracking-wider">Em Quarentena (Bloqueados)</p>
-              <h3 className="text-2xl font-bold text-white mt-1">
+              <p className="text-[#424754] dark:text-[#c2c6d6] text-xs font-semibold uppercase tracking-wider">Em Quarentena (Bloqueados)</p>
+              <h3 className="text-2xl font-bold text-[#191b23] dark:text-white mt-1">
                 {data?.quarantined_users_count || 0}
               </h3>
-              <p className="text-slate-400 text-xs mt-1">Gatilho de Flood ou Manual</p>
+              <p className="text-[#424754] dark:text-[#c2c6d6] text-xs mt-1">Gatilho de Flood ou Manual</p>
             </div>
-            <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400">
+            <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-600 dark:text-red-400">
               <ShieldAlert className="w-5 h-5" />
             </div>
           </div>
         </div>
 
         {/* Card 4: Usuários Ativos */}
-        <div className="bg-slate-900/60 border border-slate-800 p-5 rounded-2xl relative overflow-hidden group hover:border-purple-500/50 transition-all">
+        <div className="bg-white dark:bg-[#191b23] border border-[#c2c6d6]/40 p-5 rounded-2xl relative overflow-hidden group hover:border-purple-500/50 transition-all">
           <div className="flex justify-between items-start">
             <div>
-              <p className="text-slate-400 text-xs font-semibold uppercase tracking-wider">Contatos Ativos</p>
-              <h3 className="text-2xl font-bold text-white mt-1">
+              <p className="text-[#424754] dark:text-[#c2c6d6] text-xs font-semibold uppercase tracking-wider">Contatos Ativos</p>
+              <h3 className="text-2xl font-bold text-[#191b23] dark:text-white mt-1">
                 {data?.active_users_count || 0}
               </h3>
-              <p className="text-slate-400 text-xs mt-1">Interagindo normalmente</p>
+              <p className="text-[#424754] dark:text-[#c2c6d6] text-xs mt-1">Interagindo normalmente</p>
             </div>
-            <div className="p-3 bg-purple-500/10 border border-purple-500/20 rounded-xl text-purple-400">
+            <div className="p-3 bg-purple-500/10 border border-purple-500/20 rounded-xl text-purple-600 dark:text-purple-400">
               <Users className="w-5 h-5" />
             </div>
           </div>
@@ -215,13 +215,13 @@ export const FinOpsView: React.FC<FinOpsViewProps> = ({
 
       {/* Filter Tabs */}
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-2 bg-slate-900/80 p-1 rounded-xl border border-slate-800">
+        <div className="flex items-center gap-2 bg-[#ecedf7] dark:bg-[#2e3038] p-1 rounded-xl border border-[#c2c6d6]">
           <button
             onClick={() => setStatusFilter('all')}
             className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
               statusFilter === 'all'
-                ? 'bg-slate-800 text-white shadow-sm'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-white dark:bg-[#191b23] text-[#191b23] dark:text-white shadow-sm border border-[#c2c6d6]'
+                : 'text-[#424754] dark:text-[#c2c6d6] hover:text-[#191b23] dark:hover:text-white'
             }`}
           >
             Todos os Contatos ({(data?.users || []).length})
@@ -230,8 +230,8 @@ export const FinOpsView: React.FC<FinOpsViewProps> = ({
             onClick={() => setStatusFilter('active')}
             className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
               statusFilter === 'active'
-                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
+                : 'text-[#424754] dark:text-[#c2c6d6] hover:text-[#191b23] dark:hover:text-white'
             }`}
           >
             Ativos ({data?.active_users_count || 0})
@@ -240,8 +240,8 @@ export const FinOpsView: React.FC<FinOpsViewProps> = ({
             onClick={() => setStatusFilter('quarantined')}
             className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
               statusFilter === 'quarantined'
-                ? 'bg-red-500/20 text-red-300 border border-red-500/30'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-red-500/20 text-red-700 dark:text-red-300 border border-red-500/30'
+                : 'text-[#424754] dark:text-[#c2c6d6] hover:text-[#191b23] dark:hover:text-white'
             }`}
           >
             Em Quarentena ({data?.quarantined_users_count || 0})
@@ -250,11 +250,11 @@ export const FinOpsView: React.FC<FinOpsViewProps> = ({
       </div>
 
       {/* Users Table */}
-      <div className="bg-slate-900/50 border border-slate-800 rounded-2xl overflow-hidden backdrop-blur-xl">
+      <div className="bg-white dark:bg-[#191b23] border border-[#c2c6d6] rounded-2xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="border-b border-slate-800 bg-slate-900/80 text-slate-400 text-xs font-semibold uppercase tracking-wider">
+              <tr className="border-b border-[#c2c6d6]/30 bg-[#f2f3fd] dark:bg-[#2e3038] text-[#424754] dark:text-[#c2c6d6] text-xs font-semibold uppercase tracking-wider">
                 <th className="py-4 px-6">Contato / Telefone</th>
                 <th className="py-4 px-6">Grupos de Origem</th>
                 <th className="py-4 px-6">Mensagens</th>
@@ -264,10 +264,10 @@ export const FinOpsView: React.FC<FinOpsViewProps> = ({
                 <th className="py-4 px-6 text-right">Ação</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/60 text-sm">
+            <tbody className="divide-y divide-[#c2c6d6]/30 text-sm">
               {filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-12 text-slate-500">
+                  <td colSpan={7} className="text-center py-12 text-[#727785]">
                     Nenhum contato encontrado com os filtros aplicados.
                   </td>
                 </tr>
@@ -275,25 +275,25 @@ export const FinOpsView: React.FC<FinOpsViewProps> = ({
                 filteredUsers.map((u) => {
                   const isBlocked = u.is_quarantined;
                   return (
-                    <tr key={u.phone} className="hover:bg-slate-800/30 transition-colors">
+                    <tr key={u.phone} className="hover:bg-[#f2f3fd] dark:hover:bg-[#2e3038] transition-colors">
                       {/* Contato */}
                       <td className="py-4 px-6">
                         <div className="flex items-center gap-3">
                           <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs ${
                             isBlocked
-                              ? 'bg-red-500/20 text-red-400 border border-red-500/40'
-                              : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                              ? 'bg-red-500/20 text-red-700 dark:text-red-400 border border-red-500/40'
+                              : 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-500/40'
                           }`}>
                             {u.name ? u.name.charAt(0).toUpperCase() : '+'}
                           </div>
                           <div>
-                            <div className="font-medium text-white flex items-center gap-2">
+                            <div className="font-medium text-[#191b23] dark:text-white flex items-center gap-2">
                               {u.name}
                               {u.role === 'admin' && (
-                                <span className="bg-purple-500/20 text-purple-300 text-[10px] font-bold px-2 py-0.5 rounded-full border border-purple-500/30">Admin</span>
+                                <span className="bg-purple-500/20 text-purple-700 dark:text-purple-300 text-[10px] font-bold px-2 py-0.5 rounded-full border border-purple-500/30">Admin</span>
                               )}
                             </div>
-                            <div className="text-xs text-slate-400 font-mono mt-0.5">+{u.phone}</div>
+                            <div className="text-xs text-[#727785] font-mono mt-0.5">+{u.phone}</div>
                           </div>
                         </div>
                       </td>
@@ -305,38 +305,38 @@ export const FinOpsView: React.FC<FinOpsViewProps> = ({
                             {u.groups.slice(0, 2).map((g, idx) => {
                               const gName = typeof g === 'object' && g ? ((g as any).subject || (g as any).gid || '') : String(g || '');
                               return (
-                                <span key={idx} className="bg-slate-800 text-slate-300 text-[11px] px-2 py-0.5 rounded-md border border-slate-700 truncate max-w-[140px]">
+                                <span key={idx} className="bg-[#ecedf7] dark:bg-[#2e3038] text-[#424754] dark:text-[#c2c6d6] text-[11px] px-2 py-0.5 rounded-md border border-[#c2c6d6] truncate max-w-[140px]">
                                   {gName.replace('@g.us', '').slice(0, 16)}
                                 </span>
                               );
                             })}
                             {u.groups.length > 2 && (
-                              <span className="text-[10px] text-slate-400 self-center">+{u.groups.length - 2}</span>
+                              <span className="text-[10px] text-[#727785] self-center">+{u.groups.length - 2}</span>
                             )}
                           </div>
                         ) : (
-                          <span className="text-xs text-slate-500">Apenas DM</span>
+                          <span className="text-xs text-[#727785]">Apenas DM</span>
                         )}
                       </td>
 
 
                       {/* Mensagens */}
-                      <td className="py-4 px-6 text-slate-300 font-medium">
+                      <td className="py-4 px-6 text-[#191b23] dark:text-[#c2c6d6] font-medium">
                         {u.total_messages} msgs
                       </td>
 
                       {/* Tokens */}
-                      <td className="py-4 px-6 text-xs text-slate-400 font-mono">
+                      <td className="py-4 px-6 text-xs text-[#424754] dark:text-[#c2c6d6] font-mono">
                         <div>{u.total_tokens_input.toLocaleString()} in</div>
-                        <div className="text-slate-500">{u.total_tokens_output.toLocaleString()} out</div>
+                        <div className="text-[#727785]">{u.total_tokens_output.toLocaleString()} out</div>
                       </td>
 
                       {/* Custo */}
                       <td className="py-4 px-6">
-                        <div className="font-semibold text-emerald-400 font-mono">
+                        <div className="font-semibold text-emerald-700 dark:text-emerald-400 font-mono">
                           {u.estimated_cost_usd.toFixed(4)} USD
                         </div>
-                        <div className="text-xs text-slate-400 mt-0.5">
+                        <div className="text-xs text-[#424754] dark:text-[#727785] mt-0.5">
                           ≈ R$ {u.estimated_cost_brl.toFixed(2)}
                         </div>
                       </td>
@@ -344,12 +344,12 @@ export const FinOpsView: React.FC<FinOpsViewProps> = ({
                       {/* Status */}
                       <td className="py-4 px-6">
                         {isBlocked ? (
-                          <span className="inline-flex items-center gap-1.5 bg-red-500/10 text-red-400 border border-red-500/30 text-xs font-semibold px-2.5 py-1 rounded-full">
+                          <span className="inline-flex items-center gap-1.5 bg-red-500/10 text-red-700 dark:text-red-400 border border-red-500/30 text-xs font-semibold px-2.5 py-1 rounded-full">
                             <ShieldAlert className="w-3.5 h-3.5" />
                             Quarentena
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-xs font-semibold px-2.5 py-1 rounded-full">
+                          <span className="inline-flex items-center gap-1.5 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 text-xs font-semibold px-2.5 py-1 rounded-full">
                             <ShieldCheck className="w-3.5 h-3.5" />
                             Ativo
                           </span>
@@ -364,7 +364,7 @@ export const FinOpsView: React.FC<FinOpsViewProps> = ({
                           className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all disabled:opacity-50 ${
                             isBlocked
                               ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm'
-                              : 'bg-slate-800 hover:bg-red-500/20 text-slate-300 hover:text-red-300 border border-slate-700 hover:border-red-500/30'
+                              : 'bg-[#ecedf7] dark:bg-[#2e3038] hover:bg-red-500/20 text-[#191b23] dark:text-[#c2c6d6] hover:text-red-700 dark:hover:text-red-300 border border-[#c2c6d6] hover:border-red-500/30'
                           }`}
                         >
                           {actionLoading === u.phone ? (
