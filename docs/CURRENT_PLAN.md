@@ -1,7 +1,12 @@
 # CURRENT_PLAN.md — Plano de Execução por Fases (30/07/2026)
 
-> Documento dinâmico. Cada fase termina com deploy no `test` branch.
-> Cada commit = 1 fix isolado, reversível em <30s via `git revert`.
+> ⚠️ **DOCUMENTO HISTÓRICO / ARQUIVADO** — conforme atualização de 16/08/2026.
+> Este plano (Fases A-F de 30/07/2026) foi substancialmente superado pelos desenvolvimentos
+> das sessões de 13-16/08/2026 (RAG overhaul, Composio, multi-tenant, FinOps Shield,
+> Anti-Duplicação, etc). As pendências ativas estão agora em [`STATE.md`](../STATE.md)
+> e o narrative detalhado em [`DIARIO_BORDO.md`](./DIARIO_BORDO.md).
+>
+> Mantido aqui apenas para referencia historica e audit trail.
 >
 > **Fonte autoritativa de pendências:** [`STATE.md`](../STATE.md)
 

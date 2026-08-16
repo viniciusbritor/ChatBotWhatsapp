@@ -1,3 +1,36 @@
+## 16/08/2026 (05:05 BRT) — PR #42: Onboarding HTML Redesign + Sync de Docs
+
+### Contexto & Motivação
+Último merge antes da parada: PR #42 redesenhou a página de onboarding `/a/{phone}/conectar`
+com Tailwind via CDN (problema: link de onboarding vinha com imagem feia do Google).
+Sync de docs: atualização de `STATE.md` (PR #39 -> PR #42) e marcação de
+`CURRENT_PLAN.md` como arquivado/histórico.
+
+### Soluções Implementadas
+- PR #42 `feat(portal): redesign onboarding HTML with Tailwind + status feedback`:
+  - Logo Coherence AI inline SVG, tipografia Inter, card com sombra/bordas arredondadas
+  - Status badges verde/amarelo para Google + Composio
+  - Botão Composio renomeado para 'Conectar Apps de Trabalho'
+  - Check automático de conexão Google via `/admin/users/{phone}/status`
+  - 55 testes passando em `test_module_ui_admin`
+- Sync de docs:
+  - `STATE.md`: revision `agents-runtime-test-00008-qkg`, commit `5954f11` (PR #42)
+  - `CURRENT_PLAN.md`: marcado como ARQUIVADO com pointer para `STATE.md`
+
+### Pendências (sem alteração)
+- Migration `migrate_owner_phone_to_9901.py --apply` (1x manual, aguardando usuário)
+- OAuth Client Console setup para `+5511967389901` (1x manual, aguardando usuário)
+- Script `backfill_owner_hash_embeddings.py` (não criado ainda)
+
+### Testes e Validação
+- Suite: `pytest tests/test_module_ui_admin` — 55 testes passando
+- Estado: branch `test` limpa, zero divergência, working tree untracked-only
+- 0 ações manuais solicitadas — 100% via MCP + Cloud Build trigger
+
+### Próxima Sessão
+Retomar a partir de `STATE.md` para pendências técnicas (backfill embeddings)
+e ação do usuário (migration script + OAuth setup).
+
 ## 16/08/2026 (00:30 BRT) — Cleanup MiniMax + BR Migration + 6 Portal Issues
 
 ### Contexto & Motivação
