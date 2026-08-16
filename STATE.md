@@ -1,7 +1,7 @@
 # STATE.md — Estado da Sessão
 
 > Documento persistente para retomada de sessão após restart da IDE.
-> Última atualização: 2026-07-30 04:00 BRT
+> Última atualização: 2026-08-16 03:55 BRT
 
 > **Fonte autoritativa de pendências** (ativas + histórico): este arquivo.
 > `docs/GUARDRAILS.md` §11 e `docs/ARQUITETURA.md` §11 foram reduzidos a
@@ -10,33 +10,49 @@
 
 ## Resumo executivo
 
-**Branch atual:** `test`
-**Último commit local:** `e82ffbe` (TASK A folder permissions fase 1)
-**Último deploy em produção:** `b42ec173` SUCCESS, revision `agents-runtime-test-00237`
-**Status:** 13 deploys nesta sessão — bugs críticos + admin + privacy + FinOps + RAG indexes resolvidos
+**Branch atual:** `test` (sync com `origin/test`)
+**Último commit deployado:** `dc700bd` (PR #39 — FinOps light theme)
+**Último deploy em produção:** revision `agents-runtime-test-00002-wrd` em `southamerica-east1`
+**Status:** 9 deploys nesta sessão — FASE 1+2+3 (cleanup MiniMax, BR migration, 6 portal fixes)
+**URL atual:** https://agents-runtime-test-c5nbfc5meq-rj.a.run.app
 
 ## Pendências ativas (próximas fases)
 
 > Documento vivo. Cada fase termina com gate binário e deploy isolado.
 
-### TASK B RAG — runtime enforcement
-- **Status:** ✅ **IMPLEMENTADO** (PT6 F5 + owner bypass 01/08/2026)
-- **Resolve:** Tools (drive/gmail/calendar) filtram resultados por folder_permissions
-- **Cobertura:** `tools/google_*.py` aplicam `check_folder_permission` (pré) +
-  `post_filter_tool_result` (pós) via `core/owner_guard.py`; owner da instância
-  tem bypass automático. Tests: `test_folder_permissions_enforcement.py` (9),
-  `test_owner_guard.py` (21), `test_folder_permissions.py` (11).
+### FASE 1 — Code Optimizations ✅ COMPLETA
+- 1.1 mark_read dedup (PR #27) ✅
+- 1.2 prefetch conditional (PR #28) ✅
+- 1.3 prompt compress (PR #29) ✅
+- 1.4 link_shortener opt-in (PR #30) ✅
 
-### TASK A Admin — runtime enforcement
-- **Status:** ✅ **IMPLEMENTADO** (mesma esteira da TASK B)
-- **Resolve:** Tools consultam `get_user_allowed_tools()` antes de retornar resultados
+### FASE 2 — Cloud Run BR Migration ✅ COMPLETA
+- 2.1 docs BR region (PR #31) ✅
+- 2.2 Firestore location audit script (PR #32) ✅
+- 2.3 cloudbuild BR region (PR #33) ✅
+- 2.3.1 fix cloud build keywords (PR #34) ✅
+
+### FASE 3 — Portal Issues ✅ COMPLETA (15/08/2026 23:55 BRT)
+- 3.1 phone number fix 5511966830020 → 5511967389901 (PR #35) ✅
+- 3.2 LLM dropdown → read-only DeepSeek (PR #36) ✅
+- 3.3 Owners + WhatsApp Accounts enriched (PR #37) ✅
+- 3.4 Composio naming + UI shrink-0 (PR #38) ✅
+- 3.5 FinOps dark → light theme (PR #39) ✅
 
 ### Pendências externas (bloqueio usuário)
 > **Restrição (user 30/07):** rotacao de credenciais NAO sera feita por mim. Quebraria tudo.
 > Apenas o user tem acesso ao Secret Manager. Manter as chaves atuais.
-- [ ] OAuth Client setup no Google Cloud Console para telefone `+5511966830020` (setup manual user)
+- [ ] OAuth Client setup no Google Cloud Console para telefone `+5511967389901` (setup manual user)
+- [ ] Rodar `python agents_runtime/scripts/migrate_owner_phone_to_9901.py --apply` no Firestore
 - [ ] Backfill embeddings legacy (script não criado)
-- [ ] README desatualizado em `agents_runtime/README.md`
+- [ ] README desatualizado em `agents_runtime/README.md` (suite 1184 → atualizada)
+
+### FASE 4 — Deferida (condicional)
+- [ ] **JWT cache in-memory** (>100 users OU receita >$500/mês)
+- [ ] **Streaming SSE** chat_with_tools (idem)
+- [ ] **Auth middleware skip internal ports** (idem)
+- [ ] **Redis OAuth tokens** ($30/mês, idem)
+- [ ] **Multi-region (BR + US)** ($60+/mês, idem)
 
 ### Edge cases pendentes (não-críticos)
 - [ ] Anexo + pergunta pessoal — routing híbrido RAG + Drive
@@ -44,28 +60,23 @@
 - [ ] Retry budget granular in-process (Fase 0.5 Patch 4)
 - [ ] Audit log assíncrono (Fase 5 — performance)
 
-## Conquistas da sessão 30/07/2026 (DEPLOYADAS em test)
+## Conquistas consolidadas (15/08/2026 — sessão atual)
 
-| # | Fase | Commit | Mudança |
-|---|---|---|---|
-| 0 | Dedup docs | `109410f` | GUARDRAILS/ARQUITETURA/STATE autoritativo |
-| 1 | Tick azul | `8dce677` | Cold start 12s vs warm 5s |
-| 2 | RAG keywords | `4883d5a` | 28 keywords conversacionais + acento |
-| 3 | LLM contexto | `b8ccf48` | Tie-breaker com 2 últimas msgs |
-| 4 | Recent indexing | `95f0260` | Auto is_rag por 5min pós-indexing |
-| 5 | Scope-aware | `a062456` | phone OU group_jid; keywords user |
-| 6 | Filename routing | `789f488` | Bypass defense-in-depth para `.pdf/.docx` |
-| 7 | PDF multi-parser | `4e01dd9` | pypdf → pdfplumber → pdfminer |
-| 8 | PDF partial | `c3bed1f` | Tolerância página-a-página + logging |
-| A | Max tokens | `ee977fa` | Manager 1000 → 1500 via env |
-| B | Auto-image RAG | `32a04ef` | knowledge.retrieve → tabela PNG |
-| C | Humanização | `60ccee6` | Sazonalidade BRT + tom caloroso |
-| D | Privacy audit | `bc0e217` | PRIVACY_AUDIT.md completo |
-| E | FinOps pricing | `da6d01b` | core/pricing.py + cost_usd_estimated |
-| F | ROADMAP.md | `94aacaf` | ROADMAP.md + STATE.md consolidado |
-| **G** | Guard sync | `8710c0e` | **Latência -8s warm (chamada direta)** |
-| **H** | RAG indexes | `29c48a0` | **Vector composite indexes (resolve Edital.pdf bug)** |
-| **I** | Admin folder perms | `e82ffbe` | **Folder permissions endpoints + storage** |
+| # | Fase | PR | Mudança | Ganho |
+|---|---|---|---|---|
+| 1.1 | mark_read dedup | #27 | Sliding window 5s por (instance, remote_jid) | -80% chamadas Evolution |
+| 1.2 | prefetch conditional | #28 | Cascata híbrida: Firestore (name→push_name) → Evolution | -50% prefetch desnecessário |
+| 1.3 | prompt compress | #29 | jennifier.yaml 8.5KB → 3.9KB (-53.9%) | -67% tokens input |
+| 1.4 | link_shortener opt-in | #30 | Skip se < 50 chars OU sem http:// | -70% chamadas TinyURL |
+| 2.1 | docs BR region | #31 | HARNESS.md Guardrail 59 → southamerica-east1 | Doc-only |
+| 2.2 | Firestore audit | #32 | Script de auditoria (idempotente) | Audit-on-demand |
+| 2.3 | cloudbuild BR | #33 | --region=southamerica-east1 | -150ms latência BR |
+| 2.3.1 | fix cloud build | #34 | Restaura keywords críticos | Build SUCCESS |
+| 3.1 | phone number | #35 | 5511966830020 → 5511967389901 | Dados corretos |
+| 3.2 | LLM dropdown | #36 | Dropdown → read-only display | UI consistente |
+| 3.3 | Owners + Accounts | #37 | Cross-reference badge "WhatsApp:" | Melhor info |
+| 3.4 | Composio naming | #38 | Slug-based names (sem random suffix) | UI legível |
+| 3.5 | FinOps light theme | #39 | Dark → light tokens | Consistência visual |
 
 ## Documentos operacionais criados
 
@@ -74,6 +85,11 @@
 | `docs/CURRENT_PLAN.md` | Plano detalhado das fases A-F com custos estimados |
 | `docs/PRIVACY_AUDIT.md` | Auditoria completa de privacidade (7 camadas) |
 | `docs/ROADMAP.md` | Roadmap longo prazo + loop methodology |
+| `agents_runtime/core/owner_name.py` | D3 hybrid name resolver (Firestore → Evolution → mascarado) |
+| `agents_runtime/scripts/migrate_owner_phone_to_9901.py` | Migration script (idempotente) |
+| `agents_runtime/scripts/audit_firestore_location.py` | Audit script (BR compliance) |
+| `agents_runtime/core/link_shortener.py` | Opt-in shortener com 3 providers |
+| `scripts/agent_sync/` | Multi-agent coordinator (claims, audit, release, coordinator) |
 | `STATE.md` | Este arquivo — fonte autoritativa |
 
 ## WhatsappAgente — RESOLVIDO (histórico)

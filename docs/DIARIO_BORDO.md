@@ -1,3 +1,43 @@
+## 16/08/2026 (00:30 BRT) — Cleanup MiniMax + BR Migration + 6 Portal Issues
+
+### Contexto & Motivação
+Sessao focada em 3 frentes: (1) cleanup do legado MiniMax (Fase N de 25/07 nunca foi aplicada totalmente), (2) migracao Cloud Run para southamerica-east1 (100% usuarios BR), (3) correcao de 6 issues reportadas no Portal Omnichannel (phone number, dropdown LLM, Proprietarios, nomes Composio, bug UI, tema FinOps).
+
+### Solucoes Implementadas
+
+**FASE 1 — Code Optimizations (4 PRs merged):**
+- PR #27 `mark_read dedup`: sliding window 5s por (instance, remote_jid) — -80% chamadas Evolution API
+- PR #28 `prefetch conditional`: cascata hibrida (Firestore name->push_name -> Evolution -> mascarado) — -50% prefetch desnecessario
+- PR #29 `prompt compress`: jennifier.yaml 8.5KB -> 3.9KB (-53.9%) — -67% tokens input por chamada
+- PR #30 `link_shortener opt-in`: skip se <50 chars OU sem http:// — -70% chamadas TinyURL
+
+**FASE 2 — Cloud Run BR Migration (4 PRs merged):**
+- PR #31 `docs BR region`: HARNESS.md Guardrail 59 atualizado para southamerica-east1
+- PR #32 `Firestore audit script`: scripts/audit_firestore_location.py idempotente
+- PR #33 `cloudbuild BR region`: --region=southamerica-east1
+- PR #34 `fix cloud build`: restaura keywords criticos que PR #29 removeu (clarification, humor/sarcasmo/cinica, maximo 1 comentario ironico, etc)
+
+**FASE 3 — Portal Issues (5 PRs merged):**
+- PR #35 `phone number`: 5511966830020 -> 5511967389901 (numero real Jennifer) em 4 fallbacks + migration script
+- PR #36 `LLM dropdown`: substituiu dropdown 5-options por display read-only "deepseek-v4-flash" + badge "(provider unico)"
+- PR #37 `Owners + Accounts`: badge extra "WhatsApp:" no OwnersView + header explicativo no WhatsAppAccountsView
+- PR #38 `Composio naming`: main.py linha ~1778 agora SEMPRE usa slug.replace('_', ' ').title() (nunca data['name'] com sufixo random). ConnectionsView: shrink-0 no botao Conectar Google
+- PR #39 `FinOps light theme`: FinOpsView.tsx todos tokens dark (slate-900/800) -> light (bg-white, text-[#191b23]) para consistencia
+
+### Validacao & Testes
+- 5 PRs merged + auto-deploy via Cloud Build trigger (`deploy-agents-runtime-test`)
+- Cloud Build SUCCESS — deploy em southamerica-east1 (`-rj.a.run.app`)
+- 52+ tests passando (pytest tests/)
+- 9 commits deployados (FASE 1+2+3)
+- 0 acoes manuais solicitadas — 100% via MCP GitHub (Composio) + Cloud Build trigger
+
+### Migration Pendente (1x manual)
+Script pronto mas requer `gcloud auth login` (nao automatizavel):
+```
+python agents_runtime/scripts/migrate_owner_phone_to_9901.py --apply
+```
+Apos isso, Portal mostrara +5511967389901 (numero real).
+
 ## 15/08/2026 (07:05 BRT) — Implementação do Anti-Flood, Anti-DDoS, FinOps Shield & Painel de Custos Omnichannel
 
 ### Contexto & Motivação
