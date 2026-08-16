@@ -92,7 +92,7 @@ agents-runtime-test (POST /pubsub/push, ledger claim, orchestrate)
   ↕ (LangGraph: jennifier_node -> classify_intent -> guard_node -> manager -> reply)
   ↕ (access_guardian: resolve owner + check google_oauth_token + check scopes)
   ↕ (Whisper local; fallback Gemini 2.5 Flash somente sob consentimento)
-  ↕ (LLM cascade MiniMax M2.7-highspeed -> Gemini 2.5 Flash)
+  ↕ (LLM único DeepSeek V4 Flash; classificador zero-custo Groq llama-3.1-8b-instant)
 Evolution /message/sendText + /chat/markMessagesAsRead
   ↕ (resposta + tick azul)
 Celular

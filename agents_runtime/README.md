@@ -67,7 +67,8 @@ agents-runtime-test
 Pub/Sub + DLQ nativa
   ↕ push /pubsub/push (claim no ledger Firestore)
   ↕ Whisper local → Gemini 2.5 Flash (somente sob consentimento)
-  ↕ LLM cascade MiniMax M2.7 Highspeed → M3 → DeepSeek V4 Flash
+  ↕ LLM único DeepSeek V4 Flash (prompt cache ativo)
+  ↕ Groq Whisper Large v3 Turbo → OpenAI Whisper-1 → Gemini 2.5 Flash (STT cascade)
   ↕ Tools Google (somente telefone do proprietário)
 Evolution /message/sendText
   ↕ resposta + tick azul
