@@ -26,8 +26,10 @@ def reset_cache():
     os.environ["LINK_SHORTENER_ENABLED"] = "true"
     os.environ["LINK_SHORTENER_PROVIDER"] = "tinyurl"
     os.environ["LINK_SHORTENER_TIMEOUT_SEC"] = "3"
+    os.environ["LINK_SHORTENER_MIN_TEXT_LENGTH"] = "0"  # disable opt-in for unit tests
     yield
     clear_cache()
+    os.environ.pop("LINK_SHORTENER_MIN_TEXT_LENGTH", None)
 
 
 class TestShortenOneUrl:

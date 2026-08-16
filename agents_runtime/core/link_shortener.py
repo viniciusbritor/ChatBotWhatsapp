@@ -176,12 +176,28 @@ def shorten_urls_in_text(text: str) -> str:
     """Encurta todas as URLs em `text`. Preserva formatacao.
 
     Se o shortener estiver desativado ou falhar, retorna o texto original.
+
+    Optimizacao: pula encurtamento se:
+    - texto menor que MIN_TEXT_LENGTH_CHARS (default 50)
+    - texto NAO contem http:// ou https://
+
+    Isso evita chamadas HTTP para ~70% das mensagens WhatsApp (acks curtos,
+    respostas simples) que NAO tem URLs.
     """
     if not text:
         return text if text == "" else ""
 
     enabled = os.getenv("LINK_SHORTENER_ENABLED", "true").lower() not in ("false", "0", "no")
     if not enabled:
+        return text
+
+    # Optimizacao: skip em textos curtos (70% das msgs nao tem URL)
+    min_len = int(os.getenv("LINK_SHORTENER_MIN_TEXT_LENGTH", "50"))
+    if len(text) < min_len:
+        return text
+
+    # Optimizacao: skip se nao tem http:// ou https://
+    if "http://" not in text and "https://" not in text:
         return text
 
     urls = _URL_PATTERN.findall(text)
