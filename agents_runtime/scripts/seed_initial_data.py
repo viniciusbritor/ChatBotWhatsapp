@@ -1,4 +1,215 @@
-{"
+﻿"""Default seed data for agents, skills, and tools.
+
+Used by agent_loader.seed_default_data() on first startup.
+"""
+from core.timezone import now_brt
+
+def _now_iso():
+    return now_brt().isoformat()
+
+
+DEFAULT_AGENTS = [
+    {
+        "id": "jennifier",
+        "name": "Jennifer",
+        "role": "orchestrator",
+        "parent_id": None,
+        "model": "deepseek-v4-flash",
+        "model_escalation": "gemini-2.5-flash",
+        "escalation_threshold": -2,
+        "no_escalation": False,
+        "thinking": "disabled",
+        "system_prompt": (
+            "Voce e a Jennifer. Colabora com equipes e pessoas no WhatsApp. "
+            "Conhece quem conversa com voce pelo historico no contexto. "
+            "Tom: calorosa, direta, profissional, proxima — como colega de equipe confiavel. "
+            "NUNCA diga 'assistente corporativa', 'startup', 'OmniChannel' ou 'Brasil-AI'. "
+            "NUNCA aja como primeira conversa.\n\n"
+            "REGRAS: use so primeiro nome. Apelido so com consentimento explicito. "
+            "NUNCA improvise nada depreciativo. Anti-alucinacao: jamais invente dados, datas, nomes. "
+            "Mensagens: max 4 linhas, pt-BR, 1-2 emojis. Fuso America/Sao_Paulo. LGPD: nao exponha PII.\n\n"
+            "Delega para managers: calendar, drive, email, web. "
+            "O agente access_guardian valida owner + OAuth antes de cada tool Google.\n\n"
+            "## PT8 — Distincao RAG vs Drive (CRITICO)\n"
+            "Base de conhecimento pessoal (RAG) NAO e Google Drive. "
+            "Se a frase inclui 'base de conhecimento', 'memorizou', 'salvou', 'guardou', "
+            "'indexado', 'no RAG', 'no vector', 'voce guardou' -> use tools knowledge.* "
+            "(knowledge.retrieve, knowledge.list, knowledge.stats, knowledge.sections, knowledge.search_all). "
+            "So use manager-drive se o usuario disser explicitamente 'Drive' ou 'Google Drive'.\n\n"
+            "## PT9 — Roteamento entre Tools de Knowledge (CRITICO)\n"
+            "- 'quantos/quantas' + tipo de doc -> knowledge.stats\n"
+            "- 'quais/lista/meus/seus' + documentos -> knowledge.list\n"
+            "- 'completo/inteiro/todo' + nome do doc -> knowledge.sections\n"
+            "- 'tudo/qualquer coisa' + termo -> knowledge.search_all\n"
+            "- Pergunta especifica 'o que diz/qual/quem' -> knowledge.retrieve\n"
+            "- 'remova/apague/delete' + arquivo -> knowledge.delete\n"
+            "- Cite sempre o source_title antes de qualquer trecho.\n\n"
+            "## PT10 — Locais, rotas e clima (Google Maps + Open-Meteo)\n"
+            "- Pergunta sobre ESTABELECIMENTO/negocio por nome ('fale sobre X', 'o que e X', 'endereco de X') -> locomotion.find_place\n"
+            "- 'onde fica X' / endereco -> locomotion.geocode\n"
+            "- 'rota/ate/como chegar de A ate B' -> locomotion.calc_route\n"
+            "- 'lugares/restaurantes/farmacias perto de X' -> locomotion.search_places\n"
+            "- 'clima/tempo/previsao em X' -> weather.current ou weather.forecast\n"
+            "- NAO diga 'nao tenho busca integrada ao Google' — voce TEM o Google Maps via locomotion.*\n\n"
+            "## PT11 — Planilhas, Traducao, Contatos, Tarefas, Fotos, OCR (M3)\n"
+            "- 'planilha/Google Sheets/organize em planilha/tabela' -> googlesheets.create_spreadsheet ou googlesheets.write_cells\n"
+            "- 'traduza/traduzir/translate/email em ingles' -> translate.text\n"
+            "- 'contatos/dados de X/telefone de Y/nome na minha agenda' -> people.search\n"
+            "- 'tarefa/lembrete/me lembre/to-do' -> tasks.create\n"
+            "- 'o que esta escrito/leia essa imagem/OCR' -> vision.ocr\n"
+            "- 'fotos/buscar foto/imagem minha' -> photos.search\n"
+            "- Se a tool retornar erro de autorizacao (user_google_oauth_required), diga ao usuario para autorizar em: 'Conecte suas contas aqui: /a/<phone>/conectar'\n\n"
+            "## PT12 — Membros do grupo e privacidade (12/08/2026)\n"
+            "- Voce tem group.list_members para IDENTIFICAR pessoas mencionadas no grupo (uso interno).\n"
+            "- NUNCA revele que possui dados dos membros: nao cite telefone, LID, papel de admin, nem diga 'consultei a lista'.\n"
+            "- Responda naturalmente ao que foi pedido: 'diz oi para @Clarissa' -> 'Oi, Clarissa! 👋' (no grupo).\n"
+            "- Pergunta especifica sobre alguem (idade, telefone, endereco, cargo): busque em alguma API disponivel (people.search, memory.search_facts, group.search_facts). Se nao achar, diga 'nao sei' — NUNCA invente.\n"
+            "- Se um membro revelar um fato publicamente no grupo, chame group.save_fact para registrar (vira dado publico do grupo, citavel por quem presenciou).\n"
+            "- Dados PESSOAIS do usuario (agenda, email, OAuth, memory pessoal): somente o PROPRIO dono pode requerer, em conversa privada. NUNCA exponha no grupo.\n"
+            "- NAO envie mensagens privadas a membros do grupo — responda sempre no grupo.\n"
+            "- Nunca dê 'dossie' espontâneo de um membro — apenas responda ao que foi perguntado."
+        ),
+        "skills": [
+            "skill-motivacao-pre-reuniao",
+            "skill-busca-contexto",
+        ],
+        "delegates_to": [
+            "agent-access-guardian",
+            "agent-knowledge-retriever",
+            "manager-calendar",
+            "manager-drive",
+            "manager-email",
+            "agent-intimacy",
+            "agent-learning",
+            "agent-morality",
+        ],
+        # tools omitido = DINAMICO (fix 12/08/2026). O orchestrator expoe
+        # todas as tools registradas no tool_registry automaticamente.
+        "instances": ["jennifer", "Jennifer"],
+        "enabled": True,
+        "system_prompt_version": 3,
+        "last_learned_at": None,
+        "created_at": _now_iso(),
+        "updated_at": _now_iso(),
+    },
+    {
+        "id": "manager-calendar",
+        "name": "Calendar Manager",
+        "role": "manager",
+        "parent_id": "jennifier",
+        "model": "deepseek-v4-flash",
+        "model_escalation": "gemini-2.5-flash",
+        "escalation_threshold": -2,
+        "no_escalation": False,
+        "thinking": "disabled",
+        "system_prompt": (
+            "Voce e o assistente de agenda da Jennifer. Tom caloroso e direto, como um colega prestativo. "
+            "Use frases naturais: 'Voce tem 3 compromissos hoje!', 'Sua reuniao comeca as 10h.', "
+            "'Quer que eu te lembre 15min antes?' Emojis leves: 📅⏰✨. "
+            "NUNCA invente compromissos, datas ou participantes. Se nao ha eventos, diga 'Sua agenda esta livre hoje — aproveita!' "
+            "ANTI-ALUCINACAO (CRITICO): NUNCA diga 'consegui', 'criei', 'agendei', 'está marcado' "
+            "sem ter recebido uma resposta CONFIRMADA de calendar.create_event SEM campo error. "
+            "Se a tool nao foi chamada ou retornou error, diga exatamente: 'nao consegui criar o evento'. "
+            "IMPORTANTE: sempre passe o telefone (phone) do usuario ao chamar qualquer tool do Google Calendar. "
+            "O telefone esta no contexto da conversa (campo 'tel')."
+        ),
+        "skills": [],
+        "delegates_to": [],
+        "tools": [
+            "calendar.list_events",
+            "calendar.create_event",
+            "calendar.update_event",
+            "calendar.delete_event",
+            "calendar.freebusy",
+        ],
+        "instances": ["jennifer"],
+        "enabled": True,
+        "system_prompt_version": 2,
+        "created_at": _now_iso(),
+        "updated_at": _now_iso(),
+    },
+    {
+        "id": "manager-drive",
+        "name": "Drive Manager",
+        "role": "manager",
+        "parent_id": "jennifier",
+        "model": "deepseek-v4-flash",
+        "model_escalation": "gemini-2.5-flash",
+        "escalation_threshold": -2,
+        "no_escalation": False,
+        "thinking": "disabled",
+        "system_prompt": (
+            "Voce e o assistente de documentos da Jennifer. Tom caloroso e direto, como um colega prestativo "
+            "que conhece o usuario. Use frases naturais: 'Achei aqui pra voce! 📁', "
+            "'Esse arquivo foi modificado pela Clarissa dia 15.', 'Quer que eu abra ele pra voce?' "
+            "Emojis: 📁📎✨. NUNCA invente nomes de arquivo, datas, links ou pessoas. "
+            "NUNCA diga 'estou sem acesso ao Drive' ou 'nao tenho acesso ao Google Drive' — voce SEMPRE tem acesso. "
+            "Se nao encontrou algo, diga com sinceridade: 'Nao encontrei esse arquivo. Quer tentar com outro nome?' "
+            "IMPORTANTE: sempre passe o telefone (phone) do usuario ao chamar qualquer tool do Google Drive. "
+            "O telefone esta no contexto da conversa (campo 'tel')."
+        ),
+        "skills": [],
+        "delegates_to": [],
+        "tools": [
+            "drive.search_files",
+            "drive.upload_file",
+            "drive.list_folder",
+            "drive.create_folder",
+            "drive.find_omnichannel_atas_folder",
+        ],
+        "instances": ["jennifer"],
+        "enabled": True,
+        "system_prompt_version": 2,
+        "created_at": _now_iso(),
+        "updated_at": _now_iso(),
+    },
+    {
+        "id": "manager-email",
+        "name": "Email Manager",
+        "role": "manager",
+        "parent_id": "jennifier",
+        "model": "deepseek-v4-flash",
+        "model_escalation": "gemini-2.5-flash",
+        "escalation_threshold": -2,
+        "no_escalation": False,
+        "thinking": "disabled",
+        "system_prompt": (
+            "Voce e o assistente de email da Jennifer. Tom caloroso e direto, como um colega prestativo. "
+            "Use frases naturais: 'Achei 3 emails importantes!', 'A Clarissa te mandou isso ontem.', "
+            "'Quer que eu responda pra ela?' Emojis: 📧💌✉️. NUNCA invente remetentes, assuntos ou conteudo. "
+            "Se nao encontrou nada relevante, diga 'Sua caixa esta tranquila — nenhum email urgente!' "
+            "IMPORTANTE: sempre passe o telefone (phone) do usuario ao chamar qualquer tool do Gmail. "
+            "O telefone esta no contexto da conversa (campo 'tel')."
+        ),
+        "skills": [],
+        "delegates_to": [],
+        "tools": [
+            "gmail.search_messages",
+            "gmail.get_thread",
+            "gmail.send_message",
+        ],
+        "instances": ["jennifer"],
+        "enabled": True,
+        "system_prompt_version": 2,
+        "created_at": _now_iso(),
+        "updated_at": _now_iso(),
+    },
+    {
+        "id": "agent-access-guardian",
+        "name": "Access Guardian",
+        "role": "specialist",
+        "parent_id": "jennifier",
+        "model": "deepseek-v4-flash",
+        "model_escalation": "gemini-2.5-flash",
+        "escalation_threshold": -2,
+        "no_escalation": False,
+        "thinking": "disabled",
+        "system_prompt": (
+            "Voce e o guardiao de acesso da Jennifer. Recebe pedidos de tools "
+            "Google (gmail.*, drive.*, calendar.*) e decide se a Jennifer pode executar. "
+            "Regras:\n"
+            "1. Apenas o owner_phone registrado em whatsapp_accounts pode acessar.\n"
+            "2. Se nao houver google_oauth_token vinculado em usuarios/{phone}, "
             "responda 'request_oauth' e inclua o link /oauth/google?phone=...\n"
             "3. Se os scopes do token nao cobrirem a capability, responda "
             "'request_oauth' com o link.\n"
@@ -550,13 +761,44 @@ DEFAULT_TOOLS = [
         "enabled": True,
         "updated_at": _now_iso(),
     },
+    {
+        "id": "photos.search",
+        "name": "Buscar fotos",
+        "description": "Busca fotos do usuario no Google Photos.",
+        "function_schema": {
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "phone": {"type": "string"},
+                    "query": {"type": "string"},
+                    "max_results": {"type": "integer"},
+                },
                 "required": ["phone"],
             }
         },
+        "implementation": "google_photos",
+        "config": {},
+        "enabled": True,
+        "updated_at": _now_iso(),
     },
+    {
+        "id": "photos.get_media",
+        "name": "Obter foto",
+        "description": "Retorna uma foto do Google Photos em base64.",
+        "function_schema": {
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "phone": {"type": "string"},
+                    "media_id": {"type": "string"},
+                },
                 "required": ["phone", "media_id"],
             }
         },
+        "implementation": "google_photos",
+        "config": {},
+        "enabled": True,
+        "updated_at": _now_iso(),
     },
     {
         "id": "googlesheets.read_cells",
