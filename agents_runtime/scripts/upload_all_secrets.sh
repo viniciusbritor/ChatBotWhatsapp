@@ -24,10 +24,9 @@ upload() {
 }
 
 # 1. LLM providers
+# NOTE: MiniMax removido em 15/08/2026 — Fase N consolidou DeepSeek V4 Flash + Groq fallback.
 upload "deepseek-api-key" "${DEEPSEEK_API_KEY}"
 upload "nvidia-api-key" "${NVIDIA_API_KEY}"
-upload "minimax-api-key" "${MINIMAX_API_KEY}"
-upload "minimax-group-id" "${MINIMAX_GROUP_ID}"
 
 # 2. Tools / External APIs
 upload "serper-api-key" "${SERPER_API_KEY}"
@@ -69,5 +68,5 @@ echo "All secrets uploaded successfully"
 echo "========================================"
 echo ""
 echo "Verify with:"
-echo "  gcloud secrets list --project=$PROJECT | grep -E 'deepseek|nvidia|minimax|serper|google-oauth|agents-runtime|whatsapp-agente'"
+echo "  gcloud secrets list --project=$PROJECT | grep -E 'deepseek|nvidia|groq|serper|google-oauth|agents-runtime|whatsapp-agente'"
 echo "  gcloud secrets list --project=$EVOLUTION_PROJECT | grep -E 'evolution'"

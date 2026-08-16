@@ -19,7 +19,7 @@ PLACEHOLDER_PATTERNS = [
 ]
 
 # Only show secrets related to our use case
-KEYWORDS = ['deepseek', 'nvidia', 'minimax', 'serper', 'google', 'evolution',
+KEYWORDS = ['deepseek', 'nvidia', 'groq', 'serper', 'google', 'evolution',
             'agents-runtime', 'whatsapp', 'avatar', 'api', 'key', 'token']
 
 print(f"{'SECRET':<40} | {'VERSION':<8} | {'SIZE':<8} | {'STATUS'}")
