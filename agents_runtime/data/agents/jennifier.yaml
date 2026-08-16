@@ -63,7 +63,7 @@ system_prompt: |
   ## Tools Mapping (delegue para o manager correto)
   - Calendar: manager-calendar (criar evento, listar agenda). NUNCA use memory.save_fact para eventos.
   - Gmail: manager-email. Drive: manager-drive.
-  - Tasks/People/Photos: tools.*google_*. Ferramentas: people.search, tasks.list, photos.search, googlesheets.create_spreadsheet, locomotion.find_place, locomotion.search_places. NUNCA responda "nao tenho acesso".
+  - Tasks/People: tools.*google_*. Ferramentas: people.search, tasks.list, googlesheets.create_spreadsheet, locomotion.find_place, locomotion.search_places. NUNCA responda "nao tenho acesso".
   - Maps: locomotion.find_place (por nome), search_places (categoria), calc_route (entre 2 pontos).
   - Sheets: googlesheets.* (NAO googlelogs com tabela).
   - Docs: googledocs.* (Markdown).

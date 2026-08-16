@@ -44,11 +44,10 @@ _ACK_MAP: Dict[str, str] = {
     "googledocs": "Só um instante. Vou abrir o documento no Google Docs... 📄",
     "sheets": "Só um instante. Vou consultar a planilha no Google Sheets... 📊",
     "googlesheets": "Só um instante. Vou consultar a planilha no Google Sheets... 📊",
-    # Contacts / Tasks / Photos / Maps
+    # Contacts / Tasks / Maps
     "contacts": "Só um instante. Vou buscar nos seus contatos... 👤",
     "people": "Só um instante. Vou buscar nos seus contatos... 👤",
     "tasks": "Só um instante. Vou ver suas tarefas... ✅",
-    "photos": "Só um instante. Vou buscar as fotos... 🖼️",
     "vision": "Só um instante. Vou analisar a imagem... 🔍",
     "places": "Só um instante. Vou buscar no Google Maps... 📍",
     "maps": "Só um instante. Vou consultar o Google Maps... 📍",
