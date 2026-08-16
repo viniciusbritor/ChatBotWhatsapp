@@ -23,16 +23,16 @@ export const WhatsAppAccountsView: React.FC<WhatsAppAccountsViewProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Header Section */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-[28px] font-bold text-[#191b23] dark:text-white tracking-tight">
-            Contas WhatsApp
-          </h2>
-          <p className="text-[14px] text-[#424754] dark:text-[#c2c6d6] mt-1">
-            Instâncias conectadas via Evolution API
-          </p>
-        </div>
+        {/* Header Section */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h2 className="text-[28px] font-bold text-[#191b23] dark:text-white tracking-tight">
+              Contas WhatsApp
+            </h2>
+            <p className="text-[14px] text-[#424754] dark:text-[#c2c6d6] mt-1">
+              Instâncias conectadas via Evolution API. Owner_phone = whatsapp_accounts.owner_phone.
+            </p>
+          </div>
         <button
           onClick={onAddNew}
           className="bg-[#2170e4] hover:bg-[#0058be] text-white font-semibold text-[13px] px-4 py-2.5 rounded-xl transition-all flex items-center justify-center gap-2 shadow-xs shrink-0"

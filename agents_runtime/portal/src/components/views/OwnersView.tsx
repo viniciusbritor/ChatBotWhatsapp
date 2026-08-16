@@ -24,7 +24,7 @@ export const OwnersView: React.FC<OwnersViewProps> = ({ owners, onAddNew, search
             Proprietários
           </h1>
           <p className="text-[14px] text-[#424754] dark:text-[#c2c6d6] mt-1">
-            Dono único por instância (whatsapp_accounts.owner_phone)
+            Dono único por instância Evolution (whatsapp_accounts.owner_phone)
           </p>
         </div>
         <button
@@ -74,6 +74,12 @@ export const OwnersView: React.FC<OwnersViewProps> = ({ owners, onAddNew, search
               <span className="inline-flex items-center gap-1.5 bg-[#e1e2ec] dark:bg-[#2e3038] text-[#424754] dark:text-[#c2c6d6] font-mono text-[12px] px-3 py-1 rounded-md">
                 <span className="material-symbols-outlined text-[14px]">dns</span>
                 {owner.instance}
+              </span>
+
+              {/* Linked Accounts Badge */}
+              <span className="inline-flex items-center gap-1.5 bg-[#0058be]/10 dark:bg-[#adc6ff]/20 text-[#0058be] dark:text-[#adc6ff] border border-[#0058be]/30 font-mono text-[12px] px-3 py-1 rounded-md">
+                <span className="material-symbols-outlined text-[14px]">link</span>
+                WhatsApp: {owner.phone}
               </span>
             </div>
           </article>
