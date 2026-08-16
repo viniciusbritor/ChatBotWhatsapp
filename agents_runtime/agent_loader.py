@@ -658,6 +658,9 @@ def is_user_approved(phone: str) -> bool:
     1. Owner da instancia e admin sempre sao aprovados.
     2. Usuario com is_approved=True ou token Google / email vinculado no Portal.
     3. Retorna False se o usuario for guest ou nao aprovado.
+
+    Cada caminho de aprovacao automatica emite log estruturado
+    ``auto_approval_granted`` com o motivo, para auditoria via Portal Admin.
     """
     canonical = _canonical_phone(phone)
     if not canonical:
@@ -671,13 +674,44 @@ def is_user_approved(phone: str) -> bool:
     if user.get("is_approved") is True:
         return True
     if user.get("google_oauth_token") or user.get("approved_by"):
+        logger.info(
+            "auto_approval_granted phone=%s reason=oauth_or_approved_by",
+            canonical,
+            extra={
+                "event_name": "auto_approval_granted",
+                "phone": canonical,
+                "reason": "oauth_or_approved_by",
+                "approved_by": user.get("approved_by", ""),
+            },
+        )
         return True
     if user.get("email"):
         coherence_role = get_coherence_module_role(user["email"])
         if coherence_role in ("admin", "agent_user", "analyst", "analista"):
+            logger.info(
+                "auto_approval_granted phone=%s reason=portal_role email=%s role=%s",
+                canonical, user.get("email", ""), coherence_role,
+                extra={
+                    "event_name": "auto_approval_granted",
+                    "phone": canonical,
+                    "reason": "portal_role_match",
+                    "email": user.get("email", ""),
+                    "coherence_role": coherence_role,
+                },
+            )
             return True
     role = str(user.get("role", "")).strip().lower()
     if role in ("admin", "analyst", "analista", "agent_user") and role != "guest":
+        logger.info(
+            "auto_approval_granted phone=%s reason=firestore_role role=%s",
+            canonical, role,
+            extra={
+                "event_name": "auto_approval_granted",
+                "phone": canonical,
+                "reason": "firestore_role_match",
+                "role": role,
+            },
+        )
         return True
     return False
 
