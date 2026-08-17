@@ -179,7 +179,20 @@ class ApiRegistry:
         return True
 
     def get_meta(self, slug: str) -> Optional[ApiMeta]:
-        """Retorna metadados de uma API/toolkit (se permitido)."""
+        """Retorna metadados de uma API/toolkit (se permitido).
+
+        Se a discovery nunca rodou (ou falhou), tenta fazer discovery lazy
+        para evitar que o sistema fique quebrado por bug de startup.
+        """
+        if not self._discovered:
+            logger.warning(
+                "api_registry_not_discovered_lazy_retry slug=%s",
+                slug,
+            )
+            try:
+                asyncio.run(self.discover_all())
+            except Exception as exc:
+                logger.warning("api_registry_lazy_retry_failed: %s", exc)
         meta = self._google_apis.get(slug) or self._composio_toolkits.get(slug)
         if meta and self.is_allowed(slug):
             return meta

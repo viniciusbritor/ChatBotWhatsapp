@@ -141,13 +141,20 @@ if _portal_available():
     except Exception as exc:  # noqa: BLE001
         logger.warning("portal_react_mount_failed exc=%s", exc)
 
-    # GUARDRAIL (17/08/2026): auto-discovery de APIs/toolkits no startup.
-    # ApiRegistry descobre Google APIs (via GOOGLE_SERVICES) e Composio
-    # toolkits (via SDK). DynamicManagerFactory usa o registry para construir
-    # managers sob demanda. Allowlist (ALLOWED_TOOLKITS) controla a seguranca.
+@app.on_event("startup")
+async def _startup_api_registry():
+    """GUARDRAIL (17/08/2026): auto-discovery de APIs/toolkits no startup do FastAPI.
+
+    ApiRegistry descobre Google APIs (via GOOGLE_SERVICES) e Composio
+    toolkits (via SDK). DynamicManagerFactory usa o registry para construir
+    managers sob demanda. Allowlist (ALLOWED_TOOLKITS) controla a seguranca.
+
+    NOTA: NAO chamar asyncio.run() no module-level (gera RuntimeWarning
+    'coroutine was never awaited' porque uvicorn ja tem event loop).
+    """
+    from tools.api_registry import api_registry
     try:
-        from tools.api_registry import api_registry
-        asyncio.run(api_registry.discover_all())
+        await api_registry.discover_all()
         logger.info(
             "api_registry_ready toolkits=%d",
             len(api_registry.list_allowed_slugs()),
