@@ -1,7 +1,10 @@
-"""Admin Notification & 1-Click WhatsApp Approval Workflow.
+"""Admin Notification & WhatsApp Approval Workflow.
 
-Notifica o WhatsApp do Admin (Vinicius) quando um usuário não autorizado
-solicita acesso à Jennifer, gerando link assinado de aprovação em 1 clique.
+GUARDRAIL (17/08/2026): aprovação por mensagem explícita no WhatsApp.
+Admin responde "OK, APROVADO" ou "NÃO, REJEITADO" direto no chat,
+substituindo o link HMAC como mecanismo primário.
+
+O link HMAC continua disponível como fallback (Portal Rich-Path).
 """
 import base64
 import hashlib
@@ -13,6 +16,7 @@ import re
 import time
 from typing import Optional
 
+from core.approval_store import create_pending_approval
 from core.timezone import now_brt
 
 logger = logging.getLogger(__name__)
@@ -87,7 +91,14 @@ async def notify_admin_access_request(
     message_text: str = "",
     instance: str = "Jennifer",
 ) -> bool:
-    """Envia notificacao no WhatsApp do Admin quando um visitante pede acesso."""
+    """Envia solicitacao ao admin com instrucoes para responder por WhatsApp.
+
+    GUARDRAIL (17/08/2026): substitui o link HMAC por mensagem explicita.
+    Admin responde DIRETO no WhatsApp (sem sair do app).
+
+    Returns:
+        True se enviou mensagem, False caso contrario.
+    """
     clean_phone = re.sub(r"\D", "", str(phone or ""))
     if not sender_name or sender_name.strip().lower() in ("user", "usuario", "usuário", "none", "null") or sender_name.startswith("+") or sender_name.isdigit():
         try:
@@ -133,19 +144,42 @@ async def notify_admin_access_request(
         )
         return False
 
-    approval_url = generate_approval_url(clean_phone)
-    name_display = sender_name.strip() if sender_name else "Novo Contato"
+    # Cria registro pending no Firestore e obtem run_id
+    # (create_pending_approval importado no topo do modulo)
+    name_display = sender_name.strip() if sender_name else "Usuario"
+    intent = "unknown"  # sera inferido do context na fase 5
+    try:
+        run_id = create_pending_approval(
+            phone=clean_phone,
+            name=name_display,
+            intent=intent,
+            message=message_text,
+        )
+    except Exception as exc:
+        logger.warning(
+            "create_pending_approval_failed phone=%s exc=%s",
+            clean_phone, exc,
+            extra={"event_name": "create_pending_approval_failed"},
+        )
+        return False
+
     snippet = message_text.strip().replace("\n", " ")[:150]
     if len(snippet) == 150:
         snippet += "..."
 
+    # Mensagem dual-path: fast (WhatsApp) + rich (Portal)
+    portal_url = "portal.coherence-ai.com.br/admin/approvals"
     msg = (
-        f"🔔 *Solicitação de Acesso à Jennifer*\n\n"
+        f"🔔 *Nova Solicitação de Acesso*\n\n"
         f"👤 *Nome:* {name_display}\n"
         f"📱 *Telefone:* +{clean_phone}\n"
         f"💬 *Mensagem:* \"{snippet}\"\n\n"
-        f"Para liberar o acesso como *Analista*, clique no link abaixo:\n"
-        f"👉 {approval_url}"
+        f"*Responda com:*\n"
+        f"✅ *OK, APROVADO*\n"
+        f"❌ *NÃO, REJEITADO*\n\n"
+        f"💡 Ou responda 'ok {run_id}' para uma específica\n"
+        f"🌐 Ou gerencie em lote: {portal_url}\n\n"
+        f"Run ID: {run_id}"
     )
 
     try:
@@ -157,21 +191,25 @@ async def notify_admin_access_request(
         )
         if success:
             logger.info(
-                "notify_admin_send_ok phone=%s admin_phone=%s instance=%s",
-                clean_phone, admin_phone, instance,
-                extra={"event_name": "notify_admin_send_ok", "decision": "notified"},
+                "notify_admin_send_ok phone=%s admin_phone=%s run_id=%s instance=%s",
+                clean_phone, admin_phone, run_id, instance,
+                extra={
+                    "event_name": "notify_admin_send_ok",
+                    "decision": "notified",
+                    "run_id": run_id,
+                },
             )
             return True
         logger.warning(
-            "notify_admin_send_returned_false phone=%s admin_phone=%s instance=%s",
-            clean_phone, admin_phone, instance,
+            "notify_admin_send_returned_false phone=%s admin_phone=%s run_id=%s instance=%s",
+            clean_phone, admin_phone, run_id, instance,
             extra={"event_name": "notify_admin_send_failed", "decision": "send_returned_false"},
         )
         return False
     except Exception as exc:
         logger.warning(
-            "notify_admin_send_exception phone=%s exc=%s",
-            clean_phone, exc,
+            "notify_admin_send_exception phone=%s run_id=%s exc=%s",
+            clean_phone, run_id, exc,
             extra={"event_name": "notify_admin_send_failed", "reason": "exception"},
         )
         return False
