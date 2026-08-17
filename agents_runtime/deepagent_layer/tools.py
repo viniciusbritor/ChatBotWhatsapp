@@ -35,6 +35,8 @@ def _build_langchain_tools_for(manager_id: str) -> List[Any]:
         return _build_linkedin_tools()
     if manager_id == "manager-googledocs":
         return _build_googledocs_tools()
+    if manager_id == "manager-googlesheets":
+        return _build_googlesheets_tools()
     if manager_id == "manager-jennifier":
         # Agente conversacional geral: nao tem tools. Retorna lista vazia
         # explicitamente para evitar o warning 'unknown manager_id'.
@@ -115,6 +117,74 @@ def _build_googledocs_tools() -> List[Any]:
         googledocs_read_document,
         googledocs_search_documents,
         googledocs_export_pdf,
+    ]
+
+
+def _build_googlesheets_tools() -> List[Any]:
+    """LangChain tools para Google Sheets via Composio (manager-googlesheets).
+
+    Tools wrapped:
+    - googlesheets_read_cells: GOOGLESHEETS_READ_GOOGLE_SHEET
+    - googlesheets_write_cells: GOOGLESHEETS_WRITE_TO_GOOGLE_SHEET
+    - googlesheets_create_spreadsheet: GOOGLESHEETS_CREATE_GOOGLE_SHEET
+    """
+    from tools import googlesheets_composio
+
+    @tool
+    async def googlesheets_read_cells(
+        spreadsheet_id: str,
+        range_: str = "A1:Z100",
+        phone: str = "",
+    ) -> Dict[str, Any]:
+        """Le celulas de uma planilha Google Sheets.
+
+        Args:
+            spreadsheet_id: ID da planilha (encontrado na URL).
+            range_: Range A1 notation (default 'A1:Z100').
+            phone: Telefone do usuario.
+        """
+        return await googlesheets_composio.read_cells(
+            spreadsheet_id=spreadsheet_id, range_=range_, phone=phone,
+        )
+
+    @tool
+    async def googlesheets_write_cells(
+        spreadsheet_id: str,
+        range_: str,
+        values: List[List[str]],
+        phone: str = "",
+    ) -> Dict[str, Any]:
+        """Escreve valores em celulas de uma planilha Google Sheets.
+
+        Args:
+            spreadsheet_id: ID da planilha.
+            range_: Range A1 notation (ex: 'A1:C10').
+            values: Matriz de valores (linhas x colunas).
+            phone: Telefone do usuario.
+        """
+        return await googlesheets_composio.write_cells(
+            spreadsheet_id=spreadsheet_id, range_=range_, values=values, phone=phone,
+        )
+
+    @tool
+    async def googlesheets_create_spreadsheet(
+        title: str,
+        phone: str = "",
+    ) -> Dict[str, Any]:
+        """Cria uma nova planilha Google Sheets.
+
+        Args:
+            title: Titulo da planilha.
+            phone: Telefone do usuario.
+        """
+        return await googlesheets_composio.create_spreadsheet(
+            title=title, phone=phone,
+        )
+
+    return [
+        googlesheets_read_cells,
+        googlesheets_write_cells,
+        googlesheets_create_spreadsheet,
     ]
 
 
