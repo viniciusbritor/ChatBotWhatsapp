@@ -52,6 +52,7 @@ ALLOWED_TOOLKITS: Set[str] = {
     "onedrive",
     "googledocs",
     "googlesheets",
+    "googlemeet",
     "microsoft_teams",
 }
 

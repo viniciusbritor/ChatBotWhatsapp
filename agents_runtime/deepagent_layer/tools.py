@@ -39,6 +39,8 @@ def _build_langchain_tools_for(manager_id: str) -> List[Any]:
         return _build_googlesheets_tools()
     if manager_id == "manager-onedrive":
         return _build_onedrive_tools()
+    if manager_id == "manager-googlemeet":
+        return _build_googlemeet_tools()
     if manager_id == "manager-jennifier":
         # Agente conversacional geral: nao tem tools. Retorna lista vazia
         # explicitamente para evitar o warning 'unknown manager_id'.
@@ -240,6 +242,83 @@ def _build_onedrive_tools() -> List[Any]:
         onedrive_list_items,
         onedrive_list_folder_children,
         onedrive_list_drives,
+    ]
+
+
+def _build_googlemeet_tools() -> List[Any]:
+    """LangChain tools para Google Meet via Composio (manager-googlemeet).
+
+    Google Meet eh acessado via Google Calendar API (cada evento do Calendar
+    tem um link Meet automatico). Tools wrapped:
+    - googlemeet_create_meeting: GOOGLECALENDAR_CREATE_EVENT
+    - googlemeet_list_meetings: GOOGLECALENDAR_LIST_EVENTS
+    - googlemeet_get_meeting_link: GOOGLECALENDAR_GET_EVENT
+    """
+    from tools import googlemeet_composio
+
+    @tool
+    async def googlemeet_create_meeting(
+        summary: str,
+        start_time: str,
+        end_time: str,
+        attendees: str = "",
+        phone: str = "",
+    ) -> Dict[str, Any]:
+        """Cria uma reuniao no Google Meet (via Calendar).
+
+        Args:
+            summary: Titulo da reuniao.
+            start_time: ISO 8601 (ex: '2026-08-20T15:00:00-03:00').
+            end_time: ISO 8601.
+            attendees: Emails separados por virgula (opcional).
+            phone: Telefone do usuario.
+        """
+        return await googlemeet_composio.create_meeting(
+            summary=summary,
+            start_time=start_time,
+            end_time=end_time,
+            attendees=attendees,
+            phone=phone,
+        )
+
+    @tool
+    async def googlemeet_list_meetings(
+        time_min: str,
+        time_max: str,
+        max_results: int = 50,
+        phone: str = "",
+    ) -> Dict[str, Any]:
+        """Lista reunioes (eventos Calendar) com link Meet.
+
+        Args:
+            time_min: ISO 8601 datetime inicio.
+            time_max: ISO 8601 datetime fim.
+            max_results: Numero maximo de resultados (default 50).
+            phone: Telefone do usuario.
+        """
+        return await googlemeet_composio.list_meetings(
+            time_min=time_min,
+            time_max=time_max,
+            max_results=max_results,
+            phone=phone,
+        )
+
+    @tool
+    async def googlemeet_get_meeting_link(event_id: str, phone: str = "") -> Dict[str, Any]:
+        """Retorna link de Meet de um evento especifico.
+
+        Args:
+            event_id: ID do evento no Google Calendar.
+            phone: Telefone do usuario.
+        """
+        return await googlemeet_composio.get_meeting_link(
+            event_id=event_id, phone=phone,
+        )
+
+    return [
+        googlemeet_create_meeting,
+        googlemeet_list_meetings,
+        googlemeet_get_meeting_link,
     ]
 
 
