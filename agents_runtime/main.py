@@ -66,6 +66,20 @@ async def lifespan(app: FastAPI):
 
     await _validate_openai_key_on_startup()
 
+    # GUARDRAIL (17/08/2026): auto-discovery de APIs/toolkits no lifespan.
+    # ApiRegistry descobre Google APIs (via GOOGLE_SERVICES) e Composio
+    # toolkits (via SDK). DynamicManagerFactory usa o registry para construir
+    # managers sob demanda. Allowlist (ALLOWED_TOOLKITS) controla a seguranca.
+    try:
+        from tools.api_registry import api_registry
+        await api_registry.discover_all()
+        logger.info(
+            "api_registry_ready toolkits=%d",
+            len(api_registry.list_allowed_slugs()),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("api_registry_discover_failed exc=%s", exc)
+
     start_loader()
     logger.info("Agent loader started")
 
@@ -140,28 +154,6 @@ if _portal_available():
         logger.info("portal_react_mounted dir=%s", _PORTAL_DIR)
     except Exception as exc:  # noqa: BLE001
         logger.warning("portal_react_mount_failed exc=%s", exc)
-
-@app.on_event("startup")
-async def _startup_api_registry():
-    """GUARDRAIL (17/08/2026): auto-discovery de APIs/toolkits no startup do FastAPI.
-
-    ApiRegistry descobre Google APIs (via GOOGLE_SERVICES) e Composio
-    toolkits (via SDK). DynamicManagerFactory usa o registry para construir
-    managers sob demanda. Allowlist (ALLOWED_TOOLKITS) controla a seguranca.
-
-    NOTA: NAO chamar asyncio.run() no module-level (gera RuntimeWarning
-    'coroutine was never awaited' porque uvicorn ja tem event loop).
-    """
-    from tools.api_registry import api_registry
-    try:
-        await api_registry.discover_all()
-        logger.info(
-            "api_registry_ready toolkits=%d",
-            len(api_registry.list_allowed_slugs()),
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("api_registry_discover_failed exc=%s", exc)
-
 
 
 @app.get("/healthz")
