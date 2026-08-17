@@ -1,56 +1,32 @@
-"""OneDrive tools via Composio SDK + Secret Manager."""
+"""OneDrive tools via Composio (helper compartilhado).
+
+GUARDRAIL §0.8 (17/08/2026): refatorado para usar `composio_call` de
+`tools._composio_common` que extrai o data real corretamente.
+"""
 import logging
-import os
 from typing import Any, Dict
+
+from tools._composio_common import composio_call
 
 logger = logging.getLogger(__name__)
 
-_CACHED_KEY = None
-_PROJECT = os.getenv("GCP_PROJECT", "coherence-ominichannel-fs")
-
-
-def _get_api_key() -> str:
-    global _CACHED_KEY
-    if _CACHED_KEY:
-        return _CACHED_KEY
-    try:
-        from google.cloud import secretmanager
-        client = secretmanager.SecretManagerServiceClient()
-        name = f"projects/{_PROJECT}/secrets/COMPOSIO_API_KEY/versions/latest"
-        response = client.access_secret_version(request={"name": name})
-        _CACHED_KEY = response.payload.data.decode("utf-8-sig").strip()
-        return _CACHED_KEY
-    except Exception as exc:
-        logger.error("Failed to load COMPOSIO_API_KEY: %s", exc)
-        return (os.getenv("COMPOSIO_API_KEY", "") or "").strip()
-
-
-async def _composio_call(tool_slug: str, arguments: Dict[str, Any], user_id: str = "") -> Dict[str, Any]:
-    try:
-        from composio import Composio
-        from tools._composio_common import TOOLKIT_VERSIONS
-        client = Composio(api_key=_get_api_key(), toolkit_versions=TOOLKIT_VERSIONS)
-        result = client.tools.execute(slug=tool_slug, arguments=arguments, user_id=user_id)
-        return result.get("data", result)
-    except ImportError:
-        return {"error": "composio_sdk_missing"}
-    except Exception as exc:
-        logger.warning("Composio call failed: %s tool=%s", exc, tool_slug)
-        return {"error": str(exc)[:200]}
-
 
 async def list_items(top: int = 50, **kwargs) -> Dict[str, Any]:
+    """Lista itens do OneDrive."""
     user_id = str(kwargs.get("phone", "") or kwargs.get("user_id", ""))
-    return await _composio_call(
+    return await composio_call(
         "ONE_DRIVE_ONEDRIVE_LIST_ITEMS",
         {"top": max(1, min(999, top)), "user_id": "me"},
         user_id=user_id,
     )
 
 
-async def list_folder_children(folder_path: str = "/", top: int = 200, **kwargs) -> Dict[str, Any]:
+async def list_folder_children(
+    folder_path: str = "/", top: int = 200, **kwargs
+) -> Dict[str, Any]:
+    """Lista arquivos dentro de uma pasta."""
     user_id = str(kwargs.get("phone", "") or kwargs.get("user_id", ""))
-    return await _composio_call(
+    return await composio_call(
         "ONE_DRIVE_LIST_FOLDER_CHILDREN",
         {"folder_path": folder_path or "/", "top": max(1, min(999, top)), "use_me_drive": True},
         user_id=user_id,
@@ -58,5 +34,6 @@ async def list_folder_children(folder_path: str = "/", top: int = 200, **kwargs)
 
 
 async def list_drives(**kwargs) -> Dict[str, Any]:
+    """Lista drives disponiveis."""
     user_id = str(kwargs.get("phone", "") or kwargs.get("user_id", ""))
-    return await _composio_call("ONE_DRIVE_LIST_DRIVES", {}, user_id=user_id)
+    return await composio_call("ONE_DRIVE_LIST_DRIVES", {}, user_id=user_id)

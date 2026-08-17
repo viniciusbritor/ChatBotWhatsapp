@@ -37,6 +37,8 @@ def _build_langchain_tools_for(manager_id: str) -> List[Any]:
         return _build_googledocs_tools()
     if manager_id == "manager-googlesheets":
         return _build_googlesheets_tools()
+    if manager_id == "manager-onedrive":
+        return _build_onedrive_tools()
     if manager_id == "manager-jennifier":
         # Agente conversacional geral: nao tem tools. Retorna lista vazia
         # explicitamente para evitar o warning 'unknown manager_id'.
@@ -185,6 +187,59 @@ def _build_googlesheets_tools() -> List[Any]:
         googlesheets_read_cells,
         googlesheets_write_cells,
         googlesheets_create_spreadsheet,
+    ]
+
+
+def _build_onedrive_tools() -> List[Any]:
+    """LangChain tools para OneDrive via Composio (manager-onedrive).
+
+    Tools wrapped:
+    - onedrive_list_items: ONE_DRIVE_LIST_ITEMS
+    - onedrive_list_folder_children: ONE_DRIVE_LIST_FOLDER_CHILDREN
+    - onedrive_list_drives: ONE_DRIVE_LIST_DRIVES
+    """
+    from tools import onedrive_composio
+
+    @tool
+    async def onedrive_list_items(top: int = 50, phone: str = "") -> Dict[str, Any]:
+        """Lista itens do OneDrive (arquivos e pastas).
+
+        Args:
+            top: Numero maximo de itens (default 50).
+            phone: Telefone do usuario.
+        """
+        return await onedrive_composio.list_items(top=top, phone=phone)
+
+    @tool
+    async def onedrive_list_folder_children(
+        folder_path: str = "/",
+        top: int = 200,
+        phone: str = "",
+    ) -> Dict[str, Any]:
+        """Lista arquivos dentro de uma pasta especifica.
+
+        Args:
+            folder_path: Caminho da pasta (default raiz '/').
+            top: Numero maximo de itens (default 200).
+            phone: Telefone do usuario.
+        """
+        return await onedrive_composio.list_folder_children(
+            folder_path=folder_path, top=top, phone=phone,
+        )
+
+    @tool
+    async def onedrive_list_drives(phone: str = "") -> Dict[str, Any]:
+        """Lista os drives disponiveis para o usuario.
+
+        Args:
+            phone: Telefone do usuario.
+        """
+        return await onedrive_composio.list_drives(phone=phone)
+
+    return [
+        onedrive_list_items,
+        onedrive_list_folder_children,
+        onedrive_list_drives,
     ]
 
 
