@@ -31,6 +31,8 @@ def _build_langchain_tools_for(manager_id: str) -> List[Any]:
         return _build_group_rag_tools()
     if manager_id == "manager-web":
         return _build_web_tools()
+    if manager_id == "manager-linkedin":
+        return _build_linkedin_tools()
     if manager_id == "manager-jennifier":
         # Agente conversacional geral: nao tem tools. Retorna lista vazia
         # explicitamente para evitar o warning 'unknown manager_id'.
@@ -39,6 +41,78 @@ def _build_langchain_tools_for(manager_id: str) -> List[Any]:
         return []
     logger.warning("unknown manager_id=%s", manager_id)
     return []
+
+
+def _build_linkedin_tools() -> List[Any]:
+    """LangChain tools para LinkedIn via Composio (manager-linkedin).
+
+    Tools wrapped:
+    - linkedin_my_profile: LINKEDIN_GET_MY_INFO
+    - linkedin_create_post: LINKEDIN_CREATE_LINKED_IN_POST
+    - linkedin_read_post: LINKEDIN_GET_POST_CONTENT
+    - linkedin_create_article: LINKEDIN_CREATE_ARTICLE_OR_URL_SHARE
+    """
+    from tools import linkedin_composio
+
+    @tool
+    async def linkedin_my_profile(phone: str) -> Dict[str, Any]:
+        """Busca o perfil LinkedIn do usuario autenticado.
+
+        Args:
+            phone: Telefone do usuario (per-user Composio user_id).
+
+        Returns:
+            Dict com firstName, lastName, headline, id, vanityName, profilePicture.
+        """
+        return await linkedin_composio.my_profile(phone=phone)
+
+    @tool
+    async def linkedin_create_post(
+        text: str,
+        visibility: str,
+        phone: str,
+    ) -> Dict[str, Any]:
+        """Cria um post no LinkedIn do usuario.
+
+        Args:
+            text: Conteudo do post (max 3000 caracteres).
+            visibility: PUBLIC | CONNECTIONS | LOGGED_IN_MEMBERS.
+            phone: Telefone do usuario para identificar o autor.
+        """
+        return await linkedin_composio.create_post(
+            text=text, visibility=visibility, phone=phone,
+        )
+
+    @tool
+    async def linkedin_read_post(post_id: str, phone: str) -> Dict[str, Any]:
+        """Le o conteudo de um post do LinkedIn por ID.
+
+        Args:
+            post_id: ID do post no LinkedIn (urn:li:activity:xxx ou similar).
+            phone: Telefone do usuario.
+        """
+        return await linkedin_composio.read_post(post_id=post_id, phone=phone)
+
+    @tool
+    async def linkedin_create_article(
+        text: str,
+        title: str,
+        phone: str,
+        url: str = "",
+    ) -> Dict[str, Any]:
+        """Cria um artigo ou compartilha uma URL no LinkedIn.
+
+        Args:
+            text: Conteudo do artigo (max 3000 chars).
+            title: Titulo do artigo (max 200 chars).
+            phone: Telefone do usuario.
+            url: URL externa para compartilhar (opcional).
+        """
+        return await linkedin_composio.create_article(
+            text=text, title=title, url=url, phone=phone,
+        )
+
+    return [linkedin_my_profile, linkedin_create_post, linkedin_read_post, linkedin_create_article]
 
 
 def _build_calendar_tools() -> List[Any]:
