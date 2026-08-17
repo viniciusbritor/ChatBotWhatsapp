@@ -1,3 +1,97 @@
+## 17/08/2026 (00:30 BRT) — Auto-Discovery Unificado (Google + Composio) com Allowlist
+
+### Contexto & Motivação
+
+Após o refactor de 16/08 (GUARDRAIL §0.7), o user reportou que pediu `busque meu perfil no linkedin` e a Jennifer respondeu genericamente. Investigação revelou:
+
+1. Tools Composio EXISTIAM (tools/linkedin_composio.py, tools/youtube_composio.py, etc, ~80 tools)
+2. Tools NÃO eram CHAMADAS porque orchestrator só usava Padrão A (DeepAgent com managers hardcoded)
+3. Padrão B (tool_registry.py monolítico) era LEGACY DEPRECATED
+4. LinkedIn, YouTube, GitHub, Notion, OneDrive, Google Docs, Google Sheets, Microsoft Teams: **NENHUM manager dedicado**
+
+### Solucoes Implementadas (7 Fases)
+
+**FASE 0 — Limpeza Photos:**
+- `tools/google_photos.py` DELETADO
+- `scripts/seed_initial_data.py` photos entries REMOVIDAS
+- `tests/test_agent_loader_scopes.py` photoslibrary scope REMOVIDO
+- Google Photos desabilitado completamente (commit 3c93f19 ja tinha removido scope)
+
+**FASE 1 — ApiRegistry (auto-discovery):**
+- `tools/api_registry.py` NOVO: `ApiRegistry` + `ApiMeta` dataclass
+- `_discover_google_apis()`: de GOOGLE_SERVICES (core/google_scopes.py)
+- `_discover_composio_toolkits()`: SDK Composio `auth_configs.list()`
+- `ALLOWED_TOOLKITS` hardcoded (14 toolkits): git review obrigatorio
+- `EMERGENCY_DISABLE_TOOLKITS` env var: kill switch
+- `is_allowed(slug)`: check allowlist + emergency disable
+- Startup hook em `main.py`: chama `api_registry.discover_all()` no boot
+- 10 testes em `tests/test_api_registry.py`
+
+**FASE 2 — DynamicManagerFactory (B1 template-based):**
+- `deepagent_layer/dynamic_manager_factory.py` NOVO
+- `get_or_create(slug)`: lazy import + cache LRU 100
+- `_build_tools(meta, module)`: descobre funcoes async via inspect, wrap StructuredTool
+- `_build_agent()`: usa `create_deep_agent` do LangChain
+- `_build_system_prompt()`: template deterministico baseado nos metadados
+- `invalidate(slug)`: kill switch para o cache
+- 10 testes em `tests/test_dynamic_manager_factory.py`
+
+**FASE 3 — Roteamento Dinâmico no Orchestrator:**
+- Adicionado TIER 1.5 em `_orchestrate_inner()` (ANTES do TIER 2 LLM classifier)
+- `_detect_dynamic_toolkit(text)`: mapeia keywords → slug
+- `_KEYWORD_TO_TOOLKIT`: dict hardcoded (linkedin, youtube, github, etc)
+- Handler que chama `dynamic_factory.get_or_create()` e executa agent
+- Fallback amigavel: "toolkit nao configurado pelo admin"
+
+**FASE 4 — Segurança Adicional:**
+- `tools/toolkit_rate_limiter.py` NOVO: 100 calls/hora/user/toolkit
+- Integrado em `_make_async_tool()` no factory
+- Mensagem de erro amigavel quando excede limite
+- Audit log estruturado em toda chamada
+
+**FASE 5 — tool_registry.py (deprecated):**
+- Adicionado docstring explicando deprecation
+- Aponta para `tools/api_registry.py` como nova fonte
+- Mantido funcional para compatibilidade (50+ tests, sync_tools_to_firestore)
+- Migration path documentado em `docs/AUTO_DISCOVERY.md`
+
+**FASE 6 — Validação:**
+- **1314 tests passing**, 6 skipped, 1 xpassed, 0 falhas
+- Novos: 20 testes (10 api_registry + 10 dynamic_manager_factory)
+
+**FASE 7 — Documentação:**
+- `docs/AUTO_DISCOVERY.md` NOVO: arquitetura completa + workflow para adicionar toolkit
+- Entrada no `DIARIO_BORDO.md` (esta)
+
+### Camadas de Segurança
+
+1. **ALLOWED_TOOLKITS** hardcoded (git review obrigatorio)
+2. **EMERGENCY_DISABLE_TOOLKITS** env var (kill switch)
+3. **Rate limiter** por toolkit (100 calls/hora/user)
+4. **Audit log** estruturado em cada tool_call
+5. **Fallback amigavel** se toolkit nao permitido
+
+### Como Adicionar Novo Toolkit
+
+```bash
+# 1. Criar tools/<toolkit>_composio.py com implementacao
+# 2. Adicionar slug em tools/api_registry.py::ALLOWED_TOOLKITS
+# 3. Adicionar keyword em orchestrator.py::_KEYWORD_TO_TOOLKIT
+# 4. git commit + deploy
+```
+
+Tempo: ~20-30min por toolkit novo.
+
+### Resultado
+
+- Manager-jennifier (rosto humano, tools=[]) preservado
+- 6 managers hardcoded (calendar, email, drive, group-rag, web, jennifier) preservados
+- 14 toolkits auto-descobertos via registry (Google APIs + Composio)
+- Tools Composio chamadas pela primeira vez em producao
+- Bug do usuario "busque meu perfil no linkedin" → RESOLVIDO
+
+---
+
 ## 16/08/2026 (20:51 BRT) — Bug CRÍTICO de Auto-Aprovação: 3 vetores que vazaram acesso à secretária pessoal
 
 ### Contexto & Motivação

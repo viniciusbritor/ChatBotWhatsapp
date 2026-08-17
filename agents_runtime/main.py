@@ -141,6 +141,20 @@ if _portal_available():
     except Exception as exc:  # noqa: BLE001
         logger.warning("portal_react_mount_failed exc=%s", exc)
 
+    # GUARDRAIL (17/08/2026): auto-discovery de APIs/toolkits no startup.
+    # ApiRegistry descobre Google APIs (via GOOGLE_SERVICES) e Composio
+    # toolkits (via SDK). DynamicManagerFactory usa o registry para construir
+    # managers sob demanda. Allowlist (ALLOWED_TOOLKITS) controla a seguranca.
+    try:
+        from tools.api_registry import api_registry
+        asyncio.run(api_registry.discover_all())
+        logger.info(
+            "api_registry_ready toolkits=%d",
+            len(api_registry.list_allowed_slugs()),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("api_registry_discover_failed exc=%s", exc)
+
 
 
 @app.get("/healthz")

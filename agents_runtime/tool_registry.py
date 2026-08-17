@@ -1,6 +1,20 @@
-"""Tool Registry - central map of tool_id -> implementation function.
+"""Tool Registry - DEPRECATED (manter para compatibilidade).
 
-Each tool has:
+GUARDRAIL (17/08/2026): o registry principal agora e `tools.api_registry.ApiRegistry`
+(auto-discovery com allowlist). Este arquivo TOOL_REGISTRY e mantido apenas
+para:
+1. Compatibilidade com tests legacy (test_tool_registry.py, test_group_rag.py, etc)
+2. Portal Admin UI (sync_tools_to_firestore.py ainda importa daqui, mas sera
+   migrado para api_registry em proxima fase)
+
+NAO ADICIONE NOVAS TOOLS AQUI. Para novas ferramentas:
+- Google APIs: implementar tools/google_X.py e adicionar em ALLOWED_TOOLKITS
+- Composio: implementar tools/X_composio.py e adicionar em ALLOWED_TOOLKITS
+- Auto-discovery descobre via ApiRegistry.discover_all()
+
+Para migrar entries deste registry para o novo sistema: ver docs/AUTO_DISCOVERY.md.
+
+Each legacy tool has:
 - id: unique identifier
 - function: callable
 - description: for LLM schema

@@ -37,6 +37,7 @@ from tool_registry import get_tool, get_tool_schema, is_user_scoped_tool
 from agent_loader import get_agent, get_skill, has_nickname
 from core.audit import log_action
 from core.timezone import now_brt
+from tools.api_registry import api_registry
 from core.observability import (
     new_tracker, set_current_tracker, current_tracker,
 )
@@ -2194,6 +2195,39 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
+# GUARDRAIL (17/08/2026): mapeamento keyword -> toolkit slug para auto-discovery.
+_KEYWORD_TO_TOOLKIT: Dict[str, str] = {
+    "linkedin": "linkedin",
+    "youtube": "youtube",
+    "github": "github",
+    "notion": "notion",
+    "onedrive": "onedrive",
+    "google docs": "googledocs",
+    "googledocs": "googledocs",
+    "google sheets": "googlesheets",
+    "googlesheets": "googlesheets",
+    "microsoft teams": "microsoft_teams",
+    "teams": "microsoft_teams",
+    "calendar": "calendar",
+    "gmail": "gmail",
+    "drive": "drive",
+    "people": "people",
+    "tasks": "tasks",
+    "maps": "maps",
+    "rota": "maps",
+    "mapa": "maps",
+}
+
+
+def _detect_dynamic_toolkit(text: str) -> Optional[str]:
+    """Detecta toolkit slug via keywords. Retorna None se nenhuma match."""
+    text_lower = text.lower()
+    for keyword, slug in _KEYWORD_TO_TOOLKIT.items():
+        if keyword in text_lower and api_registry.is_allowed(slug):
+            return slug
+    return None
+
+
 async def _orchestrate_inner(payload: Dict[str, Any], instance: str, phone: str,
                              text: str, sender_name: str, extra: Dict[str, Any]) -> Dict[str, Any]:
     _tracker = new_tracker()
@@ -2386,6 +2420,60 @@ async def _orchestrate_inner(payload: Dict[str, Any], instance: str, phone: str,
 
     if _detect_morality(masked_text):
         return await _handle_morality(payload, masked_text, sender_name, cache_key, instance, phone)
+
+    # ========================
+    # TIER 1.5: Auto-Discovery (Dynamic Manager Factory)
+    # ========================
+    # GUARDRAIL (17/08/2026): auto-discovery de toolkits via ApiRegistry +
+    # DynamicManagerFactory. Detecta toolkit via keywords, factory constroi
+    # manager sob demanda (B1 template-based). Allowlist garante seguranca.
+    try:
+        toolkit_slug = _detect_dynamic_toolkit(masked_text)
+        if toolkit_slug:
+            from deepagent_layer.dynamic_manager_factory import dynamic_factory
+            agent = dynamic_factory.get_or_create(toolkit_slug)
+            if agent:
+                result = await _execute_agent(
+                    dict(agent), masked_text, payload, payload.get("extra", {}),
+                )
+                path = [
+                    {"step": 1, "phase": "dynamic_discovery", "toolkit": toolkit_slug},
+                ]
+                return await _finalize_orchestration(
+                    payload, masked_text, sender_name, result, path, cache_key,
+                )
+            else:
+                # Factory bloqueada (allowlist ou modulo nao existe).
+                meta = api_registry.get_meta(toolkit_slug)
+                if meta is None:
+                    blocked_msg = (
+                        f"⚠️ O toolkit '{toolkit_slug}' nao esta disponivel. "
+                        f"Pode ser que ele nao esteja na allowlist "
+                        f"(tools/api_registry.py::ALLOWED_TOOLKITS)."
+                    )
+                else:
+                    blocked_msg = (
+                        f"⚠️ O toolkit '{toolkit_slug}' ainda nao foi configurado pelo admin. "
+                        f"O modulo tools/{toolkit_slug}_composio.py precisa existir."
+                    )
+                early_result = {
+                    "reply": blocked_msg,
+                    "delay_ms": 0,
+                    "presence": "composing",
+                    "metadata": {
+                        "agent_id": "dynamic-discovery-blocked",
+                        "toolkit": toolkit_slug,
+                        "blocked_reason": "not_allowed_or_module_missing",
+                    },
+                }
+                path = [
+                    {"step": 1, "phase": "dynamic_discovery_blocked", "toolkit": toolkit_slug},
+                ]
+                return await _finalize_orchestration(
+                    payload, masked_text, sender_name, early_result, path, cache_key,
+                )
+    except Exception as exc:
+        logger.warning("dynamic_discovery_handler_failed: %s", exc)
 
     # ========================
     # TIER 2: LLM Classifier (Flash, 1 call, ~200ms)
