@@ -161,7 +161,7 @@ class TestSheetsComposio:
     async def test_read_cells_sem_composio(self):
         from tools import googlesheets_composio
 
-        with patch("tools.googlesheets_composio._composio_call", AsyncMock(return_value={"error": "composio_sdk_missing"})):
+        with patch("tools._composio_common.composio_call", AsyncMock(return_value={"error": "composio_sdk_missing"})):
             result = await googlesheets_composio.read_cells("spr1", "A1:B2", phone="5511966830020")
         assert "error" in result
 
