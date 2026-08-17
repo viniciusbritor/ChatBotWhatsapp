@@ -104,6 +104,12 @@ async def _validate_openai_key_on_startup() -> None:
         )
 
 
+# GUARDRAIL §0.7 (16/08/2026): rate-limit basico em memoria por IP para
+# /oauth/callback. Estrutura: ip -> lista de timestamps dos ultimos 10 min.
+# Limite: 5 callbacks / 10 min / IP.
+_oauth_callback_rate_limit: Dict[str, list] = {}
+
+
 app = FastAPI(
     title="agents_runtime",
     version=VERSION,
@@ -2093,14 +2099,16 @@ async def admin_me_phone_update(request: Request):
     if not canonical:
         raise HTTPException(status_code=422, detail="invalid_phone")
 
+    # GUARDRAIL §0.7 (16/08/2026): self-vinculo Portal->WhatsApp APENAS registra
+    # email/uid/picture. NAO seta role="analyst" nem is_approved=True. Aprovacao
+    # continua sendo responsabilidade exclusiva do admin (via /admin/users/{phone}/invite
+    # ou Portal Omnichannel).
     save_user(canonical, {
         "email": email.lower().strip(),
         "phone": canonical,
         "name": caller.get("name") or "",
         "picture": caller.get("picture") or "",
         "firebase_uid": caller.get("uid") or "",
-        "role": "analyst",
-        "is_approved": True,
         "updated_at": _now_iso(),
     })
     return JSONResponse(content={"status": "ok", "phone": canonical})
@@ -2715,6 +2723,28 @@ async def oauth_callback(request: Request):
     import requests
     from core.oauth_per_user import parse_oauth_state
 
+    # GUARDRAIL §0.7 (16/08/2026): rate-limit basico por IP (5 callbacks / 10min)
+    # para mitigar abuso automatizado. Mantem janela curta para nao bloquear
+    # fluxo legitimo (refresh token, reconexao). Cooldown em memoria (perde no
+    # restart da instancia, mas isso e aceitavel para defesa anti-abuso).
+    client_ip = request.headers.get("x-forwarded-for", request.client.host if request.client else "unknown").split(",")[0].strip()
+    rl_key = f"oauth_cb:{client_ip}"
+    rl_state = _oauth_callback_rate_limit.get(rl_key, [])
+    now_ts = time.time()
+    rl_state = [t for t in rl_state if now_ts - t < 600]  # janela 10 min
+    if len(rl_state) >= 5:
+        logger.warning(
+            "oauth_callback_rate_limited ip=%s count=%d",
+            client_ip, len(rl_state),
+            extra={"event_name": "oauth_callback_rate_limited", "ip": client_ip, "count": len(rl_state)},
+        )
+        return HTMLResponse(
+            content="<h2>Limite de tentativas excedido</h2><p>Tente novamente em alguns minutos.</p>",
+            status_code=429,
+        )
+    rl_state.append(now_ts)
+    _oauth_callback_rate_limit[rl_key] = rl_state
+
     code = request.query_params.get("code", "")
     state = request.query_params.get("state", "")
     if not code:
@@ -2789,13 +2819,18 @@ async def oauth_callback(request: Request):
             except Exception:
                 pass
 
+        # GUARDRAIL §0.7 (16/08/2026): OAuth NUNCA aprova. Apenas vincula token.
+        # Antes deste fix, user_update setava role="analyst"+is_approved=True sempre,
+        # permitindo que qualquer pessoa que completasse o OAuth tivesse acesso à
+        # secretária pessoal sem aprovação do admin (Vetor #1 de auto-aprovação).
+        pre_oauth_doc = get_user(phone) or {}
+        pre_oauth_approved = bool(pre_oauth_doc.get("is_approved")) or bool(pre_oauth_doc.get("approved_by"))
+
         user_update: Dict[str, Any] = {
             "phone": phone,
             "google_oauth_token": token_data,
             "scopes": granted_scopes,
             "google_oauth_linked_at": now_brt_dt.isoformat(),
-            "role": "analyst",
-            "is_approved": True,
         }
         if user_email:
             user_update["email"] = user_email.lower().strip()
@@ -2807,8 +2842,30 @@ async def oauth_callback(request: Request):
 
         saved = save_user(phone, user_update)
         if user_email:
-            sync_user_profile(phone, email=user_email, name=user_name, picture=user_picture, role="analyst")
+            sync_user_profile(phone, email=user_email, name=user_name, picture=user_picture)
         enrich_user_from_all_sources(phone)
+
+        if not pre_oauth_approved:
+            logger.warning(
+                "oauth_linked_without_approval phone=%s email=%s",
+                phone, user_email,
+                extra={
+                    "event_name": "oauth_linked_without_approval",
+                    "phone": phone,
+                    "email": user_email,
+                },
+            )
+            try:
+                from core.admin_notify import notify_admin_oauth_linked_without_approval
+                asyncio.create_task(
+                    notify_admin_oauth_linked_without_approval(
+                        phone=phone,
+                        email=user_email,
+                        instance="Jennifer",
+                    )
+                )
+            except Exception as exc:
+                logger.debug("notify_admin_oauth_linked_without_approval failed: %s", exc)
 
         if not saved:
             return HTMLResponse(content="<h2>Erro ao salvar autorizacao</h2>", status_code=503)

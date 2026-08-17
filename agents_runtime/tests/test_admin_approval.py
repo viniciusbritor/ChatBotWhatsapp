@@ -55,9 +55,45 @@ def test_is_user_approved_owner_and_guest():
         with patch("agent_loader.get_user", return_value={"role": "guest", "is_approved": False}):
             assert is_user_approved("5511911112222") is False
 
-        # Analista aprovado
+        # Analista aprovado (via flag explicita)
         with patch("agent_loader.get_user", return_value={"role": "analyst", "is_approved": True}):
             assert is_user_approved("5511911112222") is True
+
+        # GUARDRAIL §0.7 (16/08/2026): Aprovacao por approved_by continua valendo
+        with patch("agent_loader.get_user", return_value={"role": "agent_user", "approved_by": "admin_whatsapp_link"}):
+            assert is_user_approved("5511911112222") is True
+
+
+def test_is_user_approved_strict_no_auto_approval():
+    """GUARDRAIL §0.7: nenhum campo sozinho (role, oauth_token, email+portal) aprova.
+
+    Antes do fix 1.3, existiam 3 caminhos de auto-aprovacao que vazaram acesso:
+    Rafael Oliveira e Vivian Young foram auto-aprovados assim em 16/08/2026.
+    Apos o fix, SOMENTE owner / is_approved=True / approved_by aprovado.
+    """
+    with patch("agent_loader.resolve_owner_phone", return_value="5511966830020"):
+        with patch("agent_loader._is_instance_owner", return_value=False):
+            # (a) Apenas role=analyst SEM approved_by -> NAO aprova (era o caso do Rafael)
+            with patch("agent_loader.get_user", return_value={"role": "analyst", "is_approved": True, "email": "rafael@example.com"}):
+                # Esse caso REALMENTE aprova pois is_approved=True esta setado.
+                # Mas se is_approved NAO estiver setado (caso do bug original), NAO aprova.
+                pass
+
+            with patch("agent_loader.get_user", return_value={"role": "analyst"}):
+                assert is_user_approved("5521984843235") is False
+
+            # (b) Apenas google_oauth_token (sem is_approved) -> NAO aprova
+            with patch("agent_loader.get_user", return_value={"google_oauth_token": {"token": "ya29.x"}}):
+                assert is_user_approved("5511973391993") is False
+
+            # (c) Apenas email+coherence_role (sem is_approved) -> NAO aprova
+            with patch("agent_loader.get_user", return_value={"email": "vivian@example.com", "role": "agent_user"}):
+                with patch("agent_loader.get_coherence_module_role", return_value="agent_user"):
+                    assert is_user_approved("5511973391993") is False
+
+            # (d) Apenas role=agent_user (sem is_approved) -> NAO aprova
+            with patch("agent_loader.get_user", return_value={"role": "agent_user"}):
+                assert is_user_approved("5511911112222") is False
 
 
 def test_admin_approve_user_endpoint():
@@ -91,6 +127,10 @@ def test_admin_approve_user_endpoint():
 
 
 def test_admin_me_phone_update_endpoint():
+    """GUARDRAIL §0.7 (16/08/2026): /admin/me/phone NAO auto-aplica mais
+    role=analyst nem is_approved=True no self-vinculo Portal->WhatsApp.
+    Apenas persiste email/uid/name/picture; admin precisa aprovar manualmente.
+    """
     from main import app
     client = TestClient(app)
 
@@ -117,5 +157,6 @@ def test_admin_me_phone_update_endpoint():
                 mock_save.assert_called_once()
                 saved_data = mock_save.call_args[0][1]
                 assert saved_data["email"] == "analista@coherence.com"
-                assert saved_data["role"] == "analyst"
-                assert saved_data["is_approved"] is True
+                # Aprovacao NAO e mais aplicada aqui
+                assert "is_approved" not in saved_data or not saved_data.get("is_approved")
+                assert "role" not in saved_data or saved_data.get("role") != "analyst"

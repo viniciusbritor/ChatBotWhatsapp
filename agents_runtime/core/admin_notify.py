@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 _NOTIFIED_PHONES_CACHE: dict[str, float] = {}
 NOTIFY_COOLDOWN_SEC = 300  # 5 minutos entre alertas do mesmo numero
+OAUTH_LINKED_NOTIFY_COOLDOWN_SEC = 86400  # 24h entre alertas do mesmo phone (caso serio)
 
 
 def _state_secret() -> str:
@@ -289,5 +290,73 @@ async def notify_admin_flood_alert(
             return True
     except Exception as exc:
         logger.warning("Failed to notify admin of flood attack: %s", exc)
+    return False
+
+
+async def notify_admin_oauth_linked_without_approval(
+    phone: str,
+    email: str = "",
+    instance: str = "Jennifer",
+) -> bool:
+    """Alerta serio: alguem completou OAuth Google SEM estar pre-aprovado pelo admin.
+
+    GUARDRAIL §0.7 (16/08/2026): este caminho era o Vetor #1 de auto-aprovacao
+    antes do fix. Apos o fix, o OAuth nao aprova mais - mas o token ESTA salvo.
+    Precisamos do admin revisar e aprovar/revogar manualmente.
+
+    Cooldown: 24h por phone (caso de seguranca, nao spam).
+    """
+    clean_phone = re.sub(r"\D", "", str(phone or ""))
+    if not clean_phone:
+        return False
+
+    now = time.time()
+    cache_key = f"oauth_linked_{clean_phone}"
+    last_notified = _NOTIFIED_PHONES_CACHE.get(cache_key, 0)
+    if (now - last_notified) < OAUTH_LINKED_NOTIFY_COOLDOWN_SEC:
+        logger.info(
+            "oauth_linked_alert_cooldown phone=%s seconds_until_retry=%d",
+            clean_phone,
+            int(OAUTH_LINKED_NOTIFY_COOLDOWN_SEC - (now - last_notified)),
+            extra={"event_name": "oauth_linked_alert_cooldown"},
+        )
+        return False
+    _NOTIFIED_PHONES_CACHE[cache_key] = now
+
+    from agent_loader import resolve_owner_phone
+    admin_phone = resolve_owner_phone()
+    if not admin_phone or admin_phone == clean_phone:
+        return False
+
+    email_display = email.strip() if email else "(sem email vinculado)"
+    msg = (
+        f"\u26a0\ufe0f *OAuth vinculado SEM aprova\u00e7\u00e3o pr\u00e9via*\n\n"
+        f"Um contato acabou de vincular a conta Google abaixo, **mas ainda n\u00e3o foi aprovado por voc\u00ea** "
+        f"como secret\u00e1ria pessoal. O token OAuth foi salvo, mas o usu\u00e1rio N\u00c3O tem acesso \u00e0 Jennifer at\u00e9 sua aprova\u00e7\u00e3o.\n\n"
+        f"\U0001f464 *Telefone:* +{clean_phone}\n"
+        f"\U0001f4e7 *Email Google:* {email_display}\n"
+        f"\u2699\ufe0f *Inst\u00e2ncia:* {instance}\n\n"
+        f"Se voc\u00ea n\u00e3o reconhece este contato, ignore. Para liberar o acesso, use o Painel Admin "
+        f"(/admin/users/{clean_phone}) e defina `is_approved: True`.\n\n"
+        f"_Este \u00e9 um alerta do Guardrail \u00a70.7 \u2014 antes do fix, o OAuth auto-aprovava o usu\u00e1rio. "
+        f"Agora exige sua decis\u00e3o expl\u00edcita._"
+    )
+
+    try:
+        from core.evolution_client import send_text
+        success = await send_text(
+            phone=admin_phone,
+            text=msg,
+            instance=instance,
+        )
+        if success:
+            logger.info(
+                "oauth_linked_alert_sent phone=%s admin_phone=%s email=%s",
+                clean_phone, admin_phone, email,
+                extra={"event_name": "oauth_linked_alert_sent"},
+            )
+            return True
+    except Exception as exc:
+        logger.warning("notify_admin_oauth_linked failed: %s", exc)
     return False
 

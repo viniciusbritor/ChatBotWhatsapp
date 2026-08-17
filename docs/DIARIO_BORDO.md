@@ -1,3 +1,153 @@
+## 16/08/2026 (20:51 BRT) — Bug CRÍTICO de Auto-Aprovação: 3 vetores que vazaram acesso à secretária pessoal
+
+### Contexto & Motivação
+
+O admin (Vinicius) reportou que os usuários `Rafael Oliveira (5521984843235)` e
+`Vivian Young (5511973391993)` conseguiram acesso ao modo secretária pessoal
+**sem sua aprovação**. Como o uso da secretária envolve Google Calendar +
+Gmail + Drive, isso poderia gerar custos proibitivos via chamadas de LLM e
+tool-use repetidas. Além disso, foi identificado que o `ConnectionsView` do
+Portal estava fazendo polling constante contra a API Composio
+(`connected_accounts?user_ids=X`), o que também gerava custo.
+
+### Investigação (RCA)
+
+Foi feita auditoria completa do código de aprovação em
+`agents_runtime/agent_loader.py`, `agents_runtime/main.py`,
+`agents_runtime/pipelines/_guard.py` e
+`agents_runtime/agent_orchestration/access_guardian.py`.
+
+**3 vetores de auto-aprovação identificados:**
+
+#### Vetor #1 — `/oauth/callback` setava `is_approved: True` SEMPRE
+
+Em `main.py:2792-2799` (antes do fix):
+
+```python
+user_update: Dict[str, Any] = {
+    "phone": phone,
+    "google_oauth_token": token_data,
+    "scopes": granted_scopes,
+    "google_oauth_linked_at": now_brt_dt.isoformat(),
+    "role": "analyst",            # ❌ setado SEMPRE
+    "is_approved": True,          # ❌ SEMPRE
+}
+```
+
+Qualquer pessoa que completasse OAuth Google virava `analyst` aprovada. **Esse
+foi o caminho exato da Vivian Young** (linked_at 16/08/2026 02:22:18).
+
+#### Vetor #2 — `_lookup_portal_profile_for_phone_or_name` auto-aprovava por match no Portal
+
+Em `agent_loader.py:736-776` (linhas 752-754 e 770-772 antes do fix):
+
+```python
+if u_data.get("global_role") in ("analyst", "super-admin") or u_data.get("role") in ("analyst", "admin"):
+    res["role"] = "analyst"
+    res["is_approved"] = True     # ❌
+```
+
+Match por **email OU nome** (substring) na `users` collection do Portal Coherence
+silenciosamente setava `role: analyst + is_approved: True`. **Esse foi o
+caminho exato do Rafael Oliveira** (estava em `user_permissions` com
+`granted_by: "system_auto_fix_2026-07-23"` e em `users/rafadesouzaoliveira@gmail.com`
+com `global_role: "analyst"`).
+
+#### Vetor #3 — `is_user_approved` aceitava qualquer `role != "guest"`
+
+Em `agent_loader.py:703-715` (antes do fix):
+
+```python
+role = str(user.get("role", "")).strip().lower()
+if role in ("admin", "analyst", "analista", "agent_user") and role != "guest":
+    return True                    # ❌ Qualquer role != guest aprova
+```
+
+### Dados reais confirmados no Firestore
+
+| Phone | Nome | Origem da aprovação | `approved_by` |
+|---|---|---|---|
+| 5511966830020 | Vinicius Rocha | Owner (correto) | n/a |
+| **5511973391993** | **Vivian Young** | **Vetor #1** (oauth_callback auto-aprovou) | **AUSENTE** |
+| **5521984843235** | **Rafael Oliveira** | **Vetor #2** (match no Portal Coherence) | **AUSENTE** |
+| 558188464546 | Holding Auditchain | Aprovação legítima (admin via link em 15/08) | `admin_whatsapp_link` |
+
+Logs Cloud Run (`gcloud logging read`):
+
+```
+2026-08-16T14:25:36Z  GET /oauth/callback?phone=5521984843235 ... 200 OK  (Rafael)
+2026-08-16T05:22:18Z  GET /oauth/callback?phone=5511973391993 ... 200 OK  (Vivian)
+2026-08-15T08:21:07Z  GET /admin/approve-user?phone=558188464546&token=... 200 OK  (Holding)
+```
+
+### Soluções Implementadas (GUARDRAIL §0.7)
+
+**Etapa 0 — Revogação imediata (Firestore):**
+
+1. `558188464546` (Holding Auditchain): `is_approved=False`,
+   `approved_by=admin_revoked_2026_08_16`,
+   `revoked_reason=Limpeza pos-incidente auto-aprovacao (admin confirmou revogar mesmo com aprovacao previa)`.
+2. `5511973391993` (Vivian Young): `is_approved=False`,
+   `approved_by=admin_revoked_2026_08_16`, **deletado `google_oauth_token`**
+   (8 scopes OAuth ativos), `scopes`, `google_oauth_linked_at`.
+3. `5521984843235` (Rafael Oliveira): **MANTIDO** por decisão do admin.
+   Adicionado `approved_by=admin_kept_2026_08_16`, `approved_at=<now>`,
+   `notes=Permissao legitima via Portal Coherence omnichannel-agentes (system_auto_fix_2026-07-23). Mantido por decisao admin.`
+
+**Etapa 1 — 5 fixes de código:**
+
+1. `main.py:2792-2799` — `/oauth/callback` removido `role="analyst"` e
+   `is_approved=True`. OAuth apenas vincula token.
+2. `agent_loader.py:736-776` — `_lookup_portal_profile_for_phone_or_name`
+   removido auto-aprovação. Função agora APENAS enriquece (name/picture/email).
+3. `agent_loader.py:655-716` — `is_user_approved` política estrita. Apenas
+   owner / `is_approved=True` / `approved_by` aprovado. Removidos 3 caminhos
+   de auto-aprovação (oauth_token, portal_role, role≠guest).
+4. `main.py:2096-2105` — `/admin/me/phone` removido `role="analyst"` e
+   `is_approved=True` no self-vínculo Portal→WhatsApp.
+5. `tools/composio_connect.py:34-51` — Cache TTL 120s por `user_id` em
+   `get_status()`. Reduz ~85% chamadas à API Composio durante navegação.
+
+**Etapa 2 — Defesa/Auditoria:**
+
+6. `main.py:2808-2820` — Log estruturado `oauth_linked_without_approval` +
+   task `notify_admin_oauth_linked_without_approval` em `core/admin_notify.py`
+   (cooldown 24h por phone). Admin recebe alerta no WhatsApp quando alguém
+   completa OAuth sem estar pré-aprovado.
+7. `main.py:2713` — Rate-limit 5 callbacks / 10min por IP no `/oauth/callback`.
+
+**Etapa 3 — 5 testes novos:**
+
+- `test_is_user_approved_strict_no_auto_approval` (4 cenários vetores antigos)
+- `test_oauth_callback_does_not_auto_approve` (2 cenários com/sem doc pré-existente)
+- `test_lookup_portal_profile_does_not_approve` (match por email)
+- `test_lookup_portal_profile_by_name_does_not_approve` (match por nome)
+- `test_cache_ttl_hits_within_window` / `test_cache_ttl_misses_after_window`
+  / `test_cache_per_user_isolation` / `test_invalidate_status_cache_*`
+- `test_admin_me_phone_does_not_auto_approve` (atualizado)
+
+### Lição Aprendida
+
+**Auto-aprovação é uma anti-pattern**: nenhuma ação do usuário (OAuth, match
+em coleção, role herdado) deveria aprovar acesso a recursos sensíveis.
+Aprovação é decisão **humana** e deve ser **explícita** (flag + approved_by).
+
+### Custo Estimado Mitigado
+
+- 30+ chamadas `connected_accounts.list` em 12min (Vivian + Rafael) → 0 com cache TTL 120s
+- Possíveis chamadas LLM/tool-use ilimitadas de Vivian/Rafael → 0 com `unapproved_guest`
+- Risk de flood/bot via OAuth callback → mitigado com rate-limit 5/10min/IP
+
+### Pendências Externas
+
+- [ ] Revisar no Portal Coherence (`user_permissions` collection) se outras
+  contas foram auto-aprovadas pelo `system_auto_fix_2026-07-23`. Pode ter
+  outros usuários na mesma situação do Rafael que precisariam revisão manual.
+- [ ] Configurar alerta GCP Monitoring para `oauth_linked_without_approval`
+  (atualmente só log + WhatsApp).
+
+---
+
 ## 16/08/2026 (05:05 BRT) — PR #42: Onboarding HTML Redesign + Sync de Docs
 
 ### Contexto & Motivação

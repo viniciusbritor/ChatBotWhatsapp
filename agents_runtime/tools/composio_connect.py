@@ -1,13 +1,21 @@
 """Composio Platform connection manager — Connect Links + status."""
 import logging
 import os
-from typing import Any, Dict, List
+import time
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 _CACHED_KEY = None
 _PROJECT = os.getenv("GCP_PROJECT", "coherence-ominichannel-fs")
 COMPOSIO_BASE = "https://backend.composio.dev/api/v3.1"
+
+# GUARDRAIL §0.7 (16/08/2026): cache em memoria com TTL 120s por user_id para
+# evitar chamada repetida a /connected_accounts a cada render do Portal
+# (anteriormente era chamado em cada polling). Reduz custo API Composio ~85%
+# durante navegacao normal.
+_CACHE_TTL_SEC = 120
+_STATUS_CACHE: Dict[str, Dict[str, Any]] = {}  # user_id -> {"ts": float, "data": {...}}
 
 
 def _get_api_key() -> str:
@@ -32,6 +40,10 @@ def _client():
 
 
 async def get_status(user_id: str) -> Dict[str, Any]:
+    # Cache hit (TTL 120s) - evita bater no Composio a cada polling do Portal.
+    cached = _STATUS_CACHE.get(user_id)
+    if cached and (time.time() - cached["ts"]) < _CACHE_TTL_SEC:
+        return cached["data"]
     c = _client()
     try:
         configs = c.auth_configs.list()
@@ -48,7 +60,19 @@ async def get_status(user_id: str) -> Dict[str, Any]:
             "auth_config_id": getattr(cfg, "id", ""),
             "connected": slug in connected_slugs,
         }
-    return {"phone": user_id, "apps": apps, "total": len(apps)}
+    result = {"phone": user_id, "apps": apps, "total": len(apps)}
+    _STATUS_CACHE[user_id] = {"ts": time.time(), "data": result}
+    return result
+
+
+def invalidate_status_cache(user_id: Optional[str] = None) -> int:
+    """Limpa cache de status. Se user_id=None, limpa tudo."""
+    if user_id is None:
+        n = len(_STATUS_CACHE)
+        _STATUS_CACHE.clear()
+        return n
+    _STATUS_CACHE.pop(user_id, None)
+    return 1
 
 
 async def connect_all(user_id: str, toolkit: str = "") -> Dict[str, Any]:

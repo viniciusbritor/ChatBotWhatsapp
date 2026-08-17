@@ -18,6 +18,7 @@ def _request(query):
     }
     request.url.scheme = "https"
     request.url.hostname = "agents-runtime.example.run.app"
+    request.client.host = "127.0.0.1"
     return request
 
 
@@ -62,9 +63,10 @@ async def test_oauth_callback_saves_token_without_client_secret(monkeypatch):
         with patch("main.OAUTH_CLIENT_SECRET", "client-secret"):
             with patch("requests.post", return_value=token_response):
                 with patch("agent_loader.save_user", return_value=True) as save_user:
-                    response = await oauth_callback(
-                        _request({"code": "authorization-code", "state": state})
-                    )
+                    with patch("agent_loader.get_user", return_value={}) as get_user:
+                        response = await oauth_callback(
+                            _request({"code": "authorization-code", "state": state})
+                        )
 
     assert response.status_code == 200
     saved = save_user.call_args.args[1]
@@ -74,3 +76,72 @@ async def test_oauth_callback_saves_token_without_client_secret(monkeypatch):
     assert "client_id" not in token_data
     assert "client_secret" not in token_data
     assert token_data["linked_at"].endswith("-03:00")
+
+
+@pytest.mark.asyncio
+async def test_oauth_callback_does_not_auto_approve(monkeypatch):
+    """GUARDRAIL §0.7 (16/08/2026): /oauth/callback NAO seta mais
+    role='analyst' nem is_approved=True. Antes do fix, qualquer pessoa que
+    completasse OAuth era aprovada automaticamente (Vetor #1 do incidente).
+    """
+    monkeypatch.setenv("OAUTH_STATE_SECRET", "state-secret")
+    state = create_oauth_state("5511973391993")  # phone da Vivian (caso real)
+    token_response = MagicMock()
+    token_response.raise_for_status.return_value = None
+    token_response.json.return_value = {
+        "access_token": "access-token",
+        "refresh_token": "refresh-token",
+        "expires_in": 3600,
+        "id_token": "x.y.z",
+    }
+
+    with patch("main.OAUTH_CLIENT_ID", "client-id"):
+        with patch("main.OAUTH_CLIENT_SECRET", "client-secret"):
+            with patch("requests.post", return_value=token_response):
+                with patch("agent_loader.save_user", return_value=True) as save_user:
+                    # Simula usuario NAO pre-aprovado (caso da Vivian antes do fix)
+                    with patch("agent_loader.get_user", return_value={}) as get_user:
+                        response = await oauth_callback(
+                            _request({"code": "authorization-code", "state": state})
+                        )
+
+    assert response.status_code == 200
+    saved = save_user.call_args.args[1]
+    # OAuth NAO pode setar is_approved
+    assert "is_approved" not in saved or saved.get("is_approved") is not True
+    # OAuth NAO pode setar role=analyst
+    assert saved.get("role") != "analyst"
+    # OAuth apenas vincula token
+    assert saved.get("google_oauth_token", {}).get("token") == "access-token"
+
+
+@pytest.mark.asyncio
+async def test_oauth_callback_does_not_auto_approve_even_if_token_present(monkeypatch):
+    """GUARDRAIL §0.7: mesmo se get_user retornar um doc pre-existente SEM
+    is_approved, o callback NAO pode aprovar. Antes do fix 1.1, o user_update
+    sempre setava is_approved=True, sobrescrevendo o estado anterior.
+    """
+    monkeypatch.setenv("OAUTH_STATE_SECRET", "state-secret")
+    state = create_oauth_state("5511900000000")
+    token_response = MagicMock()
+    token_response.raise_for_status.return_value = None
+    token_response.json.return_value = {
+        "access_token": "new-access-token",
+        "refresh_token": "new-refresh-token",
+        "expires_in": 3600,
+    }
+
+    pre_existing_doc = {"phone": "5511900000000", "role": "guest", "is_approved": False}
+
+    with patch("main.OAUTH_CLIENT_ID", "client-id"):
+        with patch("main.OAUTH_CLIENT_SECRET", "client-secret"):
+            with patch("requests.post", return_value=token_response):
+                with patch("agent_loader.save_user", return_value=True) as save_user:
+                    with patch("agent_loader.get_user", return_value=pre_existing_doc):
+                        response = await oauth_callback(
+                            _request({"code": "authorization-code", "state": state})
+                        )
+
+    assert response.status_code == 200
+    saved = save_user.call_args.args[1]
+    assert "is_approved" not in saved or saved.get("is_approved") is False

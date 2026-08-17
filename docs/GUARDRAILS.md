@@ -1,7 +1,7 @@
 # Guardrails e Regras Inegociáveis — ChatBotWhatsapp
 
 > Regras DURAS que todos os agentes IA e humanos devem obedecer neste projeto.
-> Última atualização: **2026-08-14** — FinOps Estrito (Prompt Caching Estático, Poda de Tools a 1.500 chars, Groq Fallback e Desativação do Proactive Worker).
+> Última atualização: **2026-08-16** — GUARDRAIL §0.7 (Aprovação Explícita de Acesso Multi-Tenant — Anti Auto-Aprovação).
 
 ## 0. Guardrails de FinOps e Contenção de Custos de LLM
 
@@ -669,6 +669,55 @@ escape de `$` e melhora a legibilidade.
   O tool calling loop manual em `core/llm_provider.py::chat_with_tools` é
   fallback legacy. Tool executors SEMPRE usam `asyncio.wait_for(..., timeout=30s)`
   para evitar congelamento. Tool results devem ser truncados a 2000 chars.
+
+### §0.7 — Aprovação Explícita de Acesso Multi-Tenant (Anti Auto-Aprovação)
+
+**Regra (16/08/2026):** Aprovação de acesso ao modo secretária pessoal é
+**EXCLUSIVA** do admin e deve ser **EXPLÍCITA**. Nenhuma ação automática
+do usuário pode aprovar.
+
+**Vetores de auto-aprovação PROIBIDOS (causa raiz do incidente 16/08/2026
+que vazou acesso para Rafael Oliveira e Vivian Young):**
+
+1. **OAuth NUNCA aprova**: `/oauth/callback` (`main.py`) salva apenas o
+   `google_oauth_token`. Não seta `is_approved: True` nem `role: "analyst"`.
+2. **Portal Coherence NUNCA aprova**: `_lookup_portal_profile_for_phone_or_name`
+   (`agent_loader.py`) APENAS enriquece nome/picture/email. Não seta
+   `is_approved: True` nem `role: "analyst"` mesmo se o usuário for `analyst`
+   no Portal.
+3. **`role` sozinho NUNCA aprova**: `is_user_approved` (`agent_loader.py`)
+   verifica APENAS `is_approved: True` explícito OU `approved_by` presente
+   OU owner da instância.
+
+**Caminhos válidos de aprovação:**
+
+- `/admin/approve-user?phone=X&token=...` — admin clica link HMAC SHA-256
+  assinado (validade 30 dias) enviado via WhatsApp (`notify_admin_access_request`).
+- `/admin/users/{phone}/invite` — admin dispara convite via Portal
+  (com `approved_by: "admin_portal_invite"`).
+- Owner da instância (`resolve_owner_phone()` ou `_is_instance_owner()`).
+
+**Aprovação automática do self-vínculo PROIBIDA**: `/admin/me/phone`
+(Portal SSO → WhatsApp) salva APENAS `email/uid/picture`. Não seta
+`role: "analyst"` nem `is_approved: True`. O user fica como guest até
+o admin aprovar manualmente.
+
+**Defesa em profundidade:**
+
+- Rate-limit 5 callbacks / 10min por IP em `/oauth/callback` (anti-abuso).
+- Alerta `oauth_linked_without_approval` no WhatsApp do admin (cooldown 24h)
+  quando alguém completa OAuth sem estar pré-aprovado.
+- Audit log estruturado (`event_name=oauth_linked_without_approval`) em
+  todas as tentativas.
+
+**Regra derivada:** Toda mudança em `is_user_approved`, `_lookup_portal_*`
+ou `/oauth/callback` DEVE preservar este guardrail. Cobertura de testes em:
+
+- `tests/test_admin_approval.py::test_is_user_approved_strict_no_auto_approval`
+- `tests/test_admin_approval.py::test_admin_me_phone_does_not_auto_approve`
+- `tests/test_main_oauth.py::test_oauth_callback_does_not_auto_approve`
+- `tests/test_agent_loader.py::test_lookup_portal_profile_does_not_approve`
+- `tests/test_agent_loader.py::test_lookup_portal_profile_by_name_does_not_approve`
 
 ## 11. Pendências
 

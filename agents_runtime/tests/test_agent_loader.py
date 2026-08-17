@@ -165,3 +165,92 @@ class TestEnsureUserRegistered:
             assert args[0]["name"] == "Maria Santos"
             assert kwargs.get("merge") is True
 
+    def test_lookup_portal_profile_does_not_approve(self):
+        """GUARDRAIL §0.7 (16/08/2026): _lookup_portal_profile_for_phone_or_name
+        APENAS enriquece nome/picture/email. NAO seta role nem is_approved.
+        Antes do fix, encontrar 'Rafael Oliveira' no Portal Coherence users/
+        silenciosamente setava is_approved=True (Vetor #2 do incidente 16/08).
+        """
+        from unittest.mock import MagicMock
+        from agent_loader import _lookup_portal_profile_for_phone_or_name
+
+        db = MagicMock()
+        # users/rafadesouzaoliveira@gmail.com existe com global_role=analyst
+        portal_doc = MagicMock()
+        portal_doc.exists = True
+        portal_doc.to_dict.return_value = {
+            "name": "Rafael Oliveira",
+            "email": "rafadesouzaoliveira@gmail.com",
+            "global_role": "analyst",
+            "picture": "http://example.com/rafael.jpg",
+        }
+
+        call_count = {"users": 0, "collection": 0}
+
+        def collection_router(name):
+            call_count["collection"] += 1
+            coll = MagicMock()
+            if name == "users":
+                coll.document.return_value.get.return_value = portal_doc
+            return coll
+
+        db.collection.side_effect = collection_router
+
+        with patch("agent_loader._get_firestore_client", return_value=db):
+            result = _lookup_portal_profile_for_phone_or_name(
+                db,
+                "5521984843235",
+                name="",
+                email="rafadesouzaoliveira@gmail.com",
+            )
+
+        # Deve retornar dados de enriquecimento
+        assert result.get("name") == "Rafael Oliveira"
+        assert result.get("email") == "rafadesouzaoliveira@gmail.com"
+        assert result.get("picture") == "http://example.com/rafael.jpg"
+        # NAO pode setar role ou is_approved
+        assert "role" not in result
+        assert "is_approved" not in result
+
+    def test_lookup_portal_profile_by_name_does_not_approve(self):
+        """GUARDRAIL §0.7: match por NOME no Portal Coherence NAO aprova.
+
+        Antes do fix 1.2, a busca por substring (ex: 'Rafael' em 'Rafael
+        Oliveira') silenciosamente setava is_approved=True.
+        """
+        from unittest.mock import MagicMock
+        from agent_loader import _lookup_portal_profile_for_phone_or_name
+
+        db = MagicMock()
+        portal_doc = MagicMock()
+        portal_doc.id = "rafadesouzaoliveira@gmail.com"
+        portal_doc.to_dict.return_value = {
+            "name": "Rafael Oliveira",
+            "email": "rafadesouzaoliveira@gmail.com",
+            "global_role": "analyst",
+        }
+
+        def collection_router(name):
+            coll = MagicMock()
+            if name == "users":
+                # Sem doc.email == email_clean -> cai no loop por nome
+                coll.document.return_value.get.return_value = MagicMock(exists=False)
+                coll.stream.return_value = iter([portal_doc])
+            return coll
+
+        db.collection.side_effect = collection_router
+
+        with patch("agent_loader._get_firestore_client", return_value=db):
+            result = _lookup_portal_profile_for_phone_or_name(
+                db,
+                "5511999999999",  # phone novo, sem email
+                name="Rafael Oliveira",
+                email="",
+            )
+
+        # Encontrou match por nome -> enriqueceu
+        assert result.get("name") == "Rafael Oliveira"
+        # NAO aprova
+        assert "role" not in result
+        assert "is_approved" not in result
+

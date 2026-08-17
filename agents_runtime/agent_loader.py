@@ -653,14 +653,20 @@ def save_user(phone: str, data: Dict[str, Any]) -> bool:
 
 
 def is_user_approved(phone: str) -> bool:
-    """Verifica se o usuario esta aprovado como admin ou analista.
+    """Verifica se o usuario esta aprovado pelo admin (politica estrita).
 
-    1. Owner da instancia e admin sempre sao aprovados.
-    2. Usuario com is_approved=True ou token Google / email vinculado no Portal.
-    3. Retorna False se o usuario for guest ou nao aprovado.
+    GUARDRAIL §0.7 (16/08/2026): aprovacao e EXPLICITA via `is_approved=True`
+    ou `approved_by` presente no doc do Firestore. Os tres caminhos antigos
+    de auto-aprovacao foram removidos:
 
-    Cada caminho de aprovacao automatica emite log estruturado
-    ``auto_approval_granted`` com o motivo, para auditoria via Portal Admin.
+      ~~(a) existencia de `google_oauth_token`~~ -> OAuth nao aprova
+      ~~(b) match por email no Portal Coherence (coherence_role)~~ -> Portal nao aprova
+      ~~(c) qualquer `role != guest` no doc~~ -> role sozinho nao aprova
+
+    Caminhos validos (politica atual):
+      1. Owner da instancia (resolve_owner_phone / _is_instance_owner).
+      2. Doc com `is_approved=True` (admin clicou em approve-user / invite).
+      3. Doc com `approved_by` presente (caminho legitimo de aprovacao).
     """
     canonical = _canonical_phone(phone)
     if not canonical:
@@ -673,45 +679,7 @@ def is_user_approved(phone: str) -> bool:
         return False
     if user.get("is_approved") is True:
         return True
-    if user.get("google_oauth_token") or user.get("approved_by"):
-        logger.info(
-            "auto_approval_granted phone=%s reason=oauth_or_approved_by",
-            canonical,
-            extra={
-                "event_name": "auto_approval_granted",
-                "phone": canonical,
-                "reason": "oauth_or_approved_by",
-                "approved_by": user.get("approved_by", ""),
-            },
-        )
-        return True
-    if user.get("email"):
-        coherence_role = get_coherence_module_role(user["email"])
-        if coherence_role in ("admin", "agent_user", "analyst", "analista"):
-            logger.info(
-                "auto_approval_granted phone=%s reason=portal_role email=%s role=%s",
-                canonical, user.get("email", ""), coherence_role,
-                extra={
-                    "event_name": "auto_approval_granted",
-                    "phone": canonical,
-                    "reason": "portal_role_match",
-                    "email": user.get("email", ""),
-                    "coherence_role": coherence_role,
-                },
-            )
-            return True
-    role = str(user.get("role", "")).strip().lower()
-    if role in ("admin", "analyst", "analista", "agent_user") and role != "guest":
-        logger.info(
-            "auto_approval_granted phone=%s reason=firestore_role role=%s",
-            canonical, role,
-            extra={
-                "event_name": "auto_approval_granted",
-                "phone": canonical,
-                "reason": "firestore_role_match",
-                "role": role,
-            },
-        )
+    if user.get("approved_by"):
         return True
     return False
 
@@ -734,7 +702,13 @@ def _is_placeholder_name(name: Any) -> bool:
 
 
 def _lookup_portal_profile_for_phone_or_name(db, phone: str, name: str = "", email: str = "") -> Dict[str, Any]:
-    """Busca informacoes ricas de perfil na colecao users do Portal Coherence."""
+    """Busca informacoes de perfil (nome/picture/email) na colecao users do Portal Coherence.
+
+    GUARDRAIL §0.7 (16/08/2026): esta funcao APENAS enriquece o perfil do contato.
+    Ela NAO seta `role` nem `is_approved` - isso causava auto-aprovacao quando o
+    nome/email do contato batia com um usuario do Portal Coherence (Vetor #2).
+    Aprovacao e responsabilidade exclusiva do admin (veja is_user_approved).
+    """
     if db is None:
         return {}
     res: Dict[str, Any] = {}
@@ -749,9 +723,10 @@ def _lookup_portal_profile_for_phone_or_name(db, phone: str, name: str = "", ema
                     res["display_name"] = str(u_data["name"]).strip()
                 if u_data.get("picture"):
                     res["picture"] = u_data["picture"]
-                if u_data.get("global_role") in ("analyst", "super-admin") or u_data.get("role") in ("analyst", "admin"):
-                    res["role"] = "analyst"
-                    res["is_approved"] = True
+                if u_data.get("email"):
+                    res["email"] = str(u_data["email"]).strip().lower()
+                # NOTA: removido `res["role"]="analyst"` e `res["is_approved"]=True`
+                # ver docs/GUARDRAILS.md §0.7.
                 return res
 
         clean_name_lower = str(name or "").strip().lower()
@@ -767,9 +742,7 @@ def _lookup_portal_profile_for_phone_or_name(db, phone: str, name: str = "", ema
                     res["email"] = doc_email
                 if u_data.get("picture"):
                     res["picture"] = u_data["picture"]
-                if u_data.get("global_role") in ("analyst", "super-admin") or u_data.get("role") in ("analyst", "admin"):
-                    res["role"] = "analyst"
-                    res["is_approved"] = True
+                # NOTA: removido `res["role"]="analyst"` e `res["is_approved"]=True`
                 return res
     except Exception as exc:
         logger.debug("lookup_portal_profile failed: %s", exc)
