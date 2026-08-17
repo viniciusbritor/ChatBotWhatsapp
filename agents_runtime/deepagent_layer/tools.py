@@ -41,6 +41,8 @@ def _build_langchain_tools_for(manager_id: str) -> List[Any]:
         return _build_onedrive_tools()
     if manager_id == "manager-googlemeet":
         return _build_googlemeet_tools()
+    if manager_id == "manager-msteams":
+        return _build_msteams_tools()
     if manager_id == "manager-jennifier":
         # Agente conversacional geral: nao tem tools. Retorna lista vazia
         # explicitamente para evitar o warning 'unknown manager_id'.
@@ -319,6 +321,66 @@ def _build_googlemeet_tools() -> List[Any]:
         googlemeet_create_meeting,
         googlemeet_list_meetings,
         googlemeet_get_meeting_link,
+    ]
+
+
+def _build_msteams_tools() -> List[Any]:
+    """LangChain tools para Microsoft Teams via Composio (manager-msteams).
+
+    Tools wrapped:
+    - msteams_send_message: MS_TEAMS_SEND_MESSAGE
+    - msteams_list_channels: MS_TEAMS_LIST_CHANNELS
+    - msteams_list_messages: MS_TEAMS_LIST_MESSAGES
+    """
+    from tools import microsoft_teams_composio
+
+    @tool
+    async def msteams_send_message(
+        channel_id: str,
+        message: str,
+        phone: str = "",
+    ) -> Dict[str, Any]:
+        """Envia uma mensagem para um canal do Microsoft Teams.
+
+        Args:
+            channel_id: ID do canal de destino.
+            message: Conteudo da mensagem.
+            phone: Telefone do usuario.
+        """
+        return await microsoft_teams_composio.send_message(
+            channel_id=channel_id, message=message, phone=phone,
+        )
+
+    @tool
+    async def msteams_list_channels(phone: str = "") -> Dict[str, Any]:
+        """Lista canais do Microsoft Teams do usuario.
+
+        Args:
+            phone: Telefone do usuario.
+        """
+        return await microsoft_teams_composio.list_channels(phone=phone)
+
+    @tool
+    async def msteams_list_messages(
+        channel_id: str,
+        top: int = 20,
+        phone: str = "",
+    ) -> Dict[str, Any]:
+        """Lista mensagens de um canal do Microsoft Teams.
+
+        Args:
+            channel_id: ID do canal.
+            top: Numero maximo de mensagens (default 20).
+            phone: Telefone do usuario.
+        """
+        return await microsoft_teams_composio.list_messages(
+            channel_id=channel_id, top=top, phone=phone,
+        )
+
+    return [
+        msteams_send_message,
+        msteams_list_channels,
+        msteams_list_messages,
     ]
 
 
