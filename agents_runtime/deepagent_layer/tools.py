@@ -33,6 +33,8 @@ def _build_langchain_tools_for(manager_id: str) -> List[Any]:
         return _build_web_tools()
     if manager_id == "manager-linkedin":
         return _build_linkedin_tools()
+    if manager_id == "manager-googledocs":
+        return _build_googledocs_tools()
     if manager_id == "manager-jennifier":
         # Agente conversacional geral: nao tem tools. Retorna lista vazia
         # explicitamente para evitar o warning 'unknown manager_id'.
@@ -41,6 +43,79 @@ def _build_langchain_tools_for(manager_id: str) -> List[Any]:
         return []
     logger.warning("unknown manager_id=%s", manager_id)
     return []
+
+
+def _build_googledocs_tools() -> List[Any]:
+    """LangChain tools para Google Docs via Composio (manager-googledocs).
+
+    Tools wrapped:
+    - googledocs_create_document: GOOGLEDOCS_CREATE_DOCUMENT_MARKDOWN
+    - googledocs_read_document: GOOGLEDOCS_GET_DOCUMENT_PLAINTEXT
+    - googledocs_search_documents: GOOGLEDOCS_SEARCH_DOCUMENTS
+    - googledocs_export_pdf: GOOGLEDOCS_EXPORT_DOCUMENT_AS_PDF
+    """
+    from tools import googledocs_composio
+
+    @tool
+    async def googledocs_create_document(
+        title: str,
+        markdown_text: str = "",
+        phone: str = "",
+    ) -> Dict[str, Any]:
+        """Cria um documento Google Docs a partir de markdown.
+
+        Args:
+            title: Titulo do documento (max 200 chars).
+            markdown_text: Conteudo em markdown (max 50000 chars).
+            phone: Telefone do usuario.
+        """
+        return await googledocs_composio.create_document(
+            title=title, markdown_text=markdown_text, phone=phone,
+        )
+
+    @tool
+    async def googledocs_read_document(doc_id: str, phone: str) -> Dict[str, Any]:
+        """Le o conteudo plain text de um documento Google Docs.
+
+        Args:
+            doc_id: ID do documento Google Docs.
+            phone: Telefone do usuario.
+        """
+        return await googledocs_composio.read_document(doc_id=doc_id, phone=phone)
+
+    @tool
+    async def googledocs_search_documents(
+        query: str = "",
+        max_results: int = 10,
+        phone: str = "",
+    ) -> Dict[str, Any]:
+        """Busca documentos Google Docs por texto.
+
+        Args:
+            query: Texto de busca (max 500 chars).
+            max_results: Numero maximo de resultados (default 10).
+            phone: Telefone do usuario.
+        """
+        return await googledocs_composio.search_documents(
+            query=query, max_results=max_results, phone=phone,
+        )
+
+    @tool
+    async def googledocs_export_pdf(doc_id: str, phone: str) -> Dict[str, Any]:
+        """Exporta um documento Google Docs como PDF.
+
+        Args:
+            doc_id: ID do documento Google Docs.
+            phone: Telefone do usuario.
+        """
+        return await googledocs_composio.export_pdf(doc_id=doc_id, phone=phone)
+
+    return [
+        googledocs_create_document,
+        googledocs_read_document,
+        googledocs_search_documents,
+        googledocs_export_pdf,
+    ]
 
 
 def _build_linkedin_tools() -> List[Any]:
