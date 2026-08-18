@@ -104,6 +104,14 @@ async def test_auto_webhook_rejects_missing_secret_config():
     assert exc_info.value.status_code == 404
 
 
+def test_auto_webhook_path_is_public():
+    """O caminho /admin/evolution/auto-webhook/* deve ser publico (sem auth)."""
+    from core.auth import is_path_protected
+    assert is_path_protected("/admin/evolution/auto-webhook/tk_test_123") is False
+    # Sanity check: /admin/agents continua protegido.
+    assert is_path_protected("/admin/agents") is True
+
+
 @pytest.mark.asyncio
 async def test_auto_webhook_ignores_non_instance_create_events(shared_secret):
     """Eventos nao-criacao (MESSAGES_UPSERT, CONNECTION_UPDATE) devem ser ignorados

@@ -17,7 +17,16 @@ from fastapi.responses import JSONResponse
 logger = logging.getLogger(__name__)
 
 PROTECTED_PATHS = ("/admin", "/chat", "/proactive/send", "/version")
-PUBLIC_PATHS = ("/webhook", "/healthz", "/oauth/callback", "/oauth/google", "/pubsub", "/a", "/admin/approve-user")
+PUBLIC_PATHS = (
+    "/webhook",
+    "/healthz",
+    "/oauth/callback",
+    "/oauth/google",
+    "/pubsub",
+    "/a",
+    "/admin/approve-user",
+    "/admin/evolution/auto-webhook",
+)
 FIREBASE_PROJECT = os.getenv("GCP_PROJECT", "coherence-ominichannel-fs")
 
 
