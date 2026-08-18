@@ -9,12 +9,12 @@ if str(ROOT) not in sys.path:
 
 
 def test_allowed_toolkits_hardcoded():
-    """ALLOWED_TOOLKITS deve conter os 15 toolkits conhecidos."""
+    """ALLOWED_TOOLKITS deve conter os 16 toolkits conhecidos (6 Google + 10 Composio)."""
     from tools.api_registry import ALLOWED_TOOLKITS
     expected = {"calendar", "gmail", "drive", "people", "tasks", "maps",
                 "linkedin", "youtube", "github", "notion",
                 "onedrive", "googledocs", "googlesheets", "googlemeet",
-                "microsoft_teams"}
+                "microsoft_teams", "msteams"}
     assert ALLOWED_TOOLKITS == expected, f"diff: {ALLOWED_TOOLKITS.symmetric_difference(expected)}"
 
 
@@ -113,4 +113,4 @@ def test_list_allowed_slugs_returns_sorted():
     from tools.api_registry import api_registry
     slugs = api_registry.list_allowed_slugs()
     assert slugs == sorted(slugs)
-    assert len(slugs) == 15
+    assert len(slugs) == 16  # 6 Google + 10 Composio
