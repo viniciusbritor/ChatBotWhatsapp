@@ -1,5 +1,5 @@
 """Testes para os novos endpoints do relay (/relay/{nome}) e do registrador
-auto-webhook (/admin/evolution/auto-webhook).
+auto-webhook (/admin/evolution/auto-webhook/{token}).
 
 Esses dois endpoints foram adicionados na Parte1 do plano de Jennifer-prod
 para suportar o padrao:
@@ -76,40 +76,55 @@ async def test_relay_path_with_subpath_also_works():
     assert body["queued"] is True
 
 
+@pytest.fixture
+def shared_secret(monkeypatch):
+    """Configura o secret compartilhado para o registrador auto-webhook."""
+    monkeypatch.setenv("AGENT_AUTO_WEBHOOK_SHARED_SECRET", "tk_test_123")
+
+
 @pytest.mark.asyncio
-async def test_auto_webhook_ignores_non_instance_create_events():
+async def test_auto_webhook_rejects_wrong_token():
+    """Token errado deve retornar 404 (oculta a existencia do endpoint)."""
+    request = _request({"event": "INSTANCE_CREATE", "instance": "jennifer"})
+    with patch.dict("os.environ", {"AGENT_AUTO_WEBHOOK_SHARED_SECRET": "tk_correct"}):
+        with pytest.raises(HTTPException) as exc_info:
+            await admin_evolution_auto_webhook(request, webhook_token="wrong")
+    assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_auto_webhook_rejects_missing_secret_config():
+    """Se AGENT_AUTO_WEBHOOK_SHARED_SECRET nao estiver configurado, retorna 404."""
+    request = _request({"event": "INSTANCE_CREATE", "instance": "jennifer"})
+    with patch.dict("os.environ", {}, clear=False):
+        import os
+        os.environ.pop("AGENT_AUTO_WEBHOOK_SHARED_SECRET", None)
+        with pytest.raises(HTTPException) as exc_info:
+            await admin_evolution_auto_webhook(request, webhook_token="any")
+    assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_auto_webhook_ignores_non_instance_create_events(shared_secret):
     """Eventos nao-criacao (MESSAGES_UPSERT, CONNECTION_UPDATE) devem ser ignorados
     para nao causar ruido/duplicacao no webhook global."""
     request = _request({"event": "MESSAGES_UPSERT", "instance": "jennifer"})
-    with patch("main._require_admin") as mock_admin:
-        response = await admin_evolution_auto_webhook(request)
+    response = await admin_evolution_auto_webhook(request, webhook_token="tk_test_123")
     import json as _json
     body = _json.loads(response.body)
     assert body["status"] == "ignored"
     assert "reason" in body
-    mock_admin.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_auto_webhook_requires_auth():
-    """/admin/evolution/auto-webhook deve exigir admin (SA token)."""
-    request = _request({"event": "INSTANCE_CREATE", "instance": "jennifer-prod"})
-    with patch("main._require_admin", side_effect=HTTPException(status_code=403, detail="admin_required")):
-        with pytest.raises(HTTPException) as exc_info:
-            await admin_evolution_auto_webhook(request)
-    assert exc_info.value.status_code == 403
-
-
-@pytest.mark.asyncio
-async def test_auto_webhook_skips_unknown_instance():
+async def test_auto_webhook_skips_unknown_instance(shared_secret):
     """INSTANCE_CREATE de instancia nao presente no Evolution deve ser ignorado."""
     request = _request({"event": "INSTANCE_CREATE", "instance": "fantasma"})
-    with patch("main._require_admin"):
-        with patch("core.evolution_admin.fetch_instances", AsyncMock(return_value=[
-            {"name": "jennifer"},
-        ])):
-            with patch("core.evolution_admin.set_webhook", AsyncMock(return_value={"set": True})) as mock_set:
-                response = await admin_evolution_auto_webhook(request)
+    with patch("core.evolution_admin.fetch_instances", AsyncMock(return_value=[
+        {"name": "jennifer"},
+    ])):
+        with patch("core.evolution_admin.set_webhook", AsyncMock(return_value={"set": True})) as mock_set:
+            response = await admin_evolution_auto_webhook(request, webhook_token="tk_test_123")
     import json as _json
     body = _json.loads(response.body)
     assert body["status"] == "skipped"
@@ -118,15 +133,14 @@ async def test_auto_webhook_skips_unknown_instance():
 
 
 @pytest.mark.asyncio
-async def test_auto_webhook_creates_webhook_for_known_instance():
+async def test_auto_webhook_creates_webhook_for_known_instance(shared_secret):
     """INSTANCE_CREATE de instancia conhecida deve setar webhook dedicada via /relay."""
     request = _request({"event": "INSTANCE_CREATE", "instance": "jennifer-prod"})
-    with patch("main._require_admin"):
-        with patch("core.evolution_admin.fetch_instances", AsyncMock(return_value=[
-            {"name": "jennifer-prod"},
-        ])):
-            with patch("core.evolution_admin.set_webhook", AsyncMock(return_value={"set": True})) as mock_set:
-                response = await admin_evolution_auto_webhook(request)
+    with patch("core.evolution_admin.fetch_instances", AsyncMock(return_value=[
+        {"name": "jennifer-prod"},
+    ])):
+        with patch("core.evolution_admin.set_webhook", AsyncMock(return_value={"set": True})) as mock_set:
+            response = await admin_evolution_auto_webhook(request, webhook_token="tk_test_123")
     import json as _json
     body = _json.loads(response.body)
     assert body["status"] == "created"
@@ -139,33 +153,30 @@ async def test_auto_webhook_creates_webhook_for_known_instance():
 
 
 @pytest.mark.asyncio
-async def test_auto_webhook_invalid_json_returns_400():
+async def test_auto_webhook_invalid_json_returns_400(shared_secret):
     request = _request(error=Exception("bad json"))
-    with patch("main._require_admin"):
-        with pytest.raises(HTTPException) as exc_info:
-            await admin_evolution_auto_webhook(request)
+    with pytest.raises(HTTPException) as exc_info:
+        await admin_evolution_auto_webhook(request, webhook_token="tk_test_123")
     assert exc_info.value.status_code == 400
 
 
 @pytest.mark.asyncio
-async def test_auto_webhook_missing_instance_returns_422():
+async def test_auto_webhook_missing_instance_returns_422(shared_secret):
     request = _request({"event": "INSTANCE_CREATE"})
-    with patch("main._require_admin"):
-        with pytest.raises(HTTPException) as exc_info:
-            await admin_evolution_auto_webhook(request)
+    with pytest.raises(HTTPException) as exc_info:
+        await admin_evolution_auto_webhook(request, webhook_token="tk_test_123")
     assert exc_info.value.status_code == 422
 
 
 @pytest.mark.asyncio
-async def test_auto_webhook_accepts_instanceName_payload():
+async def test_auto_webhook_accepts_instanceName_payload(shared_secret):
     """Evolution v2 as vezes envia 'instanceName' em vez de 'instance'."""
     request = _request({"event": "INSTANCE_CREATE", "instanceName": "jennifer"})
-    with patch("main._require_admin"):
-        with patch("core.evolution_admin.fetch_instances", AsyncMock(return_value=[
-            {"name": "jennifer"},
-        ])):
-            with patch("core.evolution_admin.set_webhook", AsyncMock(return_value={"set": True})):
-                response = await admin_evolution_auto_webhook(request)
+    with patch("core.evolution_admin.fetch_instances", AsyncMock(return_value=[
+        {"name": "jennifer"},
+    ])):
+        with patch("core.evolution_admin.set_webhook", AsyncMock(return_value={"set": True})):
+            response = await admin_evolution_auto_webhook(request, webhook_token="tk_test_123")
     import json as _json
     body = _json.loads(response.body)
     assert body["status"] == "created"

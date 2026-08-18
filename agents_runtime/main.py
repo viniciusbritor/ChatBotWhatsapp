@@ -924,17 +924,24 @@ async def admin_evolution_health():
     })
 
 
-@app.post("/admin/evolution/auto-webhook")
-async def admin_evolution_auto_webhook(request: Request):
+@app.post("/admin/evolution/auto-webhook/{webhook_token:path}")
+async def admin_evolution_auto_webhook(request: Request, webhook_token: str = ""):
     """Registrador auto: recebe evento INSTANCE_CREATE do Evolution (via webhook
     global) e cria automaticamente a config de webhook dedicada para a instancia.
+
+    URL esperada: /admin/evolution/auto-webhook/<token-compartilhado>
+    O token deve bater com o env var AGENT_AUTO_WEBHOOK_SHARED_SECRET.
+    Se o token nao bater, retorna 404 (oculta a existencia do endpoint).
 
     Esperado body:
         {"event": "INSTANCE_CREATE", "instance": "X"}
     ou payload completo do Evolution (instanceName, event, etc).
     Idempotente: se ja existe webhook configurado, nao duplica.
     """
-    _require_admin(request)
+    expected = (os.getenv("AGENT_AUTO_WEBHOOK_SHARED_SECRET") or "").strip()
+    if not expected or webhook_token != expected:
+        # Esconde a existencia do endpoint sem revelar detalhes.
+        raise HTTPException(status_code=404, detail="not_found")
     try:
         body = await request.json()
     except Exception:
