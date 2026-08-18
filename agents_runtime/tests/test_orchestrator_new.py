@@ -355,7 +355,8 @@ class TestDeterministicRoutingEmail:
         text = ("marque um compromisso com o Maycon para amanha -> mande o invite "
                 "para ele mayconpxavier@gmail.com as 15:00 as 16:00")
         assert cal_detect(text) is True
-        assert eml_detect(text) is True  # email tb detecta, mas cal_detect roda primeiro
+        # Fix (18/08/2026): eml_detect NAO sequestra calendar - "compromisso" e EXCLUDE
+        assert eml_detect(text) is False  # calendar prioritario sobre email quando ha keyword de calendar
 
     def test_compromisso_agenda_com_email_participante(self):
         from pipelines.calendar_pipeline import detect as cal_detect
