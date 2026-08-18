@@ -389,9 +389,38 @@ def _build_msteams_tools() -> List[Any]:
             channel_id=channel_id, top=top, phone=phone,
         )
 
+    @tool
+    async def msteams_create_online_meeting(
+        subject: str,
+        start_date_time: str,
+        end_date_time: str,
+        phone: str = "",
+        user_id: str = "",
+        participants: list = None,
+    ) -> Dict[str, Any]:
+        """Cria uma reuniao online standalone no Microsoft Teams.
+
+        Args:
+            subject: Titulo da reuniao.
+            start_date_time: ISO 8601 (ex: '2026-08-20T15:00:00Z').
+            end_date_time: ISO 8601.
+            phone: Telefone do usuario.
+            user_id: Graph user ID (alternativo).
+            participants: Lista opcional de participantes.
+        """
+        return await microsoft_teams_composio.create_online_meeting(
+            subject=subject,
+            start_date_time=start_date_time,
+            end_date_time=end_date_time,
+            phone=phone,
+            user_id=user_id,
+            participants=participants or [],
+        )
+
     return [
         msteams_send_message,
         msteams_list_channels,
+        msteams_create_online_meeting,
         msteams_list_messages,
     ]
 

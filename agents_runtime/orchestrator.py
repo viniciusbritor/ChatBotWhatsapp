@@ -2394,28 +2394,32 @@ async def _orchestrate_inner(payload: Dict[str, Any], instance: str, phone: str,
         return await _handle_morality(payload, masked_text, sender_name, cache_key, instance, phone)
 
     # ========================
-    # TIER 1.5: Auto-Discovery (Dynamic Manager Factory)
+    # TIER 1.5: Auto-Discovery (DeepAgents hardcoded)
     # ========================
-    # GUARDRAIL (17/08/2026): auto-discovery de toolkits via ApiRegistry +
-    # DynamicManagerFactory. Detecta toolkit via keywords, factory constroi
-    # manager sob demanda (B1 template-based). Allowlist garante seguranca.
+    # GUARDRAIL (18/08/2026): auto-discovery via deepagent_layer.get_deep_agent.
+    # _detect_dynamic_toolkit retorna o slug (linkedin, youtube, etc.);
+    # construimos um dict-wrapping com id do manager e delegamos para
+    # _execute_agent, que sabe lidar com manager_id via deepagent_path.
+    # Antes usava dynamic_factory.get_or_create() + dict(agent) que
+    # quebrava com TypeError: 'CompiledStateGraph' object is not iterable.
     try:
         toolkit_slug = _detect_dynamic_toolkit(text)
         if toolkit_slug:
-            from deepagent_layer.dynamic_manager_factory import dynamic_factory
-            agent = dynamic_factory.get_or_create(toolkit_slug)
-            if agent:
+            manager_id = f"manager-{toolkit_slug}"
+            from deepagent_layer.agents import get_deep_agent, MANAGER_PROMPTS
+            if manager_id in MANAGER_PROMPTS and get_deep_agent(manager_id) is not None:
                 result = await _execute_agent(
-                    dict(agent), masked_text, payload, payload.get("extra", {}),
+                    {"id": manager_id, "system_prompt": ""},
+                    masked_text, payload, payload.get("extra", {}),
                 )
                 path = [
-                    {"step": 1, "phase": "dynamic_discovery", "toolkit": toolkit_slug},
+                    {"step": 1, "phase": "tier15_dispatch", "toolkit": toolkit_slug, "manager": manager_id},
                 ]
                 return await _finalize_orchestration(
                     payload, masked_text, sender_name, result, path, cache_key,
                 )
             else:
-                # Factory bloqueada (allowlist ou modulo nao existe).
+                # Manager nao disponivel em MANAGER_PROMPTS (slug nao reconhecido).
                 meta = api_registry.get_meta(toolkit_slug)
                 if meta is None:
                     blocked_msg = (
@@ -2433,19 +2437,19 @@ async def _orchestrate_inner(payload: Dict[str, Any], instance: str, phone: str,
                     "delay_ms": 0,
                     "presence": "composing",
                     "metadata": {
-                        "agent_id": "dynamic-discovery-blocked",
+                        "agent_id": "tier15-not-found",
                         "toolkit": toolkit_slug,
                         "blocked_reason": "not_allowed_or_module_missing",
                     },
                 }
                 path = [
-                    {"step": 1, "phase": "dynamic_discovery_blocked", "toolkit": toolkit_slug},
+                    {"step": 1, "phase": "tier15_blocked", "toolkit": toolkit_slug},
                 ]
                 return await _finalize_orchestration(
                     payload, masked_text, sender_name, early_result, path, cache_key,
                 )
     except Exception as exc:
-        logger.warning("dynamic_discovery_handler_failed: %s", exc)
+        logger.warning("tier15_dispatch_handler_failed: %s", exc)
 
     # ========================
     # TIER 1.7: Deterministic Pipeline Detection (zero LLM)
