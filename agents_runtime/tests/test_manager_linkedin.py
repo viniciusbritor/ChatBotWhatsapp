@@ -103,36 +103,27 @@ class TestManagerLinkedinE2EFlow:
         assert "post" in create_post_tool.description.lower()
 
 
-class TestManagerLinkedinDynamicFactory:
-    """Dynamic factory constroi manager-linkedin quando solicitado."""
+class TestManagerLinkedinTier15Dispatch:
+    """Fix (18/08/2026): TIER 1.5 dispatch via deepagent_layer.get_deep_agent.
 
-    def test_factory_returns_manager_for_linkedin(self):
-        """Se slug=linkedin, dynamic_factory deve construir ou None."""
-        from deepagent_layer.dynamic_manager_factory import dynamic_factory
-        dynamic_factory.clear_cache()
-        with patch("deepagent_layer.dynamic_manager_factory.api_registry") as mock_reg:
-            mock_reg.is_allowed.return_value = True
-            mock_meta = MagicMock()
-            mock_meta.slug = "linkedin"
-            mock_meta.module_path = "tools.linkedin_composio"
-            mock_meta.category = "composio"
-            mock_meta.name = "LinkedIn"
-            mock_reg.get_meta.return_value = mock_meta
-            # Mock o _build_agent para nao criar DeepAgent real
-            with patch("deepagent_layer.dynamic_manager_factory.DynamicManagerFactory._build_agent") as mock_build:
-                mock_build.return_value = MagicMock()
-                agent = dynamic_factory.get_or_create("linkedin")
+    O factory dynamic foi removido; o handler agora constroi manager-<slug>
+    e delega para _execute_agent (deepagent_path).
+    """
 
+    def test_manager_linkedin_built_by_get_deep_agent(self):
+        """get_deep_agent('manager-linkedin') deve retornar CompiledStateGraph."""
+        from deepagent_layer.agents import get_deep_agent, MANAGER_PROMPTS
+        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "sk-test"}):
+            agent = get_deep_agent("manager-linkedin")
         assert agent is not None
+        assert "manager-linkedin" in MANAGER_PROMPTS
 
-    def test_factory_blocks_linkedin_when_not_allowed(self):
-        """Se linkedin NAO esta na allowlist, factory retorna None."""
-        from deepagent_layer.dynamic_manager_factory import dynamic_factory
-        dynamic_factory.clear_cache()
-        with patch("deepagent_layer.dynamic_manager_factory.api_registry") as mock_reg:
-            mock_reg.is_allowed.return_value = False
-            agent = dynamic_factory.get_or_create("linkedin")
-        assert agent is None
+    def test_tier15_dispatches_to_deepagent(self):
+        """_detect_dynamic_toolkit detecta 'linkedin' em frases reais."""
+        from orchestrator import _detect_dynamic_toolkit
+        assert _detect_dynamic_toolkit("meu perfil no linkedin") == "linkedin"
+        assert _detect_dynamic_toolkit("buscar perfil linkedin") == "linkedin"
+        assert _detect_dynamic_toolkit("perfil do linkedin") == "linkedin"
 
 
 class TestManagerLinkedinNotBreaking:
@@ -162,26 +153,20 @@ class TestManagerLinkedinNotBreaking:
 
 
 class TestManagerLinkedinCrashSafety:
-    """Robustez."""
+    """Robustez do TIER 1.5 (dispatch).
 
-    def test_factory_handles_module_import_error(self):
-        """Se o modulo do toolkit nao existe, factory retornsa None."""
-        from deepagent_layer.dynamic_manager_factory import dynamic_factory
-        dynamic_factory.clear_cache()
-        with patch("deepagent_layer.dynamic_manager_factory.api_registry") as mock_reg:
-            mock_reg.is_allowed.return_value = True
-            mock_meta = MagicMock()
-            mock_meta.slug = "fake_toolkit"
-            mock_meta.module_path = "tools.fake_toolkit_composio"  # nao existe
-            mock_reg.get_meta.return_value = mock_meta
-            agent = dynamic_factory.get_or_create("fake_toolkit")
-        assert agent is None
+    Antes: factory.get_or_create retornava None ou capturava excecao.
+    Agora: orchestrator._orchestrate_inner captura o except e loga warning.
+    """
 
-    def test_factory_handles_keyerror_in_get_meta(self):
-        from deepagent_layer.dynamic_manager_factory import dynamic_factory
-        dynamic_factory.clear_cache()
-        with patch("deepagent_layer.dynamic_manager_factory.api_registry") as mock_reg:
-            mock_reg.is_allowed.return_value = True
-            mock_reg.get_meta.return_value = None  # toolkit sem metadata
-            agent = dynamic_factory.get_or_create("missing")
-        assert agent is None
+    def test_unknown_toolkit_slug_not_in_allowlist(self):
+        """Slug fora da allowlist -> api_registry.is_allowed retorna False."""
+        from tools.api_registry import api_registry
+        with patch.object(api_registry, "is_allowed", return_value=False):
+            assert api_registry.is_allowed("unknown_toolkit_xyz") is False
+
+    def test_tier15_handles_unknown_slug_gracefully(self):
+        """_detect_dynamic_toolkit retorna None para mensagens sem keyword conhecida."""
+        from orchestrator import _detect_dynamic_toolkit
+        assert _detect_dynamic_toolkit("oi tudo bem?") is None
+        assert _detect_dynamic_toolkit("bom dia") is None

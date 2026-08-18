@@ -87,9 +87,11 @@ async def run_agent(
                 agent_copy.get("system_prompt", "")
                 + f"\n\n[DADOS PRE-CARREGADOS DO {prefetch_label}]\n{safe_prefetch}\n\n"
                 + (tone_guide or "")
-                + "NAO chame ferramentas — os dados ja estao prontos."
+                + "Voce PODE chamar ferramentas se precisar criar, atualizar ou modificar algo."
             )
-            agent_copy["tools"] = []
+            # NAO zerar agent_copy["tools"] - o LLM precisa poder chamar
+            # calendar.create_event, gmail.send_message, etc. mesmo com prefetch.
+            # O prefetch so injeta dados no system_prompt como contexto.
 
         result = await _execute_agent(agent_copy, text, payload, extra)
 

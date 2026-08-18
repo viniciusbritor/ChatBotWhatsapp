@@ -2094,45 +2094,11 @@ async def _classify_intent_llm(text: str) -> str:
     text_ascii_safe = text_nfkd.encode("ascii", errors="ignore").decode("ascii")
     prompt = _CLASSIFIER_PROMPT.format(text=text_ascii_safe)
 
-    # 1. Groq (Zero-cost se GROQ_API_KEY configurada)
-    groq_key = get_secret("GROQ_API_KEY") or os.getenv("GROQ_API_KEY", "")
-    if groq_key:
-        try:
-            llm_groq = ChatOpenAI(
-                model="llama-3.1-8b-instant",
-                api_key=groq_key,
-                base_url="https://api.groq.com/openai/v1",
-                temperature=0,
-                max_tokens=5,
-                timeout=3,
-            )
-            result = await asyncio.to_thread(llm_groq.invoke, prompt)
-            raw = getattr(result, "content", str(result)).strip().lower()
-            if raw in valid:
-                return raw
-        except Exception as exc:
-            logger.warning("groq_intent_classifier_failed: %s", exc)
-
-    # 2. NVIDIA NIM (Zero-cost via NVIDIA_API_KEY)
-    nvidia_key = get_secret("NVIDIA_API_KEY") or os.getenv("NVIDIA_API_KEY", "")
-    if nvidia_key:
-        try:
-            llm_nvidia = ChatOpenAI(
-                model="meta/llama-3.1-8b-instruct",
-                api_key=nvidia_key,
-                base_url="https://integrate.api.nvidia.com/v1",
-                temperature=0,
-                max_tokens=5,
-                timeout=3,
-            )
-            result = await asyncio.to_thread(llm_nvidia.invoke, prompt)
-            raw = getattr(result, "content", str(result)).strip().lower()
-            if raw in valid:
-                return raw
-        except Exception as exc:
-            logger.warning("nvidia_intent_classifier_failed: %s", exc)
-
-    # 3. Fallback Principal: DeepSeek V4 Flash
+    # Classificador unico: DeepSeek V4 Flash.
+    # FIX (17/08/2026): bloco Groq removido — falhava sistematicamente com
+    # "'ascii' codec can't encode characters" (erro do runtime Groq, nao do
+    # texto, ja sanitizado). Cascade Groq->NVIDIA->DeepSeek removida em favor
+    # de 1 unica chamada deterministica (menos latencia, menos custo).
     try:
         base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
         deepseek_key = get_secret("DEEPSEEK_API_KEY") or os.getenv("DEEPSEEK_API_KEY", "")
@@ -2196,6 +2162,9 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # GUARDRAIL (17/08/2026): mapeamento keyword -> toolkit slug para auto-discovery.
+# Toolkits com manager dedicado (1 API = 1 manager, §0.8). Calendar/gmail/
+# drive sao roteados pelo TIER 1.7 deterministico (pipelines com guard).
+# people/tasks/maps tem manager dedicado -> passam pelo DynamicManagerFactory.
 _KEYWORD_TO_TOOLKIT: Dict[str, str] = {
     "linkedin": "linkedin",
     "youtube": "youtube",
@@ -2206,15 +2175,15 @@ _KEYWORD_TO_TOOLKIT: Dict[str, str] = {
     "googledocs": "googledocs",
     "google sheets": "googlesheets",
     "googlesheets": "googlesheets",
+    "sheets": "googlesheets",
     "google meet": "googlemeet",
     "googlemeet": "googlemeet",
     "meet": "googlemeet",
     "microsoft teams": "microsoft_teams",
     "teams": "microsoft_teams",
-    "calendar": "calendar",
-    "gmail": "gmail",
-    "drive": "drive",
+    "contatos": "people",
     "people": "people",
+    "tarefas": "tasks",
     "tasks": "tasks",
     "maps": "maps",
     "rota": "maps",
@@ -2425,19 +2394,19 @@ async def _orchestrate_inner(payload: Dict[str, Any], instance: str, phone: str,
         return await _handle_morality(payload, masked_text, sender_name, cache_key, instance, phone)
 
     # ========================
-    # TIER 1.5: Auto-Discovery (Dynamic Manager Factory)
+    # TIER 1.5: Auto-Discovery (DeepAgents hardcoded)
     # ========================
-    # GUARDRAIL (17/08/2026): auto-discovery de toolkits via ApiRegistry +
-    # DynamicManagerFactory. Detecta toolkit via keywords, factory constroi
-    # manager sob demanda (B1 template-based). Allowlist garante seguranca.
+    # GUARDRAIL (18/08/2026): auto-discovery via deepagent_layer.get_deep_agent.
+    # _detect_dynamic_toolkit retorna o slug (linkedin, youtube, etc.);
+    # construimos um dict-wrapping com id do manager e delegamos para
+    # _execute_agent, que sabe lidar com manager_id via deepagent_path.
+    # Antes usava dynamic_factory.get_or_create() + dict(agent) que
+    # quebrava com TypeError: 'CompiledStateGraph' object is not iterable.
     try:
-        toolkit_slug = _detect_dynamic_toolkit(masked_text)
+        toolkit_slug = _detect_dynamic_toolkit(text)
         if toolkit_slug:
+            manager_id = f"manager-{toolkit_slug}"
             from deepagent_layer.agents import get_deep_agent, MANAGER_PROMPTS
-            logger.info(
-                "tier15_dispatch_attempt phone=%s manager_id=%s toolkit=%s text_preview=%s",
-                phone, manager_id, toolkit_slug, masked_text[:60],
-            )
             if manager_id in MANAGER_PROMPTS and get_deep_agent(manager_id) is not None:
                 result = await _execute_agent(
                     {"id": manager_id, "system_prompt": ""},
@@ -2451,10 +2420,6 @@ async def _orchestrate_inner(payload: Dict[str, Any], instance: str, phone: str,
                 )
             else:
                 # Manager nao disponivel em MANAGER_PROMPTS (slug nao reconhecido).
-                logger.warning(
-                    "tier15_manager_not_found phone=%s manager_id=%s toolkit=%s in_manager_prompts=%s",
-                    phone, manager_id, toolkit_slug, manager_id in MANAGER_PROMPTS,
-                )
                 meta = api_registry.get_meta(toolkit_slug)
                 if meta is None:
                     blocked_msg = (
@@ -2483,53 +2448,55 @@ async def _orchestrate_inner(payload: Dict[str, Any], instance: str, phone: str,
                 return await _finalize_orchestration(
                     payload, masked_text, sender_name, early_result, path, cache_key,
                 )
-        else:
-            # C1: tier15_keyword_gap — texto menciona keywords de Composio mas
-            # _detect_dynamic_toolkit retornou None. Indica gap de deteccao.
-            text_lower = (text or "").lower()
-            composio_keywords = (
-                "linkedin", "youtube", "github", "notion", "msteams",
-                "teams", "googledocs", "docs", "googlesheets", "sheets",
-                "googlemeet", "meet", "onedrive",
-            )
-            potential_composio = [k for k in composio_keywords if k in text_lower]
-            if potential_composio:
-                logger.info(
-                    "tier15_keyword_gap phone=%s text_preview=%s potential_composio=%s",
-                    phone, text[:80], potential_composio,
-                )
     except Exception as exc:
-        # C2: mais contexto no tier15_dispatch_handler_failed para debug
-        logger.warning(
-            "tier15_dispatch_handler_failed phone=%s text_preview=%s exc=%s",
-            phone, text[:80] if 'text' in dir() else '', exc,
-            exc_info=True,
-        )
+        logger.warning("tier15_dispatch_handler_failed: %s", exc)
 
     # ========================
-    # TIER 2: LLM Classifier (Flash, 1 call, ~200ms)
+    # TIER 1.7: Deterministic Pipeline Detection (zero LLM)
+    # ========================
+    # GUARDRAIL (17/08/2026): detectores deterministicos (calendar/email/drive)
+    # rodam ANTES do classificador LLM. Resolve o bug em que pedidos claros
+    # de email eram classificados como "conversa" pelo LLM e nunca chegavam
+    # ao email_pipeline (ex: "leia meu email da XP sobre o processo seletivo").
+    # GUARDRAIL (17/08/2026): detectores deterministicos (calendar/email/drive)
+    # rodam ANTES do classificador LLM. Resolve o bug em que pedidos claros
+    # de email eram classificados como "conversa" pelo LLM e nunca chegavam
+    # ao email_pipeline (ex: "leia meu email da XP sobre o processo seletivo").
+    # Fix E1 (18/08/2026): detectores usam o texto ORIGINAL (pre-mask) —
+    # [MASK_EMAIL] anteriormente invertia o roteamento de pedidos de
+    # calendario com email de participante (ex: "marque um compromisso com
+    # o Maycon... invite mayconpxavier@gmail.com").
+    from pipelines.calendar_pipeline import detect as cal_detect, run as cal_run
+    from pipelines.email_pipeline import detect as eml_detect, run as eml_run
+    from pipelines.doc_pipeline import detect_drive_attachment, run as doc_run
+    from pipelines.jennifer_pipeline import run as jen_run
+
+    if cal_detect(text):
+        result = await cal_run(payload)
+        path = [{"step": 1, "phase": "deterministic_routing", "detector": "calendar"}]
+        return await _finalize_orchestration(payload, masked_text, sender_name, result, path, cache_key)
+    if eml_detect(text):
+        result = await eml_run(payload)
+        path = [{"step": 1, "phase": "deterministic_routing", "detector": "email"}]
+        return await _finalize_orchestration(payload, masked_text, sender_name, result, path, cache_key)
+    if detect_drive_attachment(text):
+        result = await doc_run(payload)
+        path = [{"step": 1, "phase": "deterministic_routing", "detector": "drive"}]
+        return await _finalize_orchestration(payload, masked_text, sender_name, result, path, cache_key)
+
+    # ========================
+    # TIER 2: LLM Classifier (Flash, 1 call, ~200ms) — fallback
     # ========================
     intent_class = await _classify_intent_llm(masked_text)
-    from pipelines.doc_pipeline import run as doc_run
 
     if intent_class in ("juridicas", "editais", "academica", "anotacoes"):
         payload["intent_class"] = intent_class
         result = await doc_run(payload)
     elif intent_class == "ferramentas":
-        from pipelines.calendar_pipeline import detect as cal_detect, run as cal_run
-        from pipelines.email_pipeline import detect as eml_detect, run as eml_run
-        from pipelines.doc_pipeline import detect_drive_attachment, run as doc_run
-        if cal_detect(masked_text):
-            result = await cal_run(payload)
-        elif eml_detect(masked_text):
-            result = await eml_run(payload)
-        elif detect_drive_attachment(masked_text):
-            result = await doc_run(payload)
-        else:
-            from pipelines.jennifer_pipeline import run as jen_run
-            result = await jen_run(payload)
+        # Detectores deterministicos ja rodaram acima (TIER 1.7). Se chegou
+        # aqui, e intencao de ferramenta nao capturada por keywords.
+        result = await jen_run(payload)
     else:
-        from pipelines.jennifer_pipeline import run as jen_run
         await _setup_nickname_consent(payload, first_name, phone)
         result = await jen_run(payload)
 

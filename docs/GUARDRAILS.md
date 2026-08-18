@@ -14,8 +14,13 @@
 - **Regra:** Em `chat_with_tools`, o retorno de qualquer ferramenta (Calendar, Drive, Gmail, Composio) deve ser truncado para no máximo **1.500 caracteres** (~350 palavras) antes de ser reinjetado no array de mensagens do modelo.
 - **Motivo:** Impede que saídas extensas de JSON inflacionem o contexto acumulado de 2.000 para 50.000 tokens a cada rodada de conversação.
 
-### §0.3 — Fallback Obrigatório para Groq
-- **Regra:** Se o DeepSeek retornar erro `429` (Quota/Créditos esgotados), `401`, `5xx` ou timeout, o sistema deve acionar automaticamente o **Groq** (`llama-3.3-70b-versatile` para tools/geral ou `llama-3.1-8b-instant` para heurísticas), sem falhar a mensagem para o usuário.
+### §0.3 — Provedor LLM Único DeepSeek V4 Flash + Cache Hit Obrigatório
+- **Regra:** O provedor LLM de chat/tool-calling é **DeepSeek V4 Flash** exclusivamente. Não há fallback para Groq LLM (o Groq LLM foi removido por falha sistemática de `ascii` codec e por instabilidade de latência).
+- **Cache Hit Obrigatório:** Toda chamada para DeepSeek (`chat()` e `chat_with_tools()`) DEVE incluir `cache_mode: "default"` na raiz do payload — o DeepSeek reaproveita o prefixo do prompt (cache hit: $0.014/1M tokens, **10x mais barato** que input normal $0.14/1M). Esta é a principal alavanca de FinOps.
+- **Cascade Removido:** A tentativa de cascade Groq → NVIDIA → DeepSeek foi desativada (Fix C, commit `26b4131`). O `_classify_intent_llm` no orchestrator chama DeepSeek diretamente; nenhum fallback de provedor é executado.
+- **Groq permanece APENAS para STT:** A transcrição de áudio (`core/audio_transcribe.py`) usa Groq Whisper (`whisper-large-v3-turbo`, free tier, ~1-2s latência). A chave `GROQ_API_KEY` continua bindada no Cloud Run para esse fim.
+- **Erros do DeepSeek:** Em caso de `429` (quota), `401` (auth) ou `5xx` (servidor), o sistema propaga o erro (`LLMError`) sem tentar outro provedor. Operadores devem rotacionar a chave ou aguardar reset.
+- **Latência esperada:** ~300ms por chamada (sem o timeout Groq de 3s por mensagem).
 
 ### §0.4 — Desativação Total de Workers Proativos
 - **Regra:** O `proactive_worker` deve permanecer estritamente desativado (`PROACTIVE_DISABLED: "true"`). Nenhuma rotina em cron ou Cloud Scheduler deve invocar LLMs em background sem uma mensagem explícita do usuário.
@@ -49,6 +54,14 @@
 - **Ações Obrigatórias:**
   1. **Recusa Concisa:** Em perguntas fora de escopo corporativo em grupos, recusar educadamente em 1 a 2 frases curtas direcionando para ferramentas de busca e reafirmando seu foco em tarefas de trabalho.
   2. **Anti-Desperdício:** Nunca gerar redações, tratados científicos ou resoluções de problemas escolares para economizar tokens de LLM.
+
+### §0.9 — Região Canônica `us-central1` (Padronização FinOps Multi-Serviço)
+- **Regra:** A região canônica de TODOS os recursos GCP deste projeto (Cloud Run, Cloud Functions, Firestore regional, Cloud Storage, Cloud SQL, VMs/Compute Engine, Vertex AI) é **`us-central1`** (Iowa, EUA). É a região mais barata (ou empatada) para a nossa stack: ~37% mais barata que `southamerica-east1` em Cloud Run (vCPU/s: 0.00002400 USD vs 0.00003292 USD), +42% em VMs, +75% em Storage, +50% em Firestore.
+- **Ações Obrigatórias:**
+  1. **Novos recursos:** Criar SEMPRE em `us-central1`, salvo ordem explícita do usuário.
+  2. **Proibição:** `southamerica-east1` é proibida para recursos novos sem justificativa aprovada pelo dono.
+  3. **Sincronização:** `cloudbuild-*.yaml`, env vars (`PUBSUB_TOKEN_AUDIENCE`, `OAUTH_REDIRECT_URI`, `AGENTS_RUNTIME_PUBLIC_URL`), webhooks Evolution e push endpoints de Pub/Sub DEVEM apontar para a MESMA região (us-central1, URL `-uc`). Regressão ao split-brain (tráfego em uma região + deploy em outra) é incidente crítico (18/08/2026).
+  4. **Limpeza:** Serviços órfãos em regiões fora do padrão devem ser deletados.
 
 
 

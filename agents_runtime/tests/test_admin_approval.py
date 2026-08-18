@@ -31,19 +31,25 @@ def test_generate_approval_url():
 
 @pytest.mark.asyncio
 async def test_notify_admin_access_request():
+    """GUARDRAIL (17/08/2026): mensagem WhatsApp SEM link HMAC, com instrucoes
+    explicitas ('OK, APROVADO' / 'NAO, REJEITADO')."""
     with patch("agent_loader.resolve_owner_phone", return_value="5511966830020"):
         with patch("core.evolution_client.send_text", AsyncMock(return_value=True)) as mock_send:
-            res = await notify_admin_access_request(
-                phone="5511977776666",
-                sender_name="Carlos Teste",
-                message_text="como está minha agenda?",
-            )
-            assert res is True
-            mock_send.assert_called_once()
-            args = mock_send.call_args[1]
-            assert args["phone"] == "5511966830020"
-            assert "Carlos Teste" in args["text"]
-            assert "admin/approve-user" in args["text"]
+            with patch("core.admin_notify.create_pending_approval", return_value="run-test-1"):
+                res = await notify_admin_access_request(
+                    phone="5511977776666",
+                    sender_name="Carlos Teste",
+                    message_text="como está minha agenda?",
+                )
+                assert res is True
+                mock_send.assert_called_once()
+                args = mock_send.call_args[1]
+                assert args["phone"] == "5511966830020"
+                assert "Carlos Teste" in args["text"]
+                # Novo fluxo: instrucoes de resposta, nao link
+                assert "APROVADO" in args["text"]
+                assert "REJEITADO" in args["text"]
+                assert "admin/approve-user" not in args["text"]
 
 
 def test_is_user_approved_owner_and_guest():

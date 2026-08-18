@@ -43,6 +43,18 @@ def _build_langchain_tools_for(manager_id: str) -> List[Any]:
         return _build_googlemeet_tools()
     if manager_id == "manager-msteams":
         return _build_msteams_tools()
+    if manager_id == "manager-youtube":
+        return _build_youtube_tools()
+    if manager_id == "manager-github":
+        return _build_github_tools()
+    if manager_id == "manager-notion":
+        return _build_notion_tools()
+    if manager_id == "manager-people":
+        return _build_people_tools()
+    if manager_id == "manager-tasks":
+        return _build_tasks_tools()
+    if manager_id == "manager-maps":
+        return _build_maps_tools()
     if manager_id == "manager-jennifier":
         # Agente conversacional geral: nao tem tools. Retorna lista vazia
         # explicitamente para evitar o warning 'unknown manager_id'.
@@ -377,10 +389,304 @@ def _build_msteams_tools() -> List[Any]:
             channel_id=channel_id, top=top, phone=phone,
         )
 
+    @tool
+    async def msteams_create_online_meeting(
+        subject: str,
+        start_date_time: str,
+        end_date_time: str,
+        phone: str = "",
+        user_id: str = "",
+        participants: list = None,
+    ) -> Dict[str, Any]:
+        """Cria uma reuniao online standalone no Microsoft Teams.
+
+        Args:
+            subject: Titulo da reuniao.
+            start_date_time: ISO 8601 (ex: '2026-08-20T15:00:00Z').
+            end_date_time: ISO 8601.
+            phone: Telefone do usuario.
+            user_id: Graph user ID (alternativo).
+            participants: Lista opcional de participantes.
+        """
+        return await microsoft_teams_composio.create_online_meeting(
+            subject=subject,
+            start_date_time=start_date_time,
+            end_date_time=end_date_time,
+            phone=phone,
+            user_id=user_id,
+            participants=participants or [],
+        )
+
     return [
         msteams_send_message,
         msteams_list_channels,
+        msteams_create_online_meeting,
         msteams_list_messages,
+    ]
+
+
+def _build_youtube_tools() -> List[Any]:
+    """LangChain tools para YouTube via Composio (manager-youtube)."""
+    from tools import youtube_composio
+
+    @tool
+    async def youtube_search_videos(query: str, max_results: int = 5, phone: str = "") -> Dict[str, Any]:
+        """Busca videos no YouTube.
+
+        Args:
+            query: Termo de busca.
+            max_results: Numero maximo de resultados (default 5).
+            phone: Telefone do usuario.
+        """
+        return await youtube_composio.search_videos(query=query, max_results=max_results, phone=phone)
+
+    @tool
+    async def youtube_get_video_details(video_ids: list, phone: str = "") -> Dict[str, Any]:
+        """Retorna detalhes de videos do YouTube por IDs.
+
+        Args:
+            video_ids: Lista de IDs de videos.
+            phone: Telefone do usuario.
+        """
+        return await youtube_composio.get_video_details(video_ids=video_ids, phone=phone)
+
+    return [
+        youtube_search_videos,
+        youtube_get_video_details,
+    ]
+
+
+def _build_github_tools() -> List[Any]:
+    """LangChain tools para GitHub via Composio (manager-github)."""
+    from tools import github_composio
+
+    @tool
+    async def github_list_repos(
+        type_: str = "all",
+        sort: str = "full_name",
+        direction: str = "",
+        page: int = 1,
+        per_page: int = 30,
+        phone: str = "",
+    ) -> Dict[str, Any]:
+        """Lista repositorios do usuario no GitHub.
+
+        Args:
+            type_: 'all' | 'owner' | 'public' | 'private' | 'member'.
+            sort: 'created' | 'updated' | 'pushed' | 'full_name'.
+            direction: 'asc' | 'desc'.
+            page: pagina (default 1).
+            per_page: itens por pagina (default 30).
+            phone: Telefone do usuario.
+        """
+        return await github_composio.list_repos(
+            type_=type_, sort=sort, direction=direction,
+            page=page, per_page=per_page, phone=phone,
+        )
+
+    @tool
+    async def github_my_profile(phone: str = "") -> Dict[str, Any]:
+        """Obtem o perfil autenticado do usuario no GitHub.
+
+        Args:
+            phone: Telefone do usuario.
+        """
+        return await github_composio.my_profile(phone=phone)
+
+    return [
+        github_list_repos,
+        github_my_profile,
+    ]
+
+
+def _build_notion_tools() -> List[Any]:
+    """LangChain tools para Notion via Composio (manager-notion)."""
+    from tools import notion_composio
+
+    @tool
+    async def notion_search_pages(query: str = "", page_size: int = 25, phone: str = "") -> Dict[str, Any]:
+        """Busca paginas no Notion por termo.
+
+        Args:
+            query: Termo de busca.
+            page_size: Numero maximo de resultados (default 25).
+            phone: Telefone do usuario.
+        """
+        return await notion_composio.search_pages(query=query, page_size=page_size, phone=phone)
+
+    @tool
+    async def notion_list_all(query: str = "", page_size: int = 100, phone: str = "") -> Dict[str, Any]:
+        """Lista todas as paginas do Notion do usuario.
+
+        Args:
+            query: Filtro opcional.
+            page_size: Numero maximo de resultados (default 100).
+            phone: Telefone do usuario.
+        """
+        return await notion_composio.list_all(query=query, page_size=page_size, phone=phone)
+
+    @tool
+    async def notion_retrieve_page(page_id: str, phone: str = "") -> Dict[str, Any]:
+        """Obtem o conteudo de uma pagina do Notion.
+
+        Args:
+            page_id: ID da pagina.
+            phone: Telefone do usuario.
+        """
+        return await notion_composio.retrieve_page(page_id=page_id, phone=phone)
+
+    return [
+        notion_search_pages,
+        notion_list_all,
+        notion_retrieve_page,
+    ]
+
+
+def _build_people_tools() -> List[Any]:
+    """LangChain tools para Google Contacts (manager-people, OAuth per-user)."""
+    from tools import google_people
+
+    @tool
+    async def people_search_contacts(query: str, page_size: int = 10, phone: str = "") -> Dict[str, Any]:
+        """Busca contatos do usuario no Google Contacts.
+
+        Args:
+            query: Termo de busca (nome, email, telefone).
+            page_size: Numero maximo de resultados (default 10).
+            phone: Telefone do usuario.
+        """
+        return await google_people.search_contacts(query=query, page_size=page_size, phone=phone)
+
+    @tool
+    async def people_get_profile(phone: str = "") -> Dict[str, Any]:
+        """Obtem o perfil do usuario no Google Contacts.
+
+        Args:
+            phone: Telefone do usuario.
+        """
+        return await google_people.get_profile(phone=phone)
+
+    return [
+        people_search_contacts,
+        people_get_profile,
+    ]
+
+
+def _build_tasks_tools() -> List[Any]:
+    """LangChain tools para Google Tasks (manager-tasks, OAuth per-user)."""
+    from tools import google_tasks
+
+    @tool
+    async def tasks_list_tasks(phone: str = "", tasklist_id: str = "@default", max_results: int = 20) -> Dict[str, Any]:
+        """Lista tarefas do usuario no Google Tasks.
+
+        Args:
+            phone: Telefone do usuario.
+            tasklist_id: ID da lista de tarefas (default @default).
+            max_results: Numero maximo de resultados (default 20).
+        """
+        return await google_tasks.list_tasks(
+            phone=phone, tasklist_id=tasklist_id, max_results=max_results,
+        )
+
+    @tool
+    async def tasks_create_task(
+        title: str,
+        notes: str = "",
+        due: str = "",
+        tasklist_id: str = "@default",
+        phone: str = "",
+    ) -> Dict[str, Any]:
+        """Cria uma tarefa no Google Tasks.
+
+        Args:
+            title: Titulo da tarefa.
+            notes: Notas opcionais.
+            due: Data de vencimento (RFC3339, opcional).
+            tasklist_id: ID da lista de tarefas (default @default).
+            phone: Telefone do usuario.
+        """
+        return await google_tasks.create_task(
+            title=title, notes=notes, due=due, tasklist_id=tasklist_id, phone=phone,
+        )
+
+    @tool
+    async def tasks_update_task(
+        task_id: str,
+        completed: bool = False,
+        title: str = None,
+        tasklist_id: str = "@default",
+        phone: str = "",
+    ) -> Dict[str, Any]:
+        """Atualiza uma tarefa no Google Tasks (concluir/renomear).
+
+        Args:
+            task_id: ID da tarefa.
+            completed: True para marcar como concluida.
+            title: Novo titulo (opcional).
+            tasklist_id: ID da lista de tarefas (default @default).
+            phone: Telefone do usuario.
+        """
+        return await google_tasks.update_task(
+            task_id=task_id, completed=completed, title=title,
+            tasklist_id=tasklist_id, phone=phone,
+        )
+
+    return [
+        tasks_list_tasks,
+        tasks_create_task,
+        tasks_update_task,
+    ]
+
+
+def _build_maps_tools() -> List[Any]:
+    """LangChain tools para Google Maps (manager-maps, API key)."""
+    from tools import locomotion
+
+    @tool
+    async def maps_calc_route(origem: str, destino: str) -> Dict[str, Any]:
+        """Calcula rota entre dois enderecos no Google Maps.
+
+        Args:
+            origem: Endereco ou coordenada de origem.
+            destino: Endereco ou coordenada de destino.
+        """
+        return await locomotion.calc_route(origem=origem, destino=destino)
+
+    @tool
+    async def maps_geocode(endereco: str) -> Dict[str, Any]:
+        """Geocodifica um endereco (endereco -> coordenadas).
+
+        Args:
+            endereco: Endereco a geocodificar.
+        """
+        return await locomotion.geocode(endereco=endereco)
+
+    @tool
+    async def maps_search_places(local: str, tipo: str = "restaurant") -> list:
+        """Busca lugares proximos no Google Maps.
+
+        Args:
+            local: Localizacao de referencia.
+            tipo: Tipo de lugar (ex: restaurant, cafe, hotel).
+        """
+        return await locomotion.search_places(local=local, tipo=tipo)
+
+    @tool
+    async def maps_find_place(query: str, localizacao: str = "") -> list:
+        """Encontra um lugar no Google Maps.
+
+        Args:
+            query: Termo de busca do lugar.
+            localizacao: Localizacao de referencia (opcional).
+        """
+        return await locomotion.find_place(query=query, localizacao=localizacao)
+
+    return [
+        maps_calc_route,
+        maps_geocode,
+        maps_search_places,
+        maps_find_place,
     ]
 
 

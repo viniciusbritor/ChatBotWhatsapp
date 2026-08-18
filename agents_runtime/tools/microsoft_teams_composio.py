@@ -21,7 +21,13 @@ async def send_message(
     message: str,
     phone: str = "",
 ) -> Dict[str, Any]:
-    """Envia uma mensagem para um canal do Teams."""
+    """Envia uma mensagem para um canal do Teams.
+
+    Args:
+        channel_id: ID do canal de destino.
+        message: Conteudo da mensagem.
+        phone: Telefone do usuario.
+    """
     user_id = str(phone or "")
     return await composio_call(
         "MS_TEAMS_SEND_MESSAGE",
@@ -34,9 +40,17 @@ async def send_message(
 
 
 async def list_channels(phone: str = "") -> Dict[str, Any]:
-    """Lista canais do Teams do usuario."""
+    """Lista canais do Teams do usuario.
+
+    Args:
+        phone: Telefone do usuario.
+    """
     user_id = str(phone or "")
-    return await composio_call("MS_TEAMS_LIST_CHANNELS", {}, user_id=user_id)
+    return await composio_call(
+        "MS_TEAMS_LIST_CHANNELS",
+        {},
+        user_id=user_id,
+    )
 
 
 async def list_messages(
@@ -44,10 +58,49 @@ async def list_messages(
     top: int = 20,
     phone: str = "",
 ) -> Dict[str, Any]:
-    """Lista mensagens de um canal do Teams."""
+    """Lista mensagens de um canal do Teams.
+
+    Args:
+        channel_id: ID do canal.
+        top: Numero maximo de mensagens (default 20).
+        phone: Telefone do usuario.
+    """
     user_id = str(phone or "")
     return await composio_call(
         "MS_TEAMS_LIST_MESSAGES",
         {"channel_id": channel_id, "top": max(1, min(999, top))},
         user_id=user_id,
+    )
+
+
+async def create_online_meeting(
+    subject: str,
+    start_date_time: str,
+    end_date_time: str,
+    phone: str = "",
+    user_id: str = "",
+    participants: list = None,
+) -> Dict[str, Any]:
+    """Cria uma reuniao online standalone no Microsoft Teams.
+
+    Args:
+        subject: Titulo da reuniao.
+        start_date_time: ISO 8601 (ex: '2026-08-20T15:00:00Z').
+        end_date_time: ISO 8601.
+        phone: Telefone do usuario (per-user Composio user_id).
+        user_id: (alternativo) Graph user ID.
+        participants: Lista opcional de participantes (objects com user_id/email).
+    """
+    user = str(user_id or phone or "")
+    args = {
+        "subject": subject,
+        "startDateTime": start_date_time,
+        "endDateTime": end_date_time,
+    }
+    if participants:
+        args["participants"] = participants
+    return await composio_call(
+        "MICROSOFT_TEAMS_CREATE_ONLINE_MEETING",
+        args,
+        user_id=user,
     )

@@ -192,7 +192,18 @@ class ApiRegistry:
                 slug,
             )
             try:
-                asyncio.run(self.discover_all())
+                # NUNCA chamar asyncio.run() com um event loop ativo
+                # (RuntimeError "asyncio.run() cannot be called from a
+                # running event loop"). Se ha loop rodando, agenda a
+                # discovery em background; senao, roda sincronamente.
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = None
+                if loop is not None:
+                    loop.create_task(self.discover_all())
+                else:
+                    asyncio.run(self.discover_all())
             except Exception as exc:
                 logger.warning("api_registry_lazy_retry_failed: %s", exc)
         meta = self._google_apis.get(slug) or self._composio_toolkits.get(slug)

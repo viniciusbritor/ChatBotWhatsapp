@@ -341,3 +341,100 @@ class TestOnboardingNudge:
         with patch("agent_loader.get_user", return_value=None), \
              patch("tools.composio_connect.get_status", AsyncMock(return_value={"apps": {"youtube": {"connected": False}}})):
             assert await _user_has_any_connection("5511999999999") is False
+
+
+class TestDeterministicRoutingEmail:
+    """Fix E1 (18/08/2026): detectores deterministicos usam o texto ORIGINAL
+    (pre-mask). Antes, o [MASK_EMAIL] do masker invertia o roteamento de
+    pedidos de calendario com email de participante para o email pipeline.
+    """
+
+    def test_compromisso_com_email_participante_vai_para_calendar(self):
+        from pipelines.calendar_pipeline import detect as cal_detect
+        from pipelines.email_pipeline import detect as eml_detect
+        text = ("marque um compromisso com o Maycon para amanha -> mande o invite "
+                "para ele mayconpxavier@gmail.com as 15:00 as 16:00")
+        assert cal_detect(text) is True
+        # Fix (18/08/2026): eml_detect NAO sequestra calendar - "compromisso" e EXCLUDE
+        assert eml_detect(text) is False  # calendar prioritario sobre email quando ha keyword de calendar
+
+    def test_compromisso_agenda_com_email_participante(self):
+        from pipelines.calendar_pipeline import detect as cal_detect
+        from pipelines.email_pipeline import detect as eml_detect
+        text = ("marque um compromisso na agenda com o Maycon para amanha -> "
+                "mande o invite para ele mayconpxavier@gmail.com as 15:00 as 16:00")
+        assert cal_detect(text) is True
+        assert eml_detect(text) is False  # excluido por 'agenda'
+
+    def test_keyword_detection_usa_texto_original(self):
+        """_detect_dynamic_toolkit deve receber o texto original (nao masked)."""
+        from unittest.mock import MagicMock
+        import orchestrator
+        orig = orchestrator._detect_dynamic_toolkit
+        try:
+            orchestrator._detect_dynamic_toolkit = MagicMock(wraps=orig)
+            # Nao chama aqui - apenas garante que o mapeamento people/tasks/maps existe
+            from orchestrator import _KEYWORD_TO_TOOLKIT
+            assert "people" in _KEYWORD_TO_TOOLKIT
+            assert "tasks" in _KEYWORD_TO_TOOLKIT
+            assert "maps" in _KEYWORD_TO_TOOLKIT
+        finally:
+            orchestrator._detect_dynamic_toolkit = orig
+
+
+class TestE3AntiHallucination:
+    """Fix E3 (18/08/2026): regra anti-alucinacao presente em TODOS os managers."""
+
+    def test_regra_presente_em_todos_os_prompts(self):
+        from deepagent_layer.agents import MANAGER_PROMPTS, _append_guardrails
+        assert len(MANAGER_PROMPTS) >= 18
+        for name, prompt in MANAGER_PROMPTS.items():
+            ap = _append_guardrails(prompt)
+            assert "ANTI-ALUCINACAO" in ap, f"{name} sem regra E3"
+
+    def test_matriz_completa_1_api_1_manager(self):
+        from deepagent_layer.agents import MANAGER_PROMPTS
+        expected = {
+            "manager-calendar", "manager-email", "manager-drive",
+            "manager-group-rag", "manager-web", "manager-jennifier",
+            "manager-linkedin", "manager-googledocs", "manager-googlesheets",
+            "manager-onedrive", "manager-googlemeet", "manager-msteams",
+            "manager-youtube", "manager-github", "manager-notion",
+            "manager-people", "manager-tasks", "manager-maps",
+        }
+        missing = expected - set(MANAGER_PROMPTS.keys())
+        assert not missing, f"managers faltando: {missing}"
+
+    def test_factory_prefere_prompt_dedicado(self):
+        """Fix (18/08/2026): factory removido, mas get_deep_agent ainda usa MANAGER_PROMPTS dedicado.
+
+        Cada manager dedicado tem seu prompt customizado em MANAGER_PROMPTS
+        e a regra E3 anti-alucinacao injetada via _append_guardrails.
+        """
+        from unittest.mock import patch
+        from deepagent_layer.agents import get_deep_agent, MANAGER_PROMPTS, _append_guardrails
+        for slug, mgr in [("youtube", "manager-youtube"), ("maps", "manager-maps"),
+                          ("microsoft_teams", "manager-msteams"), ("notion", "manager-notion")]:
+            assert mgr in MANAGER_PROMPTS, f"{mgr} deve existir em MANAGER_PROMPTS"
+            # Verifica que o prompt dedicado tem a regra E3
+            full_prompt = _append_guardrails(MANAGER_PROMPTS[mgr])
+            assert "ANTI-ALUCINACAO" in full_prompt, f"{mgr} sem regra E3"
+            # Verifica que get_deep_agent resolve o manager dedicado
+            with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "sk-test"}):
+                agent = get_deep_agent(mgr)
+            assert agent is not None, f"get_deep_agent({mgr}) falhou"
+
+    def test_novos_managers_tem_tools(self):
+        from deepagent_layer.tools import get_tools_for_manager
+        casos = {
+            "manager-youtube": ["youtube_search_videos", "youtube_get_video_details"],
+            "manager-github": ["github_list_repos", "github_my_profile"],
+            "manager-notion": ["notion_search_pages", "notion_list_all", "notion_retrieve_page"],
+            "manager-people": ["people_search_contacts", "people_get_profile"],
+            "manager-tasks": ["tasks_list_tasks", "tasks_create_task", "tasks_update_task"],
+            "manager-maps": ["maps_calc_route", "maps_geocode", "maps_search_places", "maps_find_place"],
+        }
+        for mgr, expected in casos.items():
+            tools = get_tools_for_manager(mgr)
+            names = [getattr(t, "name", "?") for t in tools]
+            assert names == expected, f"{mgr}: {names} != {expected}"

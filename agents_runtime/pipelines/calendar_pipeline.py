@@ -19,17 +19,21 @@ CALENDAR_PRIORITY = (
     "marcar compromisso", "marcar reuniao", "agendar", "novo compromisso",
     "agenda amanha", "compromissos amanha", "agenda da semana",
     "meus compromissos", "minha agenda", "eventos hoje",
+    "titulo", "participantes", "começa as", "inicia as",
 )
 
 CALENDAR_KEYWORDS = (
     "agenda", "agend", "reuniao", "evento", "eventos", "compromiss",
     "compromisso", "compromissos", "lembrete", "calendario", "disponivel",
     "semana que vem", "proxima semana", "agenda de hoje",
+    "participantes", "horario", "titulo",
 )
 
 EXCLUDE_PATTERNS = (
-    "documento", "arquivo", "email", "e-mail", "drive",
-    "pdf", "docx", "xlsx", "planilha",
+    "documento", "arquivo", "email", "e-mail",
+    "drive", "pdf", "docx", "xlsx", "planilha",
+    "caixa de entrada", "caixa postal", "correio", "inbox",
+    "ler email", "enviar email", "ultimos emails", "ultima mensagem",
 )
 
 

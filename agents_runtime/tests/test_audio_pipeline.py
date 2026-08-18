@@ -28,7 +28,8 @@ async def test_audio_url_transcreve_e_mascara():
         result = await transcribe_envelope_audio(payload)
     assert result["provider"] == "groq:whisper-large-v3-turbo"
     assert result["source"] == "url"
-    assert "fulano@exemplo.com" not in result["transcript"]  # PII mascarado
+    # Fix E2 (18/08/2026): EMAIL removido do masker — o email flui no transcript
+    assert "fulano@exemplo.com" in result["transcript"]
 
 
 @pytest.mark.asyncio

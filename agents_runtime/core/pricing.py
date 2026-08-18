@@ -19,6 +19,9 @@ no futuro. Precos sao aproximados e variam com a oferta do fornecedor.
 
 Embeddings: text-embedding-3-small
 - Input: $0.02/1M
+
+GUARDRAIL (18/08/2026): Groq LLM removido (Opção B). Groq permanece apenas
+para STT em core.audio_transcribe (Whisper, free tier).
 """
 from __future__ import annotations
 
@@ -44,22 +47,10 @@ OPENAI_EMBEDDING_SMALL = {
 }
 
 
-GROQ_LLAMA_3_3_70B = {
-    "input_per_1m": 0.59,
-    "output_per_1m": 0.79,
-}
-
-GROQ_LLAMA_3_1_8B = {
-    "input_per_1m": 0.05,
-    "output_per_1m": 0.08,
-}
-
 PROVIDERS: Dict[str, Dict[str, float]] = {
     "deepseek_v4_flash": DEEPSEEK_V4_FLASH,
     "deepseek_v4_pro": DEEPSEEK_V4_PRO,
     "openai_embedding_small": OPENAI_EMBEDDING_SMALL,
-    "groq_llama_3_3_70b": GROQ_LLAMA_3_3_70B,
-    "groq_llama_3_1_8b": GROQ_LLAMA_3_1_8B,
 }
 
 
@@ -68,8 +59,6 @@ _KEY_RATE_MAP = {
     "deepseek_output_tokens": ("deepseek_v4_flash", "output_per_1m"),
     "deepseek_cache_hit_tokens": ("deepseek_v4_flash", "cache_hit_per_1m"),
     "openai_embedding_input_tokens": ("openai_embedding_small", "input_per_1m"),
-    "groq_input_tokens": ("groq_llama_3_3_70b", "input_per_1m"),
-    "groq_output_tokens": ("groq_llama_3_3_70b", "output_per_1m"),
 }
 
 

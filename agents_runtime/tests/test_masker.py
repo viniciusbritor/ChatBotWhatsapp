@@ -20,11 +20,17 @@ class TestMaskPII:
         assert "[MASK_PHONE_BR]" in masked
         assert "98765" not in masked
 
-    def test_mask_email(self):
+    def test_email_not_masked(self):
+        """Fix E2 (18/08/2026): EMAIL removido do masker.
+
+        O token [MASK_EMAIL] continha a substring "email", que invertia o
+        roteamento deterministico de pedidos de calendario com email de
+        participante. Emails agora fluem no texto original.
+        """
         text = "Mande email para joao.silva@example.com"
         masked = mask_pii(text)
-        assert "[MASK_EMAIL]" in masked
-        assert "joao.silva" not in masked
+        assert "joao.silva@example.com" in masked
+        assert "[MASK_EMAIL]" not in masked
 
     def test_mask_credit_card(self):
         text = "Cartao 4111 1111 1111 1111 venceu"
@@ -53,7 +59,7 @@ class TestMaskPII:
     def test_multiple_pii_types(self):
         text = "Joao (joao@test.com, CPF 123.456.789-09, tel 11 98765-4321)"
         masked = mask_pii(text)
-        assert "[MASK_EMAIL]" in masked
+        assert "joao@test.com" in masked
         assert "[MASK_CPF]" in masked
         assert "[MASK_PHONE_BR]" in masked
 
@@ -61,11 +67,11 @@ class TestMaskPII:
 class TestHasPII:
     def test_has_pii_true(self):
         assert has_pii("CPF 123.456.789-09") is True
-        assert has_pii("Email: test@example.com") is True
         assert has_pii("Tel +55 11 98765-4321") is True
 
     def test_has_pii_false(self):
         assert has_pii("Oi tudo bem?") is False
+        assert has_pii("Email: test@example.com") is False  # EMAIL nao e mais PII (Fix E2)
         assert has_pii("") is False
         assert has_pii(None) is False
 
@@ -77,8 +83,7 @@ class TestExtractPII:
         assert any("123.456.789-09" in m for m in result["CPF"])
 
     def test_extract_multiple(self):
-        text = "CPF 111.222.333-44 email a@b.com tel 11 99999-8888"
+        text = "CPF 111.222.333-44 tel 11 99999-8888"
         result = extract_pii(text)
         assert "CPF" in result
-        assert "EMAIL" in result
         assert "PHONE_BR" in result
