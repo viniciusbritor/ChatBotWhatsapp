@@ -16,11 +16,12 @@ class TestManagerMsteamsConfig:
     def test_manager_msteams_routing(self):
         from deepagent_layer.tools import _build_msteams_tools
         tools = _build_msteams_tools()
-        assert len(tools) == 3
+        assert len(tools) == 4
         tool_names = [t.name for t in tools]
         assert "msteams_send_message" in tool_names
         assert "msteams_list_channels" in tool_names
         assert "msteams_list_messages" in tool_names
+        assert "msteams_create_online_meeting" in tool_names
 
 
 class TestManagerMsteamsAllowlist:

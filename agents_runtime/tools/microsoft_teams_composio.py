@@ -71,3 +71,36 @@ async def list_messages(
         {"channel_id": channel_id, "top": max(1, min(999, top))},
         user_id=user_id,
     )
+
+
+async def create_online_meeting(
+    subject: str,
+    start_date_time: str,
+    end_date_time: str,
+    phone: str = "",
+    user_id: str = "",
+    participants: list = None,
+) -> Dict[str, Any]:
+    """Cria uma reuniao online standalone no Microsoft Teams.
+
+    Args:
+        subject: Titulo da reuniao.
+        start_date_time: ISO 8601 (ex: '2026-08-20T15:00:00Z').
+        end_date_time: ISO 8601.
+        phone: Telefone do usuario (per-user Composio user_id).
+        user_id: (alternativo) Graph user ID.
+        participants: Lista opcional de participantes (objects com user_id/email).
+    """
+    user = str(user_id or phone or "")
+    args = {
+        "subject": subject,
+        "startDateTime": start_date_time,
+        "endDateTime": end_date_time,
+    }
+    if participants:
+        args["participants"] = participants
+    return await composio_call(
+        "MICROSOFT_TEAMS_CREATE_ONLINE_MEETING",
+        args,
+        user_id=user,
+    )

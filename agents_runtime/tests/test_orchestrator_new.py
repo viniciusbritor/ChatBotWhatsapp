@@ -405,15 +405,23 @@ class TestE3AntiHallucination:
         assert not missing, f"managers faltando: {missing}"
 
     def test_factory_prefere_prompt_dedicado(self):
-        from types import SimpleNamespace
-        from deepagent_layer.dynamic_manager_factory import _build_system_prompt
-        from deepagent_layer.agents import MANAGER_PROMPTS
+        """Fix (18/08/2026): factory removido, mas get_deep_agent ainda usa MANAGER_PROMPTS dedicado.
+
+        Cada manager dedicado tem seu prompt customizado em MANAGER_PROMPTS
+        e a regra E3 anti-alucinacao injetada via _append_guardrails.
+        """
+        from unittest.mock import patch
+        from deepagent_layer.agents import get_deep_agent, MANAGER_PROMPTS, _append_guardrails
         for slug, mgr in [("youtube", "manager-youtube"), ("maps", "manager-maps"),
                           ("microsoft_teams", "manager-msteams"), ("notion", "manager-notion")]:
-            meta = SimpleNamespace(slug=slug, name=slug, category="composio", description="x")
-            sp = _build_system_prompt(meta)
-            assert MANAGER_PROMPTS[mgr] in sp, f"factory nao usou prompt dedicado {mgr}"
-            assert "ANTI-ALUCINACAO" in sp
+            assert mgr in MANAGER_PROMPTS, f"{mgr} deve existir em MANAGER_PROMPTS"
+            # Verifica que o prompt dedicado tem a regra E3
+            full_prompt = _append_guardrails(MANAGER_PROMPTS[mgr])
+            assert "ANTI-ALUCINACAO" in full_prompt, f"{mgr} sem regra E3"
+            # Verifica que get_deep_agent resolve o manager dedicado
+            with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "sk-test"}):
+                agent = get_deep_agent(mgr)
+            assert agent is not None, f"get_deep_agent({mgr}) falhou"
 
     def test_novos_managers_tem_tools(self):
         from deepagent_layer.tools import get_tools_for_manager

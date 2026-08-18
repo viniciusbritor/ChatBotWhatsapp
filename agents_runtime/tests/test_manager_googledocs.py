@@ -70,22 +70,22 @@ class TestManagerGoogledocsE2EFlow:
         assert "pdf" in export_tool.description.lower()
 
 
-class TestManagerGoogledocsDynamicFactory:
-    def test_factory_returns_manager_for_googledocs(self):
-        from deepagent_layer.dynamic_manager_factory import dynamic_factory
-        dynamic_factory.clear_cache()
-        with patch("deepagent_layer.dynamic_manager_factory.api_registry") as mock_reg:
-            mock_reg.is_allowed.return_value = True
-            mock_meta = MagicMock()
-            mock_meta.slug = "googledocs"
-            mock_meta.module_path = "tools.googledocs_composio"
-            mock_meta.category = "composio"
-            mock_meta.name = "Google Docs"
-            mock_reg.get_meta.return_value = mock_meta
-            with patch("deepagent_layer.dynamic_manager_factory.DynamicManagerFactory._build_agent") as mock_build:
-                mock_build.return_value = MagicMock()
-                agent = dynamic_factory.get_or_create("googledocs")
+class TestManagerGoogledocsTier15Dispatch:
+    """Fix (18/08/2026): TIER 1.5 dispatch via get_deep_agent (factory removido)."""
+
+    def test_manager_googledocs_built_by_get_deep_agent(self):
+        from unittest.mock import patch
+        from deepagent_layer.agents import get_deep_agent, MANAGER_PROMPTS
+        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "sk-test"}):
+            agent = get_deep_agent("manager-googledocs")
         assert agent is not None
+        assert "manager-googledocs" in MANAGER_PROMPTS
+
+    def test_tier15_dispatches_googledocs(self):
+        from orchestrator import _detect_dynamic_toolkit
+        assert _detect_dynamic_toolkit("criar um doc no google docs") == "googledocs"
+        assert _detect_dynamic_toolkit("buscar no googledocs") == "googledocs"
+        assert _detect_dynamic_toolkit("abrir meu googledocs") == "googledocs"
 
 
 class TestManagerGoogledocsNotBreaking:

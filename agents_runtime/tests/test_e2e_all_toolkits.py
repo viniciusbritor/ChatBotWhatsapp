@@ -111,24 +111,30 @@ class TestE2EKeywordRouting:
                     f"'{phrase}' -> {result} (expected {expected_slug})"
 
 
-class TestE2EDynamicFactory:
-    """Dynamic factory construida todos os managers corretamente."""
+class TestE2EAllManagersInPrompts:
+    """Fix (18/08/2026): factory removido, todos os managers via MANAGER_PROMPTS."""
 
-    def test_factory_creates_all_managers(self):
-        from deepagent_layer.dynamic_manager_factory import dynamic_factory
+    def test_all_composio_managers_in_prompts(self):
         from deepagent_layer.agents import MANAGER_PROMPTS
 
-        dynamic_factory.clear_cache()
-
-        # Testa criacao de TODOS os managers do Composio
+        # TODOS os managers do Composio com 1 API = 1 manager
         composio_managers = [
             "manager-linkedin", "manager-googledocs", "manager-googlesheets",
             "manager-onedrive", "manager-googlemeet", "manager-msteams",
+            "manager-youtube", "manager-github", "manager-notion",
         ]
         for mgr in composio_managers:
-            # Cada manager deve ter module_path que aponta para tools/X_composio.py
-            # (ou tools/googlemeet_composio.py / tools/microsoft_teams_composio.py)
-            assert mgr in MANAGER_PROMPTS
+            assert mgr in MANAGER_PROMPTS, f"{mgr} deveria existir em MANAGER_PROMPTS"
+
+    def test_all_google_apis_in_prompts(self):
+        """1 API = 1 manager tambem para Google dedicado (people, tasks, maps)."""
+        from deepagent_layer.agents import MANAGER_PROMPTS
+        google_managers = [
+            "manager-people", "manager-tasks", "manager-maps",
+            "manager-calendar", "manager-email", "manager-drive",
+        ]
+        for mgr in google_managers:
+            assert mgr in MANAGER_PROMPTS, f"{mgr} deveria existir em MANAGER_PROMPTS"
 
 
 class TestE2EInvertionRegression:

@@ -158,8 +158,14 @@ async def create_event(
     location: Optional[str] = None,
     calendar_id: str = DEFAULT_CALENDAR_ID,
     instance: str = "",
+    create_meeting_room: bool = True,
+    send_updates: str = "all",
 ) -> Dict[str, Any]:
-    """Create a new calendar event."""
+    """Create a new calendar event.
+
+    Fix (18/08/2026): quando ha qualquer attendee, cria Google Meet link
+    automaticamente (conferenceData.createRequest) e envia invite (sendUpdates='all').
+    """
     try:
         service = _get_service(phone)
         event_body = {
@@ -171,22 +177,25 @@ async def create_event(
             event_body["description"] = description
         if location:
             event_body["location"] = location
-        if attendees:
+        # Flag: criar Meet link se create_meeting_room=True e tiver attendee
+        has_attendees = bool(attendees)
+        create_meet = create_meeting_room and (has_attendees or create_meeting_room)
+        if has_attendees:
             event_body["attendees"] = [{"email": e} for e in attendees]
-            # M3a (12/08/2026): reuniao com 2+ pessoas => Google Meet automatico.
-            # Calendar API cria a videochamada via conferenceData.createRequest.
-            if len(attendees) >= 2:
-                event_body["conferenceDataVersion"] = 1
-                event_body["conferenceData"] = {
-                    "createRequest": {
-                        "requestId": str(uuid.uuid4()),
-                        "conferenceSolutionKey": {"type": "hangoutsMeet"},
-                    }
+        if create_meet:
+            event_body["conferenceDataVersion"] = 1
+            event_body["conferenceData"] = {
+                "createRequest": {
+                    "requestId": str(uuid.uuid4()),
+                    "conferenceSolutionKey": {"type": "hangoutsMeet"},
                 }
-
-        created = service.events().insert(
-            calendarId=calendar_id, body=event_body, conferenceDataVersion=1 if len((attendees or [])) >= 2 else None
-        ).execute()
+            }
+        insert_params = {"calendarId": calendar_id, "body": event_body}
+        if create_meet:
+            insert_params["conferenceDataVersion"] = 1
+        if has_attendees:
+            insert_params["sendUpdates"] = send_updates
+        created = service.events().insert(**insert_params).execute()
         return {"event": _format_event(created)}
     except HttpError as e:
         logger.error(f"Calendar create_event error: {e}")
