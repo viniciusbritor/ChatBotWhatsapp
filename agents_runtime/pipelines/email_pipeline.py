@@ -24,8 +24,10 @@ EMAIL_KEYWORDS = (
 )
 
 EXCLUDE_PATTERNS = (
-    "agenda", "documento", "arquivo", "drive",
-    "pdf", "docx", "xlsx", "planilha",
+    "agenda", "reuniao", "compromisso", "compromissos", "evento",
+    "marcar", "agendar", "calendario", "documento", "arquivo",
+    "drive", "pdf", "docx", "xlsx", "planilha",
+    "participantes", "titulo", "inicia", "comeca",
 )
 
 
