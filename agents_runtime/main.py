@@ -311,9 +311,16 @@ async def chat(request: Request):
     return JSONResponse(content=result)
 
 
+@app.post("/relay/{instance_path:path}")
 @app.post("/webhook")
-async def evolution_webhook(request: Request):
+async def evolution_webhook(request: Request, instance_path: str = ""):
     """Receive WhatsApp message from Evolution webhook.
+
+    Two URL patterns share the same handler:
+    - /webhook (legacy direct path used by existing instances)
+    - /relay/{instance_path} (coringa nginx na VM - URL dedicada por instancia
+      sob https://evolution.coherenceai.com.br/relay/<nome>). O sufixo e
+      ignorado - o roteamento continua pelo campo "instance" do payload.
 
     Single source of truth for inbound WhatsApp messages. Validates the
     payload shape, extracts a normalized envelope, publishes to Pub/Sub
@@ -917,6 +924,72 @@ async def admin_evolution_health():
     })
 
 
+@app.post("/admin/evolution/auto-webhook")
+async def admin_evolution_auto_webhook(request: Request):
+    """Registrador auto: recebe evento INSTANCE_CREATE do Evolution (via webhook
+    global) e cria automaticamente a config de webhook dedicada para a instancia.
+
+    Esperado body:
+        {"event": "INSTANCE_CREATE", "instance": "X"}
+    ou payload completo do Evolution (instanceName, event, etc).
+    Idempotente: se ja existe webhook configurado, nao duplica.
+    """
+    _require_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid_json")
+
+    event = str(body.get("event") or body.get("type") or "")
+    instance_name = str(
+        body.get("instance") or body.get("instanceName") or ""
+    ).strip()
+
+    # Apenas eventos de criacao (nao reagir a MESSAGES_UPSERT nem CONNECTION_UPDATE
+    # para nao gerar ruido/duplicata via webhook global).
+    if event.upper() not in {"INSTANCE_CREATE", "INSTANCE.UPSERT", "instance.create", "instance_create"}:
+        return JSONResponse(content={
+            "status": "ignored",
+            "event": event,
+            "reason": "event_not_instance_create",
+        })
+    if not instance_name:
+        raise HTTPException(status_code=422, detail="instance name required")
+
+    # Derivar URL dedicada do relay nginx (coringa /relay/{nome})
+    from core.evolution_admin import fetch_instances, set_webhook
+
+    # Validar que a instancia realmente existe antes de criar webhook
+    instances = await fetch_instances()
+    if not any(i.get("name") == instance_name for i in instances):
+        logger.warning("auto_webhook_instance_not_found instance=%s", instance_name)
+        return JSONResponse(content={
+            "status": "skipped",
+            "instance": instance_name,
+            "reason": "instance_not_in_evolution",
+        }, status_code=200)
+
+    evo_base = (os.getenv("EVO_BASE_URL") or "https://evolution.coherenceai.com.br").rstrip("/")
+    relay_host = evo_base.replace("https://", "").replace("http://", "")
+    relay_url = f"{evo_base}/relay/{instance_name.lower()}"
+
+    result = await set_webhook(instance_name, relay_url)
+    if result.get("error"):
+        logger.error("auto_webhook_failed instance=%s error=%s", instance_name, result.get("error"))
+        return JSONResponse(content={
+            "status": "error",
+            "instance": instance_name,
+            "detail": result,
+        }, status_code=502)
+
+    logger.info("auto_webhook_set instance=%s url=%s", instance_name, relay_url)
+    return JSONResponse(content={
+        "status": "created",
+        "instance": instance_name,
+        "webhook_url": relay_url,
+    })
+
+
 @app.get("/admin/ping")
 async def admin_ping():
     """Health-check rapido para o Portal e Cloud Scheduler warm-up.
@@ -1206,8 +1279,12 @@ async def admin_instances_create(request: Request):
     if not instance_name or not owner_phone:
         raise HTTPException(status_code=422, detail="name e owner_phone obrigatorios")
     base_url = os.getenv("EVO_BASE_URL", "https://evolution.coherenceai.com.br").rstrip("/")
-    instance_base = base_url.replace("https://", "").replace("http://", "").replace(".", "-").replace("/", "")
-    webhook_url = (body.get("webhook_url") or "").strip() or f"https://{instance_base}/webhook"
+    # Default webhook: URL dedicada por instancia via relay nginx (/relay/{nome}).
+    # O nginx da VM (coringa location /relay/) faz o forwarding para o runtime.
+    webhook_url = (
+        (body.get("webhook_url") or "").strip()
+        or f"{base_url}/relay/{instance_name.lower()}"
+    )
 
     created = await create_instance(instance_name, webhook_url=webhook_url)
     if created.get("error"):
