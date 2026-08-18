@@ -36,8 +36,23 @@ def _discover_async_funcs(module) -> List[Callable]:
 
 
 def _build_system_prompt(meta: ApiMeta) -> str:
-    """Template deterministico de system prompt baseado nos metadados."""
-    return (
+    """System prompt para um toolkit.
+
+    Prioridade (GUARDRAIL §0.8, 18/08/2026):
+    1. Prompt dedicado em MANAGER_PROMPTS (1 API = 1 manager) se existir
+       (mapeia slug -> manager-<slug>; 'microsoft_teams' -> 'manager-msteams').
+    2. Template deterministico generico baseado nos metadados.
+
+    Em ambos os casos, aplica os guardrails globais (E3 anti-alucinacao).
+    """
+    from deepagent_layer.agents import MANAGER_PROMPTS, _append_guardrails
+
+    slug = meta.slug
+    manager_id = _MANAGER_ID_FROM_SLUG.get(slug, f"manager-{slug}")
+    dedicated = MANAGER_PROMPTS.get(manager_id)
+    if dedicated:
+        return _append_guardrails(dedicated)
+    return _append_guardrails(
         f"Voce e o especialista em {meta.name} ({meta.category}) da Jennifer. "
         f"{meta.description}. "
         f"Use as tools disponiveis para executar as acoes do usuario. "
@@ -45,6 +60,13 @@ def _build_system_prompt(meta: ApiMeta) -> str:
         f"reporte educadamente que essa ferramenta nao pode fazer isso. "
         f"Responda em portugues brasileiro natural e amigavel."
     )
+
+
+# Mapeia slug Composio -> manager dedicado quando o nome difere.
+_MANAGER_ID_FROM_SLUG: Dict[str, str] = {
+    "microsoft_teams": "manager-msteams",
+    "msteams": "manager-msteams",
+}
 
 
 def _make_async_tool(name: str, coroutine_fn: Callable, doc: str, slug: str) -> BaseTool:
