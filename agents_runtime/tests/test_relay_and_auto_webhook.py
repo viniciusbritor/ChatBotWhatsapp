@@ -143,21 +143,38 @@ async def test_auto_webhook_skips_unknown_instance(shared_secret):
 @pytest.mark.asyncio
 async def test_auto_webhook_creates_webhook_for_known_instance(shared_secret):
     """INSTANCE_CREATE de instancia conhecida deve setar webhook dedicada via /relay."""
-    request = _request({"event": "INSTANCE_CREATE", "instance": "jennifer-prod"})
+    request = _request({"event": "INSTANCE_CREATE", "instance": "Jennifer-prod"})
     with patch("core.evolution_admin.fetch_instances", AsyncMock(return_value=[
-        {"name": "jennifer-prod"},
+        {"name": "Jennifer-prod"},
     ])):
         with patch("core.evolution_admin.set_webhook", AsyncMock(return_value={"set": True})) as mock_set:
             response = await admin_evolution_auto_webhook(request, webhook_token="tk_test_123")
     import json as _json
     body = _json.loads(response.body)
     assert body["status"] == "created"
-    assert body["instance"] == "jennifer-prod"
+    assert body["instance"] == "Jennifer-prod"
     assert body["webhook_url"].endswith("/relay/jennifer-prod")
     mock_set.assert_called_once()
     call_args = mock_set.call_args
-    assert call_args.args[0] == "jennifer-prod"
+    assert call_args.args[0] == "Jennifer-prod"
     assert call_args.args[1].endswith("/relay/jennifer-prod")
+
+
+@pytest.mark.asyncio
+async def test_auto_webhook_creates_webhook_case_insensitive(shared_secret):
+    """Comparacao de instancia deve ser case-insensitive (tolerar variacoes)."""
+    request = _request({"event": "INSTANCE_CREATE", "instance": "jennifer-prod"})
+    with patch("core.evolution_admin.fetch_instances", AsyncMock(return_value=[
+        {"name": "Jennifer-prod"},
+    ])):
+        with patch("core.evolution_admin.set_webhook", AsyncMock(return_value={"set": True})):
+            response = await admin_evolution_auto_webhook(request, webhook_token="tk_test_123")
+    import json as _json
+    body = _json.loads(response.body)
+    assert body["status"] == "created"
+    assert body["instance"] == "jennifer-prod"  # lowercase passado
+    # URL usa canonical name (casing da Evolution)
+    assert body["webhook_url"].endswith("/relay/jennifer-prod")
 
 
 @pytest.mark.asyncio

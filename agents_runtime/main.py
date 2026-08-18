@@ -967,8 +967,9 @@ async def admin_evolution_auto_webhook(request: Request, webhook_token: str = ""
     from core.evolution_admin import fetch_instances, set_webhook
 
     # Validar que a instancia realmente existe antes de criar webhook
+    # (comparacao case-insensitive para tolerar variacoes do Evolution).
     instances = await fetch_instances()
-    if not any(i.get("name") == instance_name for i in instances):
+    if not any((i.get("name") or "").lower() == instance_name.lower() for i in instances):
         logger.warning("auto_webhook_instance_not_found instance=%s", instance_name)
         return JSONResponse(content={
             "status": "skipped",
@@ -977,8 +978,13 @@ async def admin_evolution_auto_webhook(request: Request, webhook_token: str = ""
         }, status_code=200)
 
     evo_base = (os.getenv("EVO_BASE_URL") or "https://evolution.coherenceai.com.br").rstrip("/")
-    relay_host = evo_base.replace("https://", "").replace("http://", "")
-    relay_url = f"{evo_base}/relay/{instance_name.lower()}"
+    # Usar o nome exato da instancia no Evolution (preserva casing)
+    canonical_name = next(
+        (i.get("name") or instance_name)
+        for i in instances
+        if (i.get("name") or "").lower() == instance_name.lower()
+    )
+    relay_url = f"{evo_base}/relay/{canonical_name.lower()}"
 
     result = await set_webhook(instance_name, relay_url)
     if result.get("error"):
