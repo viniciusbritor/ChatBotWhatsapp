@@ -143,8 +143,9 @@ class TestEmbeddingContract:
             result = await embed_query("Meu email e pessoa@example.com")
 
         assert len(result) == EMBEDDING_DIM
-        assert "pessoa@example.com" not in captured[0]
-        assert "[MASK_EMAIL]" in captured[0]
+        # Fix E2 (18/08/2026): EMAIL removido do masker — o email flui no texto
+        assert "pessoa@example.com" in captured[0]
+        assert "[MASK_EMAIL]" not in captured[0]
 
 
 class TestVectorQuery:

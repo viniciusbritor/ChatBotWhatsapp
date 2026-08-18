@@ -2162,9 +2162,9 @@ async def orchestrate(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # GUARDRAIL (17/08/2026): mapeamento keyword -> toolkit slug para auto-discovery.
-# Somente toolkits Composio. Google APIs nativas (calendar/gmail/drive/people/
-# tasks/maps) sao roteadas pelo TIER 1.7 deterministico ou pela Jennifer
-# via tool calling (nao passam pelo DynamicManagerFactory).
+# Toolkits com manager dedicado (1 API = 1 manager, §0.8). Calendar/gmail/
+# drive sao roteados pelo TIER 1.7 deterministico (pipelines com guard).
+# people/tasks/maps tem manager dedicado -> passam pelo DynamicManagerFactory.
 _KEYWORD_TO_TOOLKIT: Dict[str, str] = {
     "linkedin": "linkedin",
     "youtube": "youtube",
@@ -2181,6 +2181,13 @@ _KEYWORD_TO_TOOLKIT: Dict[str, str] = {
     "meet": "googlemeet",
     "microsoft teams": "microsoft_teams",
     "teams": "microsoft_teams",
+    "contatos": "people",
+    "people": "people",
+    "tarefas": "tasks",
+    "tasks": "tasks",
+    "maps": "maps",
+    "rota": "maps",
+    "mapa": "maps",
 }
 
 
@@ -2393,7 +2400,7 @@ async def _orchestrate_inner(payload: Dict[str, Any], instance: str, phone: str,
     # DynamicManagerFactory. Detecta toolkit via keywords, factory constroi
     # manager sob demanda (B1 template-based). Allowlist garante seguranca.
     try:
-        toolkit_slug = _detect_dynamic_toolkit(masked_text)
+        toolkit_slug = _detect_dynamic_toolkit(text)
         if toolkit_slug:
             from deepagent_layer.dynamic_manager_factory import dynamic_factory
             agent = dynamic_factory.get_or_create(toolkit_slug)
@@ -2447,20 +2454,28 @@ async def _orchestrate_inner(payload: Dict[str, Any], instance: str, phone: str,
     # rodam ANTES do classificador LLM. Resolve o bug em que pedidos claros
     # de email eram classificados como "conversa" pelo LLM e nunca chegavam
     # ao email_pipeline (ex: "leia meu email da XP sobre o processo seletivo").
+    # GUARDRAIL (17/08/2026): detectores deterministicos (calendar/email/drive)
+    # rodam ANTES do classificador LLM. Resolve o bug em que pedidos claros
+    # de email eram classificados como "conversa" pelo LLM e nunca chegavam
+    # ao email_pipeline (ex: "leia meu email da XP sobre o processo seletivo").
+    # Fix E1 (18/08/2026): detectores usam o texto ORIGINAL (pre-mask) —
+    # [MASK_EMAIL] anteriormente invertia o roteamento de pedidos de
+    # calendario com email de participante (ex: "marque um compromisso com
+    # o Maycon... invite mayconpxavier@gmail.com").
     from pipelines.calendar_pipeline import detect as cal_detect, run as cal_run
     from pipelines.email_pipeline import detect as eml_detect, run as eml_run
     from pipelines.doc_pipeline import detect_drive_attachment, run as doc_run
     from pipelines.jennifer_pipeline import run as jen_run
 
-    if cal_detect(masked_text):
+    if cal_detect(text):
         result = await cal_run(payload)
         path = [{"step": 1, "phase": "deterministic_routing", "detector": "calendar"}]
         return await _finalize_orchestration(payload, masked_text, sender_name, result, path, cache_key)
-    if eml_detect(masked_text):
+    if eml_detect(text):
         result = await eml_run(payload)
         path = [{"step": 1, "phase": "deterministic_routing", "detector": "email"}]
         return await _finalize_orchestration(payload, masked_text, sender_name, result, path, cache_key)
-    if detect_drive_attachment(masked_text):
+    if detect_drive_attachment(text):
         result = await doc_run(payload)
         path = [{"step": 1, "phase": "deterministic_routing", "detector": "drive"}]
         return await _finalize_orchestration(payload, masked_text, sender_name, result, path, cache_key)

@@ -1,7 +1,14 @@
 """LGPD PII masker.
 
-Patterns masked: CPF, RG, telefone, email, cartao, CNPJ.
+Patterns masked: CPF, RG, telefone, cartao, CNPJ.
 Mask format: [MASK_{TYPE}].
+
+NOTA (18/08/2026): o padrao EMAIL foi REMOVIDO. O token [MASK_EMAIL]
+continha a substring "email", que invertia o roteamento deterministico
+(orchestrator TIER 1.7): pedidos de calendario com email de participante
+(ex: "marque compromisso... invite mayconpxavier@gmail.com") eram roteados
+para o email pipeline. Emails agora fluem no texto original; os detectores
+deterministicos usam o texto pre-mask (Fix E1).
 """
 import re
 import logging
@@ -14,7 +21,6 @@ PATTERNS = {
     "RG": re.compile(r"\d{1,2}\.?\d{3}\.?\d{3}-?\d{1}"),
     "CNPJ": re.compile(r"\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}"),
     "PHONE_BR": re.compile(r"\(?\d{2}\)?\s?9?\d{4,5}-?\d{4}"),
-    "EMAIL": re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"),
     "CARD": re.compile(r"\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}"),
 }
 
