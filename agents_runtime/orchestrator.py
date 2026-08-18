@@ -2433,20 +2433,28 @@ async def _orchestrate_inner(payload: Dict[str, Any], instance: str, phone: str,
     try:
         toolkit_slug = _detect_dynamic_toolkit(masked_text)
         if toolkit_slug:
-            from deepagent_layer.dynamic_manager_factory import dynamic_factory
-            agent = dynamic_factory.get_or_create(toolkit_slug)
-            if agent:
+            from deepagent_layer.agents import get_deep_agent, MANAGER_PROMPTS
+            logger.info(
+                "tier15_dispatch_attempt phone=%s manager_id=%s toolkit=%s text_preview=%s",
+                phone, manager_id, toolkit_slug, masked_text[:60],
+            )
+            if manager_id in MANAGER_PROMPTS and get_deep_agent(manager_id) is not None:
                 result = await _execute_agent(
-                    dict(agent), masked_text, payload, payload.get("extra", {}),
+                    {"id": manager_id, "system_prompt": ""},
+                    masked_text, payload, payload.get("extra", {}),
                 )
                 path = [
-                    {"step": 1, "phase": "dynamic_discovery", "toolkit": toolkit_slug},
+                    {"step": 1, "phase": "tier15_dispatch", "toolkit": toolkit_slug, "manager": manager_id},
                 ]
                 return await _finalize_orchestration(
                     payload, masked_text, sender_name, result, path, cache_key,
                 )
             else:
-                # Factory bloqueada (allowlist ou modulo nao existe).
+                # Manager nao disponivel em MANAGER_PROMPTS (slug nao reconhecido).
+                logger.warning(
+                    "tier15_manager_not_found phone=%s manager_id=%s toolkit=%s in_manager_prompts=%s",
+                    phone, manager_id, toolkit_slug, manager_id in MANAGER_PROMPTS,
+                )
                 meta = api_registry.get_meta(toolkit_slug)
                 if meta is None:
                     blocked_msg = (
@@ -2464,19 +2472,39 @@ async def _orchestrate_inner(payload: Dict[str, Any], instance: str, phone: str,
                     "delay_ms": 0,
                     "presence": "composing",
                     "metadata": {
-                        "agent_id": "dynamic-discovery-blocked",
+                        "agent_id": "tier15-not-found",
                         "toolkit": toolkit_slug,
                         "blocked_reason": "not_allowed_or_module_missing",
                     },
                 }
                 path = [
-                    {"step": 1, "phase": "dynamic_discovery_blocked", "toolkit": toolkit_slug},
+                    {"step": 1, "phase": "tier15_blocked", "toolkit": toolkit_slug},
                 ]
                 return await _finalize_orchestration(
                     payload, masked_text, sender_name, early_result, path, cache_key,
                 )
+        else:
+            # C1: tier15_keyword_gap — texto menciona keywords de Composio mas
+            # _detect_dynamic_toolkit retornou None. Indica gap de deteccao.
+            text_lower = (text or "").lower()
+            composio_keywords = (
+                "linkedin", "youtube", "github", "notion", "msteams",
+                "teams", "googledocs", "docs", "googlesheets", "sheets",
+                "googlemeet", "meet", "onedrive",
+            )
+            potential_composio = [k for k in composio_keywords if k in text_lower]
+            if potential_composio:
+                logger.info(
+                    "tier15_keyword_gap phone=%s text_preview=%s potential_composio=%s",
+                    phone, text[:80], potential_composio,
+                )
     except Exception as exc:
-        logger.warning("dynamic_discovery_handler_failed: %s", exc)
+        # C2: mais contexto no tier15_dispatch_handler_failed para debug
+        logger.warning(
+            "tier15_dispatch_handler_failed phone=%s text_preview=%s exc=%s",
+            phone, text[:80] if 'text' in dir() else '', exc,
+            exc_info=True,
+        )
 
     # ========================
     # TIER 2: LLM Classifier (Flash, 1 call, ~200ms)
