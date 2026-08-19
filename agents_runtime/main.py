@@ -2899,106 +2899,150 @@ def _oauth_redirect_uri(request: Request) -> str:
 
 
 @app.get("/a/{phone}/conectar")
-async def onboarding_conectar(phone: str, request: Request):
-    """Página pública de onboarding: conecta Google + TODOS os apps Composio."""
+async def onboarding_conectar(phone: str, request: Request, token: Optional[str] = None):
+    """Página pública e dedicada de onboarding: conecta Google Workspace + TODOS os apps Composio."""
     from agent_loader import get_user
 
-    user = get_user(phone) or {}
+    canonical_phone = "".join(c for c in str(phone or "") if c.isdigit())
+    user = get_user(canonical_phone) or {}
     has_google = bool(user.get("google_oauth_token"))
+    user_name = user.get("name") or user.get("push_name") or "Usuário"
     base = _oauth_redirect_uri(request).replace("/oauth/callback", "")
-    google_html = (
-        '<p style="color:#16a34a;font-weight:600">✅ Google já conectado</p>'
+    google_url = f"{base}/oauth/google?phone={canonical_phone}"
+
+    google_btn_html = (
+        f'''<div class="flex items-center justify-between p-4 bg-emerald-50/80 border border-emerald-200 rounded-xl">
+              <div class="flex items-center gap-2">
+                <span class="text-emerald-600 font-bold text-base">&#10003;</span>
+                <span class="text-sm font-semibold text-emerald-800">Google Workspace Conectado</span>
+              </div>
+              <a href="{google_url}" class="text-xs text-blue-600 font-medium hover:underline">Reconectar</a>
+            </div>'''
         if has_google else
-        '<a href="' + base + '/oauth/google?phone=' + phone + '">'
-        '<button style="background:#4285F4;color:#fff;border:0;padding:14px 28px;border-radius:8px;'
-        'font-size:16px;font-weight:600;cursor:pointer">Conectar Google</button></a>'
+        f'''<a href="{google_url}" class="block">
+              <button class="w-full flex items-center justify-center gap-3 bg-white hover:bg-slate-50 text-slate-800 font-semibold py-3.5 px-6 rounded-xl border border-slate-300 shadow-xs transition-all active:scale-[0.99]">
+                <svg class="w-5 h-5" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+                </svg>
+                <span>Conectar Google Workspace</span>
+              </button>
+            </a>'''
     )
+
     html = """<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Conectar contas | Jennifer - Coherence AI</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23196b52'/%3E%3Ctext x='50' y='62' font-size='52' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'%3EJ%3C/text%3E%3C/svg%3E">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Conectar Contas | Coherence AI</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%230058be'/%3E%3Ctext x='50' y='62' font-size='52' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'%3EC%3C/text%3E%3C/svg%3E">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-      body{font-family:Inter,system-ui,-apple-system,sans-serif;background:#f8fafc}
-      .card-hover{transition:all .2s ease}
-      .card-hover:hover{transform:translateY(-2px);box-shadow:0 8px 25px -5px rgba(0,0,0,0.1)}
-      .provider-icon{width:48px;height:48px;display:flex;align-items:center;justify-content:center;border-radius:12px;font-size:24px}
+      body{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,sans-serif;background:#f8fafc}
+      .provider-icon{width:44px;height:44px;display:flex;align-items:center;justify-content:center;border-radius:12px;font-size:20px}
       .status-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}
       .connected{background:#16a34a}
       .pending{background:#f59e0b}
     </style>
-    </head><body class="min-h-screen py-12 px-4">
-    <div class="max-w-2xl mx-auto">
+    </head><body class="min-h-screen py-8 px-4 flex items-center justify-center">
+    <div class="w-full max-w-lg mx-auto">
 
-      <div class="text-center mb-8">
-        <div class="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-[#196b52] to-[#2180c4] rounded-2xl mb-4 shadow-lg">
-          <span class="text-white font-bold text-3xl">J</span>
+      <!-- Header com Logo Coherence -->
+      <div class="text-center mb-6">
+        <div class="inline-flex items-center justify-center gap-2 mb-3">
+          <svg class="h-8 w-auto text-[#0058be]" viewBox="0 0 140 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <text x="0" y="24" font-family="system-ui, sans-serif" font-weight="900" font-size="24" fill="#0058be" letter-spacing="-0.5">COHERENCE</text>
+          </svg>
         </div>
-        <h1 class="text-3xl font-bold text-slate-900 mb-2">Jennifer - Conectar Contas</h1>
-        <p class="text-slate-600">Autorize o acesso para que a Jennifer use seus servicos com seguranca.</p>
+        <h1 class="text-2xl font-bold text-slate-900 tracking-tight">Secretária Pessoal IA</h1>
+        <p class="text-sm text-slate-600 mt-1">Olá, <strong class="text-slate-900">""" + user_name + """</strong> (+""" + canonical_phone + """)</p>
+        <p class="text-xs text-slate-500 mt-0.5">Autorize suas contas para liberar o assistente no WhatsApp.</p>
       </div>
 
-      <div class="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+      <!-- Card Principal -->
+      <div class="bg-white rounded-2xl shadow-xl shadow-slate-200/60 border border-slate-200 overflow-hidden">
 
+        <!-- Seção 1: Google Workspace -->
         <div class="p-6 border-b border-slate-100">
-          <div class="flex items-start justify-between mb-4">
+          <div class="flex items-center justify-between mb-3">
             <div class="flex items-center gap-3">
-              <div class="provider-icon bg-blue-50">&#128309;</div>
+              <div class="provider-icon bg-blue-50 text-blue-600">
+                <svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM19 18H6c-2.21 0-4-1.79-4-4 0-2.05 1.53-3.76 3.56-3.97l1.07-.11.5-.95C8.08 7.14 9.94 6 12 6c2.62 0 4.88 1.86 5.39 4.43l.3 1.5 1.53.11c1.56.1 2.78 1.41 2.78 2.96 0 1.65-1.35 3-3 3z"/>
+                </svg>
+              </div>
               <div>
-                <h2 class="text-lg font-semibold text-slate-900">Google</h2>
-                <p class="text-sm text-slate-500">Agenda, Gmail e Drive</p>
+                <h2 class="text-base font-semibold text-slate-900 leading-tight">Google Workspace</h2>
+                <p class="text-xs text-slate-500">Google Calendar, Gmail e Google Drive</p>
               </div>
             </div>
-            <span id="google-status" class="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-600">
+            <span id="google-status" class="text-xs px-2.5 py-1 rounded-full font-medium """ + ('bg-emerald-50 text-emerald-700' if has_google else 'bg-amber-50 text-amber-700') + """">
+              <span class="status-dot """ + ('connected' if has_google else 'pending') + """"></span>""" + ('Conectado' if has_google else 'Pendente') + """
+            </span>
+          </div>
+          <div class="mt-3">
+            """ + google_btn_html + """
+          </div>
+          <p class="text-[11px] text-slate-400 mt-2 text-center">Permite que a assistente consulte sua agenda, leia e-mails e acesse documentos.</p>
+        </div>
+
+        <!-- Seção 2: Apps de Trabalho (Composio) -->
+        <div class="p-6 border-b border-slate-100">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-3">
+              <div class="provider-icon bg-indigo-50 text-indigo-600">
+                <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                  <polyline points="22,6 12,13 2,6"/>
+                </svg>
+              </div>
+              <div>
+                <h2 class="text-base font-semibold text-slate-900 leading-tight">Aplicativos de Trabalho</h2>
+                <p class="text-xs text-slate-500">LinkedIn, YouTube, GitHub, Notion, OneDrive, Docs</p>
+              </div>
+            </div>
+            <span id="composio-status" class="text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 font-medium">
               <span class="status-dot pending"></span>Verificando...
             </span>
           </div>
-        <p class="text-xs text-slate-500 mt-3">Apos autorizar, seu browser volta para esta pagina.</p>
-        </div>
-
-        <div class="p-6 border-b border-slate-100">
-          <div class="flex items-start justify-between mb-4">
-            <div class="flex items-center gap-3">
-              <div class="provider-icon bg-purple-50">&#128995;</div>
-              <div>
-                <h2 class="text-lg font-semibold text-slate-900">Apps de Trabalho</h2>
-                <p class="text-sm text-slate-500">YouTube, LinkedIn, GitHub, Notion, Google Docs, OneDrive</p>
-              </div>
-            </div>
-            <span id="composio-status" class="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-600">
-              <span class="status-dot pending"></span>Nao conectado
-            </span>
-          </div>
           <button onclick="conectarComposio()" id="composio-btn"
-            class="w-full bg-gradient-to-r from-slate-900 to-slate-700 hover:from-slate-800 hover:to-slate-600 text-white font-semibold py-3 px-6 rounded-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed">
-            Conectar Apps de Trabalho
+            class="w-full bg-[#0058be] hover:bg-[#00479e] active:scale-[0.99] text-white font-semibold py-3.5 px-6 rounded-xl shadow-xs transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed">
+            Conectar Todos os Apps
           </button>
           <div id="comp-status" class="mt-3"></div>
         </div>
 
-        <div class="p-6 bg-gradient-to-br from-slate-50 to-slate-100 text-center">
-          <p class="text-sm text-slate-600">
-            &#128274; Apos conectar, volte ao WhatsApp e continue a conversa com a Jennifer.
+        <!-- Rodapé de Garantia & Segurança -->
+        <div class="p-5 bg-slate-50 text-center">
+          <div class="flex items-center justify-center gap-2 text-xs font-semibold text-slate-700">
+            <span>&#128274;</span>
+            <span>Acessos prévios são 100% preservados</span>
+          </div>
+          <p class="text-[11px] text-slate-400 mt-1">
+            Conexão OAuth 2.0 oficial criptografada. Suas senhas nunca são armazenadas.
           </p>
-          <p class="text-xs text-slate-400 mt-2">Conexoes criptografadas - OAuth 2.0 - Sem armazenamento de senhas</p>
         </div>
       </div>
 
-      <div id="status-banner" class="mt-4 hidden"></div>
+      <div class="text-center mt-4">
+        <a href="https://wa.me/5511917389901" class="text-xs text-slate-500 hover:text-slate-700 font-medium">
+          &larr; Voltar ao WhatsApp da Jennifer
+        </a>
+      </div>
 
     </div>
 
     <script>
-    const BASE = {base_js};
-    const PHONE = {phone_js};
+    const BASE = """ + json.dumps(base) + """;
+    const PHONE = """ + json.dumps(canonical_phone) + """;
     const compBtn = document.getElementById('composio-btn');
     const compStatus = document.getElementById('comp-status');
     const compStatusBadge = document.getElementById('composio-status');
 
     async function conectarComposio() {
       compBtn.disabled = true;
-      compBtn.textContent = 'Gerando links de conexao...';
-      compStatus.innerHTML = '<p class="text-sm text-slate-500">Abrindo abas para autorizacao...</p>';
+      compBtn.textContent = 'Gerando links de autorização...';
+      compStatus.innerHTML = '<p class="text-xs text-slate-500 text-center">Abrindo abas seguras de autorização...</p>';
       try {
         const res = await fetch(BASE + '/a/' + PHONE + '/composio', {method:'POST'});
         const data = await res.json();
@@ -3007,14 +3051,16 @@ async def onboarding_conectar(phone: str, request: Request):
         const total = data.total || links.length;
 
         if (!links.length) {
-          compStatus.innerHTML = '<p class="text-sm text-emerald-600 font-medium">&#9989; Todos os apps ja estao conectados!</p>';
-          compStatusBadge.innerHTML = '<span class="status-dot connected"></span>Conectado';
+          compStatus.innerHTML = '<p class="text-xs text-emerald-600 font-semibold text-center">&#9989; Todos os aplicativos já estão conectados!</p>';
+          compStatusBadge.innerHTML = '<span class="status-dot connected"></span>Conectado (' + already + '/' + total + ')';
+          compStatusBadge.className = 'text-xs px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 font-medium';
+          compBtn.textContent = 'Apps Conectados';
           return;
         }
-        let html = '<p class="text-sm text-slate-600 mb-2"><strong>' + already + '/' + total + '</strong> ja conectados, <strong>' + links.length + '</strong> pendentes:</p><ul class="space-y-1.5">';
+        let html = '<p class="text-xs text-slate-600 mb-2 font-medium"><strong>' + already + '/' + total + '</strong> conectados. Complete os pendentes:</p><ul class="space-y-1.5">';
         links.forEach((l, idx) => {
           const name = (l.toolkit || '').replace(/_/g, ' ').replace(/\\b\\w/g, c => c.toUpperCase());
-          html += '<li class="flex items-center gap-2 text-xs"><span class="text-slate-400">' + (idx + 1) + '.</span><a href="' + l.url + '" target="_blank" rel="noopener" class="text-blue-600 hover:underline">' + name + '</a></li>';
+          html += '<li class="flex items-center justify-between text-xs p-2 bg-slate-50 rounded-lg border border-slate-200"><span>' + name + '</span><a href="' + l.url + '" target="_blank" rel="noopener" class="px-2.5 py-1 bg-blue-600 text-white rounded font-medium text-[11px] hover:bg-blue-700">Autorizar</a></li>';
         });
         html += '</ul>';
         compStatus.innerHTML = html;
@@ -3022,30 +3068,35 @@ async def onboarding_conectar(phone: str, request: Request):
         compBtn.disabled = false;
         window.open(links[0].url, '_blank');
       } catch (e) {
-        compStatus.innerHTML = '<p class="text-sm text-red-600">Erro: ' + e.message + '</p>';
+        compStatus.innerHTML = '<p class="text-xs text-red-600 text-center">Erro ao gerar conexões: ' + e.message + '</p>';
         compBtn.disabled = false;
         compBtn.textContent = 'Tentar Novamente';
       }
     }
 
-    (async () => {{
-      try {{
+    (async () => {
+      try {
         const res = await fetch(BASE + '/admin/users/' + PHONE + '/status?token=');
         const data = await res.json();
-        if (data && data.google && data.google.connected) {{
-          document.getElementById('google-status').innerHTML = '<span class="status-dot connected"></span>Conectado';
-        }} else {{
-          document.getElementById('google-status').innerHTML = '<span class="status-dot pending"></span>Nao conectado';
-        }}
-      }} catch (e) {{ /* silent */ }}
-    }})();
+        if (data && data.composio) {
+          const conn = data.composio.connected_count || 0;
+          const total = data.composio.total_count || 6;
+          if (conn > 0) {
+            compStatusBadge.innerHTML = '<span class="status-dot connected"></span>' + conn + '/' + total + ' Ativos';
+            compStatusBadge.className = 'text-xs px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 font-medium';
+          } else {
+            compStatusBadge.innerHTML = '<span class="status-dot pending"></span>Pendente';
+            compStatusBadge.className = 'text-xs px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 font-medium';
+          }
+        } else {
+          compStatusBadge.innerHTML = '<span class="status-dot pending"></span>Pendente';
+        }
+      } catch (e) {
+        compStatusBadge.innerHTML = '<span class="status-dot pending"></span>Pronto';
+      }
+    })();
     </script>
     </body></html>"""
-    html = (
-        html.replace("{google_html}", google_html)
-        .replace("{base_js}", json.dumps(base))
-        .replace("{phone_js}", json.dumps(phone))
-    )
     return HTMLResponse(content=html)
 
 

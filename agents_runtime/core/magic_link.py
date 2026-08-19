@@ -64,9 +64,10 @@ def verify_magic_link_token(token: str) -> Optional[Dict[str, Any]]:
 
 
 def build_magic_link_url(phone: str, base_url: str = "") -> str:
-    """Constrói a URL completa para o usuário acessar suas conexões no Portal."""
+    """Constrói a URL completa para o usuário acessar suas conexões na Landing Page de Onboarding."""
     if not base_url:
         base_url = os.getenv("PORTAL_PUBLIC_URL", "https://agents-runtime-test-c5nbfc5meq-uc.a.run.app")
     token = generate_magic_link_token(phone)
+    canonical = "".join(c for c in str(phone or "") if c.isdigit())
     clean_base = base_url.rstrip("/")
-    return f"{clean_base}/portal/?token={token}"
+    return f"{clean_base}/a/{canonical}/conectar?token={token}"
