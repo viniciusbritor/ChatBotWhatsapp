@@ -61,25 +61,19 @@ export const OwnersView: React.FC<OwnersViewProps> = ({ owners, onAddNew, search
               {/* UID Badge (Jade Green) */}
               <span className="inline-flex items-center gap-1.5 bg-[#196b52] text-white font-mono text-[12px] px-3 py-1 rounded-md shadow-2xs">
                 <span className="material-symbols-outlined text-[14px]">badge</span>
-                uid {owner.uid}
+                UID: {owner.uid}
               </span>
 
               {/* Phone Badge */}
               <span className="inline-flex items-center gap-1.5 bg-[#ecedf7] dark:bg-[#2e3038] text-[#191b23] dark:text-white border border-[#c2c6d6] font-mono text-[12px] px-3 py-1 rounded-md">
                 <span className="material-symbols-outlined text-[14px]">call</span>
-                {owner.phone}
-              </span>
-
-              {/* Instance Badge */}
-              <span className="inline-flex items-center gap-1.5 bg-[#e1e2ec] dark:bg-[#2e3038] text-[#424754] dark:text-[#c2c6d6] font-mono text-[12px] px-3 py-1 rounded-md">
-                <span className="material-symbols-outlined text-[14px]">dns</span>
-                {owner.instance}
-              </span>
-
-              {/* Linked Accounts Badge */}
-              <span className="inline-flex items-center gap-1.5 bg-[#0058be]/10 dark:bg-[#adc6ff]/20 text-[#0058be] dark:text-[#adc6ff] border border-[#0058be]/30 font-mono text-[12px] px-3 py-1 rounded-md">
-                <span className="material-symbols-outlined text-[14px]">link</span>
                 WhatsApp: {owner.phone}
+              </span>
+
+              {/* Instance Bot Badge */}
+              <span className="inline-flex items-center gap-1.5 bg-[#0058be]/10 dark:bg-[#adc6ff]/20 text-[#0058be] dark:text-[#adc6ff] border border-[#0058be]/30 font-mono text-[12px] px-3 py-1 rounded-md">
+                <span className="material-symbols-outlined text-[14px]">smart_toy</span>
+                Instância: {owner.instance}
               </span>
             </div>
           </article>

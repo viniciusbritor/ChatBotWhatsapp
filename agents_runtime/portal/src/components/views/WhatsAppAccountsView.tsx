@@ -55,14 +55,17 @@ export const WhatsAppAccountsView: React.FC<WhatsAppAccountsViewProps> = ({
             <div className="flex justify-between items-start z-10">
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 rounded-full bg-[#f2f3fd] dark:bg-[#2e3038] flex items-center justify-center text-[#0058be] dark:text-[#adc6ff]">
-                  <span className="material-symbols-outlined text-[28px]">chat_bubble</span>
+                  <span className="material-symbols-outlined text-[28px]">smart_toy</span>
                 </div>
                 <div>
-                  <h3 className="text-[18px] font-semibold text-[#191b23] dark:text-white">
+                  <h3 className="text-[18px] font-semibold text-[#191b23] dark:text-white flex items-center gap-2">
                     {acc.name}
+                    <span className="text-[11px] font-medium bg-[#0058be]/10 text-[#0058be] dark:text-[#adc6ff] px-2 py-0.5 rounded-full">
+                      Bot Assistente
+                    </span>
                   </h3>
-                  <p className="text-[13px] text-[#424754] dark:text-[#c2c6d6] font-mono mt-0.5">
-                    {acc.phone}
+                  <p className="text-[13px] text-[#191b23] dark:text-white font-mono mt-0.5 font-semibold">
+                    📞 {acc.phone || '+5511917389901'}
                   </p>
                 </div>
               </div>
@@ -74,9 +77,10 @@ export const WhatsAppAccountsView: React.FC<WhatsAppAccountsViewProps> = ({
               </div>
             </div>
 
-            <div className="z-10 mt-1">
-              <span className="inline-flex items-center bg-[#f1f5f9] dark:bg-[#2e3038] text-[#475569] dark:text-[#c2c6d6] font-mono text-[12px] px-2.5 py-1 rounded-md border border-[#e2e8f0] dark:border-[#424754]">
-                Owner: {acc.ownerPhone}
+            <div className="z-10 mt-1 flex flex-col gap-1.5">
+              <span className="inline-flex items-center gap-1.5 bg-[#f1f5f9] dark:bg-[#2e3038] text-[#475569] dark:text-[#c2c6d6] font-mono text-[12px] px-2.5 py-1 rounded-md border border-[#e2e8f0] dark:border-[#424754]">
+                <span className="material-symbols-outlined text-[14px]">person</span>
+                Proprietário: {acc.ownerPhone || '+5511966830020'}
               </span>
             </div>
 

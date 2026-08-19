@@ -277,18 +277,24 @@ export const FinOpsView: React.FC<FinOpsViewProps> = ({
                   return (
                     <tr key={u.phone} className="hover:bg-[#f2f3fd] dark:hover:bg-[#2e3038] transition-colors">
                       {/* Contato */}
+                      {/* Contato */}
                       <td className="py-4 px-6">
                         <div className="flex items-center gap-3">
                           <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs ${
-                            isBlocked
+                            u.phone === '5511917389901' || u.role === 'bot'
+                              ? 'bg-blue-500/20 text-blue-700 dark:text-blue-400 border border-blue-500/40'
+                              : isBlocked
                               ? 'bg-red-500/20 text-red-700 dark:text-red-400 border border-red-500/40'
                               : 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-500/40'
                           }`}>
-                            {u.name ? u.name.charAt(0).toUpperCase() : '+'}
+                            {u.phone === '5511917389901' || u.role === 'bot' ? '🤖' : (u.name ? u.name.charAt(0).toUpperCase() : '+')}
                           </div>
                           <div>
                             <div className="font-medium text-[#191b23] dark:text-white flex items-center gap-2">
                               {u.name}
+                              {(u.phone === '5511917389901' || u.role === 'bot') && (
+                                <span className="bg-blue-500/20 text-blue-700 dark:text-blue-300 text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-500/30">Bot Assistente</span>
+                              )}
                               {u.role === 'admin' && (
                                 <span className="bg-purple-500/20 text-purple-700 dark:text-purple-300 text-[10px] font-bold px-2 py-0.5 rounded-full border border-purple-500/30">Admin</span>
                               )}
@@ -343,7 +349,12 @@ export const FinOpsView: React.FC<FinOpsViewProps> = ({
 
                       {/* Status */}
                       <td className="py-4 px-6">
-                        {isBlocked ? (
+                        {u.phone === '5511917389901' || u.role === 'bot' ? (
+                          <span className="inline-flex items-center gap-1.5 bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/30 text-xs font-semibold px-2.5 py-1 rounded-full">
+                            <ShieldCheck className="w-3.5 h-3.5" />
+                            Bot (Protegido)
+                          </span>
+                        ) : isBlocked ? (
                           <span className="inline-flex items-center gap-1.5 bg-red-500/10 text-red-700 dark:text-red-400 border border-red-500/30 text-xs font-semibold px-2.5 py-1 rounded-full">
                             <ShieldAlert className="w-3.5 h-3.5" />
                             Quarentena
@@ -358,29 +369,33 @@ export const FinOpsView: React.FC<FinOpsViewProps> = ({
 
                       {/* Ação */}
                       <td className="py-4 px-6 text-right">
-                        <button
-                          onClick={() => handleToggleBlock(u.phone, isBlocked)}
-                          disabled={actionLoading === u.phone}
-                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all disabled:opacity-50 ${
-                            isBlocked
-                              ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm'
-                              : 'bg-[#ecedf7] dark:bg-[#2e3038] hover:bg-red-500/20 text-[#191b23] dark:text-[#c2c6d6] hover:text-red-700 dark:hover:text-red-300 border border-[#c2c6d6] hover:border-red-500/30'
-                          }`}
-                        >
-                          {actionLoading === u.phone ? (
-                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                          ) : isBlocked ? (
-                            <>
-                              <Unlock className="w-3.5 h-3.5" />
-                              Desbloquear
-                            </>
-                          ) : (
-                            <>
-                              <Lock className="w-3.5 h-3.5" />
-                              Bloquear
-                            </>
-                          )}
-                        </button>
+                        {u.phone === '5511917389901' || u.role === 'bot' ? (
+                          <span className="text-xs text-blue-600 dark:text-blue-400 font-medium italic">Imune</span>
+                        ) : (
+                          <button
+                            onClick={() => handleToggleBlock(u.phone, isBlocked)}
+                            disabled={actionLoading === u.phone}
+                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all disabled:opacity-50 ${
+                              isBlocked
+                                ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm'
+                                : 'bg-[#ecedf7] dark:bg-[#2e3038] hover:bg-red-500/20 text-[#191b23] dark:text-[#c2c6d6] hover:text-red-700 dark:hover:text-red-300 border border-[#c2c6d6] hover:border-red-500/30'
+                            }`}
+                          >
+                            {actionLoading === u.phone ? (
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            ) : isBlocked ? (
+                              <>
+                                <Unlock className="w-3.5 h-3.5" />
+                                Desbloquear
+                              </>
+                            ) : (
+                              <>
+                                <Lock className="w-3.5 h-3.5" />
+                                Bloquear
+                              </>
+                            )}
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );

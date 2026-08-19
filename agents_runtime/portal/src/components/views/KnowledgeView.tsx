@@ -10,6 +10,12 @@ interface KnowledgeViewProps {
   searchQuery: string;
 }
 
+function formatDocTitle(title: string): string {
+  if (!title) return '';
+  // Substitui underscores por espaços para quebra gramatical natural entre palavras
+  return title.replace(/_/g, ' ');
+}
+
 export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
   categories,
   currentUser,
@@ -139,11 +145,14 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
               </span>
             </div>
 
-            <div>
-              <h3 className="text-[18px] font-bold text-[#191b23] dark:text-white">
-                {cat.title}
+            <div className="flex-1 flex flex-col">
+              <h3
+                className="text-[16px] font-bold text-[#191b23] dark:text-white leading-snug break-words [overflow-wrap:anywhere] hyphens-auto"
+                title={cat.title}
+              >
+                {formatDocTitle(cat.title)}
               </h3>
-              <p className="text-[12px] font-mono text-[#424754] dark:text-[#c2c6d6] mt-1">
+              <p className="text-[12px] font-mono text-[#424754] dark:text-[#c2c6d6] mt-1.5">
                 Collection: {cat.collection}
               </p>
               <p className="text-[12px] font-mono text-[#727785]">Class: {cat.classification}</p>

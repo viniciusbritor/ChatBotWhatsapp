@@ -1,3 +1,24 @@
+## 19/08/2026 (03:15 BRT) — Correções de Contas, Proprietários, Catálogo de Tools, Nomes de Conhecimento e Whitelist FinOps
+
+### 1. Contas WhatsApp (Jennifer = 5511917389901, Dono = 5511966830020)
+- Atualizado `whatsapp_accounts/Jennifer` no Firestore e `_enrich_accounts_with_evolution_state` em `main.py` para normalizar o chip do bot (`+55 11 91738-9901`) e o dono (`+55 11 96683-0020` - Vinicius Brito Rocha).
+- Ajustado `WhatsAppAccountsView.tsx` e `mapAccounts` em `portal/src/App.tsx` para exibir badges claros distinguindo o chip da assistente do telefone do proprietário.
+
+### 2. Proprietários (Vinicius Brito Rocha como Dono Master)
+- `GET /admin/owners` em `main.py` atualizado para consultar o perfil real em `usuarios/{owner_phone}` e retornar "Vinicius Brito Rocha", papel "Proprietário Master" e a instância vinculada `Jennifer (+55 11 91738-9901)`.
+- Eliminada redundância de colocar o nome do bot como seu próprio proprietário em `OwnersView.tsx`.
+
+### 3. Catálogo Completo de Tools (Google Native + Composio MCP)
+- `GET /admin/tools` em `main.py` unificado para retornar as 91 ferramentas do `TOOL_REGISTRY` e `api_registry` categorizadas dinamicamente em Google Workspace, Composio MCP, Serviços e APIs e Core.
+- Ajustado `mapTools` em `portal/src/App.tsx` para classificar corretamente todos os toolkits Composio (LinkedIn, YouTube, GitHub, Notion, OneDrive, Google Docs, Sheets, Twitter, Teams) sob o filtro Composio MCP.
+
+### 4. Conhecimento (Quebra Gramatical de Nomes de Arquivos)
+- Em `KnowledgeView.tsx`, implementada função `formatDocTitle` que substitui underscores por espaços e estiliza títulos com `break-words [overflow-wrap:anywhere]` para acomodar nomes longos (como `Curriculo_Vinicius_Brito_Rocha_Data_Science_AI_Manager.pdf`) sem estourar os cards.
+
+### 5. FinOps & Escudo de Segurança (Whitelist Bot e Admins)
+- Adicionada `_STATIC_WHITELIST_PHONES` em `core/flood_protection.py` contendo o bot (`5511917389901`) e os administradores (`5511966830020`), tornando-os 100% imunes a quarentena/bloqueio acidental de flood.
+- Desbloqueado `usuarios/5511917389901` no Firestore e adicionada identificação visual de `[Bot Assistente - Protegido]` em `FinOpsView.tsx`.
+
 ## 19/08/2026 (02:05 BRT) — Diagnóstico de Painel em Branco e Avaliação de Impacto: Relay Webhook & Novo Owner
 
 ### 1. Diagnóstico e Correção da UI do Módulo Agentes (Tela em Branco no Dashboard)

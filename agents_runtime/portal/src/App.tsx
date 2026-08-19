@@ -37,16 +37,21 @@ import { ViewChunksModal } from './components/modals/ViewChunksModal';
 import { NewItemModal } from './components/modals/NewItemModal';
 
 function mapAccounts(data: any): WhatsAppAccount[] {
-  return (data?.accounts || []).map((a: any) => ({
-    id: a.id || a.instance || '',
-    name: a.name || a.instance || a.id || '',
-    phone: a.owner_phone ? '+' + a.owner_phone : '',
-    ownerPhone: '+' + (a.owner_phone || ''),
-    status: a.connection_status === 'open' ? 'Conectado'
-          : a.connection_status === 'connecting' ? 'Aguardando QR' : 'Desconectado',
-    instanceName: a.instance || a.id || '',
-    updatedAt: a.updated_at || '',
-  }));
+  return (data?.accounts || []).map((a: any) => {
+    const botPhone = a.phone || a.number || (a.instance === 'Jennifer' ? '5511917389901' : '');
+    const ownerPhone = a.owner_phone || '5511966830020';
+    return {
+      id: a.id || a.instance || '',
+      name: a.name || a.instance || a.id || '',
+      phone: botPhone ? (botPhone.startsWith('+') ? botPhone : '+' + botPhone) : '+5511917389901',
+      ownerPhone: ownerPhone ? (ownerPhone.startsWith('+') ? ownerPhone : '+' + ownerPhone) : '+5511966830020',
+      ownerName: a.owner_name || 'Vinicius Brito Rocha',
+      status: a.connection_status === 'open' ? 'Conectado'
+            : a.connection_status === 'connecting' ? 'Aguardando QR' : 'Desconectado',
+      instanceName: a.instance || a.id || '',
+      updatedAt: a.updated_at || '',
+    };
+  });
 }
 
 function mapAgents(data: any): Agent[] {
@@ -76,12 +81,25 @@ function mapSkills(data: any): Skill[] {
 function mapTools(data: any): Tool[] {
   return (data?.tools || []).map((t: any) => {
     const id = t.tool_id || t.id || t.name || '';
-    const isComposio = (t.implementation || '').includes('composio') || (t.type_filter || '').includes('composio');
+    const isComposio =
+      t.type_filter === 'Composio' ||
+      (t.implementation || '').includes('composio') ||
+      (t.type_filter || '').includes('composio') ||
+      (t.category || '').includes('Composio') ||
+      id.startsWith('linkedin.') ||
+      id.startsWith('youtube.') ||
+      id.startsWith('github.') ||
+      id.startsWith('notion.') ||
+      id.startsWith('onedrive.') ||
+      id.startsWith('googledocs.') ||
+      id.startsWith('googlesheets.') ||
+      id.startsWith('twitter.') ||
+      id.startsWith('msteams.');
     return {
       id: id,
       code: id,
       name: t.name || id,
-      category: (t.category || 'Custom') as any,
+      category: (t.category || (isComposio ? 'Composio MCP' : 'Google Workspace')) as any,
       typeFilter: isComposio ? 'Composio' : 'Google Native',
       description: t.description || '',
       status: t.enabled === false ? 'Inactive' : 'Active',
@@ -143,14 +161,17 @@ function mapKnowledge(data: any): KnowledgeCategory[] {
 }
 
 function mapOwners(data: any): Owner[] {
-  return (data?.owners || []).map((o: any) => ({
-    id: o.owner_uid || o.owner_phone || o.phone || '',
-    name: o.display_name || o.name || o.owner_phone || o.phone || '',
-    role: 'Owner',
-    uid: o.owner_uid || o.owner_phone || '',
-    phone: o.owner_phone || o.phone || '',
-    instance: o.instance || '',
-  }));
+  return (data?.owners || []).map((o: any) => {
+    const phone = o.owner_phone || o.phone || '5511966830020';
+    return {
+      id: o.owner_uid || phone,
+      name: o.display_name || o.name || 'Vinicius Brito Rocha',
+      role: o.role || 'Proprietário Master',
+      uid: o.owner_uid || phone,
+      phone: phone.startsWith('+') ? phone : '+' + phone,
+      instance: o.instance || 'Jennifer (+55 11 91738-9901)',
+    };
+  });
 }
 
 function mapIntegrations(data: any): Integration[] {

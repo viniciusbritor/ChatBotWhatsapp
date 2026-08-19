@@ -51,10 +51,32 @@ def _get_firestore_client():
     return firestore.Client(project=project)
 
 
+# Whitelist de numeros que NUNCA entram em quarentena (Bots de instancia e Administradores)
+_STATIC_WHITELIST_PHONES = {
+    "5511917389901",  # Chip da Jennifer (Bot)
+    "11917389901",
+    "5511966830020",  # Vinicius (Owner Master)
+    "11966830020",
+}
+
+
+def _is_whitelisted(phone: str) -> bool:
+    """Verifica se o numero pertence ao bot ou a um administrador master."""
+    canonical = _canonical_phone(phone)
+    if not canonical:
+        return False
+    if canonical in _STATIC_WHITELIST_PHONES:
+        return True
+    digits_only = "".join(c for c in canonical if c.isdigit())
+    if digits_only in _STATIC_WHITELIST_PHONES or ("55" + digits_only) in _STATIC_WHITELIST_PHONES:
+        return True
+    return False
+
+
 def is_user_quarantined(phone: str) -> bool:
     """Verifica se o usuário está em quarentena (bloqueado por flood/segurança)."""
     canonical = _canonical_phone(phone)
-    if not canonical:
+    if not canonical or _is_whitelisted(canonical):
         return False
 
     now = time.time()
@@ -93,7 +115,8 @@ def quarantine_user(
 ) -> None:
     """Coloca o usuário em quarentena no Firestore e no cache local."""
     canonical = _canonical_phone(phone)
-    if not canonical:
+    if not canonical or _is_whitelisted(canonical):
+        logger.info("quarantine_user skipped for whitelisted phone=%s", canonical)
         return
 
     now_iso = now_brt().isoformat()
@@ -167,7 +190,7 @@ def check_and_record_message(
         (is_blocked: bool, flood_details: dict)
     """
     canonical = _canonical_phone(phone)
-    if not canonical:
+    if not canonical or _is_whitelisted(canonical):
         return False, {}
 
     # 1. Se já está em quarentena, bloqueia direto

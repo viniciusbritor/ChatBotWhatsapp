@@ -1275,7 +1275,15 @@ async def _enrich_accounts_with_evolution_state(rows: list) -> None:
     from core.evolution_admin import get_connection_state
 
     for row in rows:
-        instance = str(row.get("instance") or "").strip()
+        instance = str(row.get("instance") or row.get("id") or "").strip()
+        # Garantir bot phone e owner phone normalizados
+        if not row.get("phone"):
+            row["phone"] = row.get("number") or ("5511917389901" if instance.lower() == "jennifer" else "")
+        if not row.get("owner_phone"):
+            row["owner_phone"] = "5511966830020"
+        if not row.get("owner_name"):
+            row["owner_name"] = "Vinicius Brito Rocha"
+
         if not instance:
             continue
         state = await get_connection_state(instance)
@@ -1553,13 +1561,39 @@ async def admin_owners_list():
         return JSONResponse(content={"owners": []})
     rows: list = []
     try:
+        seen_phones = set()
         for doc in db.collection("whatsapp_accounts").stream():
             data = doc.to_dict() or {}
+            owner_phone = str(data.get("owner_phone") or data.get("owner_uid") or "").strip()
+            if not owner_phone or owner_phone in seen_phones:
+                continue
+            seen_phones.add(owner_phone)
+
+            # Buscar perfil do dono real em usuarios
+            display_name = str(data.get("owner_name") or "").strip()
+            if not display_name:
+                try:
+                    u_doc = db.collection("usuarios").document(owner_phone).get(timeout=2)
+                    if u_doc.exists:
+                        u_data = u_doc.to_dict() or {}
+                        display_name = u_data.get("name") or u_data.get("display_name") or ""
+                except Exception:
+                    pass
+            if not display_name and owner_phone == "5511966830020":
+                display_name = "Vinicius Brito Rocha"
+
+            inst_name = str(data.get("instance") or data.get("name") or "Jennifer").strip()
+            bot_phone = str(data.get("phone") or data.get("number") or "5511917389901").strip()
+
             rows.append({
-                "owner_uid": data.get("owner_uid") or data.get("owner_phone"),
-                "owner_phone": data.get("owner_phone"),
-                "display_name": data.get("name"),
-                "instance": data.get("instance"),
+                "owner_uid": data.get("owner_uid") or owner_phone,
+                "owner_phone": owner_phone,
+                "phone": owner_phone,
+                "display_name": display_name or f"Proprietário ({owner_phone})",
+                "name": display_name or f"Proprietário ({owner_phone})",
+                "role": "Proprietário Master",
+                "instance": f"{inst_name} (+{bot_phone})",
+                "bot_phone": bot_phone,
             })
     except Exception as exc:
         logger.warning("admin_owners_list failed: %s", exc)
@@ -1888,8 +1922,74 @@ async def admin_tools_post(request: Request):
 
 @app.get("/admin/tools")
 async def admin_tools_list():
-    """List all tools (Portal proxy)."""
-    return JSONResponse(content={"tools": list_tools()})
+    """List all tools (Portal proxy) aggregated from TOOL_REGISTRY and Firestore."""
+    from tool_registry import TOOL_REGISTRY
+
+    fs_tools = {t.get("id") or t.get("tool_id"): t for t in list_tools() if t.get("id") or t.get("tool_id")}
+    all_tools = []
+    seen = set()
+
+    for tool_id, tool_entry in TOOL_REGISTRY.items():
+        seen.add(tool_id)
+        fs_meta = fs_tools.get(tool_id, {})
+        prefix = tool_id.split(".")[0].lower()
+
+        is_composio = prefix in ("linkedin", "youtube", "github", "notion", "onedrive", "googledocs", "googlesheets", "googlemeet", "msteams", "microsoft_teams", "twitter")
+        is_google_workspace = prefix in ("calendar", "gmail", "drive", "people", "tasks", "photos")
+        is_google_services = prefix in ("locomotion", "weather", "translate", "vision", "web", "transporte")
+
+        if is_composio:
+            type_filter = "Composio"
+            category = "Composio MCP"
+            impl = "composio"
+        elif is_google_workspace:
+            type_filter = "Google Native"
+            category = "Google Workspace"
+            impl = "native_google"
+        elif is_google_services:
+            type_filter = "Google Native"
+            category = "Serviços e APIs"
+            impl = "native_service"
+        else:
+            type_filter = "Google Native"
+            category = "Core / Sistema"
+            impl = "internal"
+
+        raw_desc = fs_meta.get("description") or (tool_entry.get("description") if isinstance(tool_entry, dict) else "") or f"Ferramenta {tool_id}"
+        raw_name = fs_meta.get("name") or tool_id.replace("_", " ").title()
+
+        all_tools.append({
+            "id": tool_id,
+            "tool_id": tool_id,
+            "name": raw_name,
+            "description": raw_desc,
+            "category": category,
+            "type_filter": type_filter,
+            "implementation": impl,
+            "enabled": fs_meta.get("enabled", True),
+            "permissions": fs_meta.get("permissions") or [f"role:user", f"scope:{prefix}"],
+            "parameters_schema": fs_meta.get("parameters_schema") or (tool_entry.get("parameters_schema") if isinstance(tool_entry, dict) else {}),
+        })
+
+    for tool_id, fs_meta in fs_tools.items():
+        if tool_id not in seen:
+            prefix = tool_id.split(".")[0].lower()
+            is_comp = prefix in ("linkedin", "youtube", "github", "notion", "onedrive", "googledocs", "googlesheets", "googlemeet", "msteams", "twitter") or "composio" in (fs_meta.get("implementation") or "")
+            all_tools.append({
+                "id": tool_id,
+                "tool_id": tool_id,
+                "name": fs_meta.get("name") or tool_id.replace("_", " ").title(),
+                "description": fs_meta.get("description") or f"Ferramenta {tool_id}",
+                "category": "Composio MCP" if is_comp else "Google Native",
+                "type_filter": "Composio" if is_comp else "Google Native",
+                "implementation": "composio" if is_comp else "native",
+                "enabled": fs_meta.get("enabled", True),
+                "permissions": fs_meta.get("permissions") or [f"role:user"],
+                "parameters_schema": fs_meta.get("parameters_schema") or {},
+            })
+
+    all_tools.sort(key=lambda t: t["id"])
+    return JSONResponse(content={"tools": all_tools})
 
 
 @app.get("/admin/tools/{tool_id}")
