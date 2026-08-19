@@ -7,6 +7,7 @@ para suportar o padrao:
   - Auto-preenchimento do webhook quando uma instancia e criada
 """
 import asyncio
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -338,3 +339,46 @@ async def test_register_strips_phone_formatting():
     call_kwargs = mock_write.call_args.args[1]
     assert call_kwargs["owner_phone"] == "5511966830020"
     assert call_kwargs["admin_phones"] == ["5511917389901"]
+
+
+# ---- Front 2d: log estruturado no registrador ----
+
+
+@pytest.mark.asyncio
+async def test_auto_webhook_logs_entry_with_token_match(shared_secret):
+    """Front 2d: o registrador emite log estruturado com token_match
+    ANTES de qualquer validacao, mesmo em chamadas invalidas."""
+    request = MagicMock()
+    request.headers = {}
+    request.body = AsyncMock(return_value=b'{"event":"INSTANCE_CREATE","instance":"X"}')
+    with patch("main.logger") as mock_logger:
+        with pytest.raises(HTTPException):
+            await admin_evolution_auto_webhook(request, webhook_token="wrong-token")
+    # Verificar que o log_info foi chamado com event_name=auto_webhook_registrador_called
+    info_calls = [c for c in mock_logger.info.call_args_list
+                  if c.kwargs.get("extra", {}).get("event_name") == "auto_webhook_registrador_called"]
+    assert len(info_calls) >= 1
+    extra = info_calls[0].kwargs.get("extra", {})
+    assert extra["token_match"] is False  # wrong-token nao bate
+    assert extra["evolution_event"] == "INSTANCE_CREATE"
+    assert extra["evolution_instance"] == "X"
+
+
+@pytest.mark.asyncio
+async def test_auto_webhook_logs_entry_with_token_valid(shared_secret):
+    """Front 2d: token valido -> log com token_match=True."""
+    request = MagicMock()
+    request.headers = {}
+    body_dict = {"event": "INSTANCE_CREATE", "instance": "jennifer-prod"}
+    request.body = AsyncMock(return_value=json.dumps(body_dict).encode("utf-8"))
+    request.json = AsyncMock(return_value=body_dict)
+    with patch("main.logger") as mock_logger:
+        with patch("core.evolution_admin.fetch_instances", AsyncMock(return_value=[])):
+            with patch("agent_loader._get_firestore_client", return_value=None):
+                response = await admin_evolution_auto_webhook(request, webhook_token="tk_test_123")
+    info_calls = [c for c in mock_logger.info.call_args_list
+                  if c.kwargs.get("extra", {}).get("event_name") == "auto_webhook_registrador_called"]
+    assert len(info_calls) >= 1
+    extra = info_calls[0].kwargs.get("extra", {})
+    assert extra["token_match"] is True
+    assert extra["evolution_instance"] == "jennifer-prod"

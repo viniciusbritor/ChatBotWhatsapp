@@ -954,8 +954,39 @@ async def admin_evolution_auto_webhook(request: Request, webhook_token: str = ""
         {"event": "INSTANCE_CREATE", "instance": "X"}
     ou payload completo do Evolution (instanceName, event, etc).
     Idempotente: se ja existe webhook configurado, nao duplica.
+
+    Front 2d: log estruturado de cada chamada para observabilidade
+    (Cloud Logging). Mesmo chamada com token invalido eh logada
+    (com token_match=false) para detectar tentativas de uso.
     """
+    # Front 2d: log de entrada (antes do check de token, para
+    # detectar tentativas de uso com token invalido).
     expected = (os.getenv("AGENT_AUTO_WEBHOOK_SHARED_SECRET") or "").strip()
+    token_match = bool(expected) and (webhook_token == expected)
+    try:
+        body_preview = {}
+        # Le o body so para o log de entrada; se falhar, segue
+        try:
+            body_preview = json.loads((await request.body()).decode("utf-8", errors="replace"))
+        except Exception:
+            body_preview = {"_raw_unparseable": True}
+        logger.info(
+            "auto_webhook_registrador_called",
+            extra={
+                "event_name": "auto_webhook_registrador_called",
+                "token_match": token_match,
+                "evolution_event": body_preview.get("event") or body_preview.get("type") or "",
+                "evolution_instance": (
+                    body_preview.get("instance")
+                    or body_preview.get("instanceName")
+                    or ""
+                ),
+            },
+        )
+    except Exception:
+        # Nao bloquear o fluxo se o log de entrada falhar.
+        pass
+
     if not expected or webhook_token != expected:
         # Esconde a existencia do endpoint sem revelar detalhes.
         raise HTTPException(status_code=404, detail="not_found")
