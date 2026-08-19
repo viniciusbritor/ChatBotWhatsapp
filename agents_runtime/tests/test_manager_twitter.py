@@ -159,12 +159,6 @@ def test_manager_twitter_prompt_exists():
 def test_expected_twitter_tools_match_dispatcher():
     """REGRESSAO: os 7 langchain tools em deepagent_layer/tools.py devem ser os esperados."""
     from deepagent_layer import tools as _tools_module_inner
-    from langchain_core.tools import tool
-
-    @tool
-    def dummy_a(): pass
-    @tool
-    def dummy_b(): pass
 
     built = _tools_module_inner._build_twitter_tools()
     names = set()

@@ -3,8 +3,14 @@
 .gitignore
 **/node_modules/
 **/.venv/
+**/.venv-c/
 **/__pycache__/
 **/.pytest_cache/
+**/.mypy_cache/
 **/.coverage
 **/dist/
 **/whisper_models/
+**/portal/
+**/secrets/
+**/data/
+**/firestore.indexes.json
