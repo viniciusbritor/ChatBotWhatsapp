@@ -144,39 +144,57 @@ async def test_auto_webhook_skips_unknown_instance(shared_secret):
 
 @pytest.mark.asyncio
 async def test_auto_webhook_creates_webhook_for_known_instance(shared_secret):
-    """INSTANCE_CREATE de instancia conhecida deve setar webhook dedicada via /relay."""
+    """INSTANCE_CREATE de instancia conhecida deve setar webhook dedicada via /relay
+    e criar o doc em whatsapp_accounts (Front 1c)."""
     request = _request({"event": "INSTANCE_CREATE", "instance": "Jennifer-prod"})
+    fake_db = MagicMock()
+    fake_collection = MagicMock()
+    fake_doc = MagicMock()
+    fake_db.collection.return_value = fake_collection
+    fake_collection.document.return_value = fake_doc
     with patch("core.evolution_admin.fetch_instances", AsyncMock(return_value=[
         {"name": "Jennifer-prod"},
     ])):
         with patch("core.evolution_admin.set_webhook", AsyncMock(return_value={"set": True})) as mock_set:
-            response = await admin_evolution_auto_webhook(request, webhook_token="tk_test_123")
+            with patch("agent_loader._get_firestore_client", return_value=fake_db):
+                response = await admin_evolution_auto_webhook(request, webhook_token="tk_test_123")
     import json as _json
     body = _json.loads(response.body)
     assert body["status"] == "created"
     assert body["instance"] == "Jennifer-prod"
     assert body["webhook_url"].endswith("/relay/jennifer-prod")
+    assert body["firestore_linked"] is True
     mock_set.assert_called_once()
     call_args = mock_set.call_args
     assert call_args.args[0] == "Jennifer-prod"
     assert call_args.args[1].endswith("/relay/jennifer-prod")
+    # Firestore: doc.set(merge=True) foi chamado com os dados minimos
+    fake_collection.document.assert_called_with("jennifer-prod")
+    set_call = fake_doc.set.call_args
+    assert set_call.kwargs.get("merge") is True
+    assert set_call.args[0]["name"] == "Jennifer-prod"
+    assert set_call.args[0]["instance"] == "Jennifer-prod"
+    assert set_call.args[0]["status"] == "pending_owner"
 
 
 @pytest.mark.asyncio
 async def test_auto_webhook_creates_webhook_case_insensitive(shared_secret):
     """Comparacao de instancia deve ser case-insensitive (tolerar variacoes)."""
     request = _request({"event": "INSTANCE_CREATE", "instance": "jennifer-prod"})
+    fake_db = MagicMock()
     with patch("core.evolution_admin.fetch_instances", AsyncMock(return_value=[
         {"name": "Jennifer-prod"},
     ])):
         with patch("core.evolution_admin.set_webhook", AsyncMock(return_value={"set": True})):
-            response = await admin_evolution_auto_webhook(request, webhook_token="tk_test_123")
+            with patch("agent_loader._get_firestore_client", return_value=fake_db):
+                response = await admin_evolution_auto_webhook(request, webhook_token="tk_test_123")
     import json as _json
     body = _json.loads(response.body)
     assert body["status"] == "created"
     assert body["instance"] == "jennifer-prod"  # lowercase passado
     # URL usa canonical name (casing da Evolution)
     assert body["webhook_url"].endswith("/relay/jennifer-prod")
+    assert body["firestore_linked"] is True
 
 
 @pytest.mark.asyncio
@@ -199,15 +217,18 @@ async def test_auto_webhook_missing_instance_returns_422(shared_secret):
 async def test_auto_webhook_accepts_instanceName_payload(shared_secret):
     """Evolution v2 as vezes envia 'instanceName' em vez de 'instance'."""
     request = _request({"event": "INSTANCE_CREATE", "instanceName": "jennifer"})
+    fake_db = MagicMock()
     with patch("core.evolution_admin.fetch_instances", AsyncMock(return_value=[
         {"name": "jennifer"},
     ])):
         with patch("core.evolution_admin.set_webhook", AsyncMock(return_value={"set": True})):
-            response = await admin_evolution_auto_webhook(request, webhook_token="tk_test_123")
+            with patch("agent_loader._get_firestore_client", return_value=fake_db):
+                response = await admin_evolution_auto_webhook(request, webhook_token="tk_test_123")
     import json as _json
     body = _json.loads(response.body)
     assert body["status"] == "created"
     assert body["instance"] == "jennifer"
+    assert body["firestore_linked"] is True
 # ---- Front 1b: /admin/instances/{instance_id}/register ----
 
 

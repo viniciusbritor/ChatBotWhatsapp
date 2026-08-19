@@ -1012,11 +1012,39 @@ async def admin_evolution_auto_webhook(request: Request, webhook_token: str = ""
             "detail": result,
         }, status_code=502)
 
-    logger.info("auto_webhook_set instance=%s url=%s", instance_name, relay_url)
+    # Front 1c: auto-link no Firestore (whatsapp_accounts). Cria o doc
+    # com owner_phone=None e status="pending_owner" se ainda nao
+    # existir. Isso garante que a whitelist (Front 1a) nao bloqueia
+    # mensagens de uma instancia recem-criada pelo auto-webhook. O
+    # admin completa com POST /admin/instances/{instance}/register
+    # depois. merge=True preserva google_oauth_token/composio_*.
+    firestore_linked = False
+    try:
+        from agent_loader import _get_firestore_client
+        db = _get_firestore_client()
+        if db is not None:
+            db.collection("whatsapp_accounts").document(canonical_name.lower()).set(
+                {
+                    "name": canonical_name,
+                    "instance": canonical_name,
+                    "status": "pending_owner",
+                    "webhook_url": relay_url,
+                    "updated_at": now_brt().isoformat(),
+                },
+                merge=True,
+            )
+            invalidate_instance_registry_cache(canonical_name)
+            invalidate_instance_registry_cache(canonical_name.lower())
+            firestore_linked = True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("auto_webhook_firestore_link_failed instance=%s exc=%s", canonical_name, exc)
+
+    logger.info("auto_webhook_set instance=%s url=%s firestore=%s", instance_name, relay_url, firestore_linked)
     return JSONResponse(content={
         "status": "created",
         "instance": instance_name,
         "webhook_url": relay_url,
+        "firestore_linked": firestore_linked,
     })
 
 
