@@ -2954,7 +2954,7 @@ async def onboarding_conectar(phone: str, request: Request, token: Optional[str]
             <text x="0" y="24" font-family="system-ui, sans-serif" font-weight="900" font-size="24" fill="#0058be" letter-spacing="-0.5">COHERENCE</text>
           </svg>
         </div>
-        <h1 class="text-2xl font-bold text-slate-900 tracking-tight">Secretária Pessoal IA</h1>
+        <h1 class="text-2xl font-bold text-slate-900 tracking-tight">Jennifer - Conectar Contas</h1>
         <p class="text-sm text-slate-600 mt-1">Olá, <strong class="text-slate-900">""" + user_name + """</strong> (+""" + canonical_phone + """)</p>
         <p class="text-xs text-slate-500 mt-0.5">Autorize suas contas para liberar o assistente no WhatsApp.</p>
       </div>
@@ -3007,7 +3007,7 @@ async def onboarding_conectar(phone: str, request: Request, token: Optional[str]
           </div>
           <button onclick="conectarComposio()" id="composio-btn"
             class="w-full bg-[#0058be] hover:bg-[#00479e] active:scale-[0.99] text-white font-semibold py-3.5 px-6 rounded-xl shadow-xs transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed">
-            Conectar Todos os Apps
+            Conectar Apps de Trabalho
           </button>
           <div id="comp-status" class="mt-3"></div>
         </div>
