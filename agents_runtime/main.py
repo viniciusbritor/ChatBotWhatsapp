@@ -25,6 +25,7 @@ from core.auth import auth_middleware
 from core.delay_calculator import calculate_delay_ms
 from core.logging import configure_logging
 from core.masker import mask_pii
+from core.owner import invalidate_instance_registry_cache, is_instance_registered
 from core.timezone import now_brt
 from core import metrics
 from agent_loader import start_loader, stop_loader, list_agents, list_skills, list_tools, get_agent
@@ -352,6 +353,22 @@ async def evolution_webhook(request: Request, instance_path: str = ""):
             extra={"event_name": "webhook_invalid_payload", "payload_type": type(body).__name__},
         )
         raise HTTPException(status_code=422, detail="payload must be an object")
+
+    # Front 1a: ignorar webhooks de instancias nao registradas em
+    # whatsapp_accounts (defesa contra instancias "fantasma" criadas
+    # por engano via painel - vide incidente Vinicius 18/08/2026).
+    payload_instance = (body.get("instance") or "").strip()
+    if payload_instance and not is_instance_registered(payload_instance):
+        logger.info(
+            "webhook_unknown_instance",
+            extra={
+                "event_name": "webhook_unknown_instance",
+                "evolution_instance": payload_instance,
+                "evolution_event": body.get("event") or body.get("type") or "",
+                "latency_ms": round((time.monotonic() - webhook_started) * 1000, 2),
+            },
+        )
+        return JSONResponse(content={"status": "ignored", "reason": "instance_not_registered"})
 
     envelope = extract_envelope(body)
     if envelope is None:

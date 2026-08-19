@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass
 from typing import Dict, Iterable, Optional
 
@@ -156,3 +157,73 @@ def deny_if_not_owner(resolution: Optional[OwnerResolution], inbound_phone: str,
         "instance": resolution.instance if resolution else "",
         "phone": normalize_phone(inbound_phone),
     }
+
+
+# ---- Whitelist de instancias registradas (Front 1a) ----
+
+# Cache in-process: instance_name -> (timestamp, exists_bool)
+_INSTANCE_REGISTRY_CACHE: Dict[str, tuple] = {}
+_INSTANCE_REGISTRY_TTL_SEC = 30.0
+
+
+def _fetch_instance_registry(instance_name: str) -> bool:
+    """Look up ``whatsapp_accounts`` por ``instance`` (case-insensitive).
+
+    Cache in-process de 30s para reduzir leituras Firestore em rajadas
+    de webhook. ``_get_firestore_client()`` ja trata Firestore indisponivel
+    retornando None - nesse caso retornamos True (fail-open) para nao
+    bloquear instancias legadas durante incidentes de Firestore.
+
+    Caso real (confirmado em 18/08/2026): o doc no Firestore tem
+    ``id="Jennifer"`` e ``instance="Jennifer"`` (mesmo casing). Mas o
+    payload do webhook pode chegar com ``instance="jennifer"``
+    (lowercase, normalizado pelo extract_envelope). A query do Firestore
+    e case-sensitive, entao fazemos a busca de forma robusta:
+    1. Tenta lookup por doc ID com o nome normalizado.
+    2. Tenta lookup por doc ID com o nome exato do payload.
+    3. Tenta query pelo campo ``instance`` (case-insensitive no cliente).
+    """
+    norm = (instance_name or "").strip()
+    if not norm:
+        return False
+    cached = _INSTANCE_REGISTRY_CACHE.get(norm)
+    if cached and (time.time() - cached[0]) < _INSTANCE_REGISTRY_TTL_SEC:
+        return cached[1]
+    db = _get_firestore_client()
+    exists = True  # fail-open por padrao
+    if db is not None:
+        try:
+            # 1) Doc ID com nome normalizado (lowercase)
+            if db.collection(WHATSAPP_ACCOUNTS_COLLECTION).document(norm.lower()).get().exists:
+                exists = True
+            # 2) Doc ID com nome exato (preserva casing original)
+            elif db.collection(WHATSAPP_ACCOUNTS_COLLECTION).document(norm).get().exists:
+                exists = True
+            # 3) Query pelo campo "instance" com case-insensitive no cliente
+            else:
+                exists = any(
+                    (d.to_dict() or {}).get("instance", "").lower() == norm.lower()
+                    for d in db.collection(WHATSAPP_ACCOUNTS_COLLECTION).limit(50).stream()
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("instance_registry_lookup_failed instance=%s exc=%s", norm, exc)
+            exists = True  # fail-open
+    _INSTANCE_REGISTRY_CACHE[norm] = (time.time(), exists)
+    return exists
+
+
+def is_instance_registered(instance_name: str) -> bool:
+    """True se a instancia Evolution esta cadastrada em whatsapp_accounts.
+
+    Usado pelo ``evolution_webhook`` (Front 1a) para ignorar webhooks
+    de instancias nao registradas (ex.: criadas por engano via painel).
+    """
+    return _fetch_instance_registry(instance_name)
+
+
+def invalidate_instance_registry_cache(instance_name: str = "") -> None:
+    """Limpa o cache de registry. Util para testes e apos POST /admin/instances/.../register."""
+    if instance_name:
+        _INSTANCE_REGISTRY_CACHE.pop(instance_name, None)
+    else:
+        _INSTANCE_REGISTRY_CACHE.clear()
