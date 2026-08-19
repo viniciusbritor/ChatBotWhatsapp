@@ -55,6 +55,8 @@ def _build_langchain_tools_for(manager_id: str) -> List[Any]:
         return _build_tasks_tools()
     if manager_id == "manager-maps":
         return _build_maps_tools()
+    if manager_id == "manager-twitter":
+        return _build_twitter_tools()
     if manager_id == "manager-jennifier":
         # Agente conversacional geral: nao tem tools. Retorna lista vazia
         # explicitamente para evitar o warning 'unknown manager_id'.
@@ -1180,3 +1182,158 @@ def get_tools_for_manager(manager_id: str) -> List[Any]:
     except Exception as exc:
         logger.exception("failed to build tools for %s: %s", manager_id, exc)
         return []
+
+
+def _build_twitter_tools() -> List[Any]:
+    """LangChain tools para Twitter/X via Composio (manager-twitter).
+
+    GUARDRAIL §0.8 (18/08/2026): manager dedicado para X/Twitter. Tools wrapped:
+    - twitter_me_profile: TWITTER_USER_LOOKUP_ME
+    - twitter_lookup_users: TWITTER_USER_LOOKUP_BY_USERNAMES
+    - twitter_search_recent: TWITTER_RECENT_SEARCH
+    - twitter_search_recent_counts: TWITTER_SEARCH_RECENT_COUNTS (trends-by-volume)
+    - twitter_lookup_posts: TWITTER_POST_LOOKUP_BY_POST_IDS
+    - twitter_create_post: TWITTER_CREATION_OF_A_POST (com confirmacao previa)
+    - twitter_delete_post: TWITTER_POST_DELETE_BY_POST_ID (DESTRUCTIVE)
+
+    NAO inclui upload_media direto aqui — para video/GIF grandes, usar
+    initialize_media_upload + append_media_upload + get_media_upload_status
+    (chunked) via system_prompt do manager.
+    """
+    from tools import twitter_composio
+
+    @tool
+    async def twitter_me_profile(phone: str) -> Dict[str, Any]:
+        """Retorna o perfil X do usuario autenticado.
+
+        Args:
+            phone: Telefone do usuario (per-user Composio user_id).
+
+        Returns:
+            Dict com id, name, username, description, public_metrics (followers, following, tweets).
+        """
+        return await twitter_composio.me_profile(phone=phone)
+
+    @tool
+    async def twitter_lookup_users(
+        usernames: list,
+        phone: str = "",
+    ) -> Dict[str, Any]:
+        """Busca perfis publicos do X por username (sem @).
+
+        Args:
+            usernames: Lista de 1 a 100 usernames. Ex: ["elonmusk", "sundarpichai"].
+            phone: Telefone do usuario.
+        """
+        return await twitter_composio.lookup_users(usernames=usernames, phone=phone)
+
+    @tool
+    async def twitter_search_recent(
+        query: str,
+        max_results: int = 10,
+        start_time: str = "",
+        end_time: str = "",
+        phone: str = "",
+    ) -> Dict[str, Any]:
+        """Busca tweets dos ultimos 7 dias por query (X search syntax).
+
+        Operators uteis: from:user, to:user, lang:pt, -is:retweet,
+        -is:reply, has:media, hashtag.
+
+        Args:
+            query: Query (max 512 chars). Ex: 'from:elonmusk -is:retweet'.
+            max_results: 10-100 (default 10).
+            start_time: ISO 8601 (opcional, default: 7d atras).
+            end_time: ISO 8601 (opcional).
+            phone: Telefone do usuario.
+        """
+        return await twitter_composio.search_recent(
+            query=query,
+            max_results=max_results,
+            start_time=start_time or None,
+            end_time=end_time or None,
+            phone=phone,
+        )
+
+    @tool
+    async def twitter_search_recent_counts(
+        query: str,
+        granularity: str = "hour",
+        start_time: str = "",
+        end_time: str = "",
+        phone: str = "",
+    ) -> Dict[str, Any]:
+        """Conta tweets matching query por bucket de tempo.
+
+        Usado pelo manager-twitter para trends-by-volume:
+        comparar count(ultimas 6h) vs count(6h anteriores) = delta.
+
+        Args:
+            query: Query de busca.
+            granularity: 'minute' | 'hour' | 'day' (default 'hour').
+            start_time: ISO 8601 (opcional).
+            end_time: ISO 8601 (opcional).
+            phone: Telefone do usuario.
+        """
+        return await twitter_composio.search_recent_counts(
+            query=query,
+            granularity=granularity,
+            start_time=start_time or None,
+            end_time=end_time or None,
+            phone=phone,
+        )
+
+    @tool
+    async def twitter_lookup_posts(
+        post_ids: list,
+        phone: str = "",
+    ) -> Dict[str, Any]:
+        """Busca ate 100 tweets por ID.
+
+        Args:
+            post_ids: Lista de IDs (max 100). Ex: ['1234567890'].
+            phone: Telefone do usuario.
+        """
+        return await twitter_composio.lookup_posts(post_ids=post_ids, phone=phone)
+
+    @tool
+    async def twitter_create_post(
+        text: str,
+        phone: str = "",
+    ) -> Dict[str, Any]:
+        """Cria um tweet do usuario autenticado.
+
+        ANTES DE CHAMAR: confirme com o usuario o texto EXATO (a tool posta
+        imediatamente, sem rascunho). NAO exceda 280 chars (X standard).
+
+        Args:
+            text: Texto do tweet (max 280 chars standard; 25000 X Premium).
+            phone: Telefone do usuario.
+        """
+        return await twitter_composio.create_post(text=text, phone=phone)
+
+    @tool
+    async def twitter_delete_post(
+        post_id: str,
+        phone: str = "",
+    ) -> Dict[str, Any]:
+        """Deleta um tweet do usuario autenticado (ACAO IRREVERSIVEL).
+
+        ANTES DE CHAMAR: confirme DUPLO com o usuario (acao destrutiva).
+        Esta tool NAO pode ser desfeita.
+
+        Args:
+            post_id: ID do tweet a deletar.
+            phone: Telefone do usuario.
+        """
+        return await twitter_composio.delete_post(post_id=post_id, phone=phone)
+
+    return [
+        twitter_me_profile,
+        twitter_lookup_users,
+        twitter_search_recent,
+        twitter_search_recent_counts,
+        twitter_lookup_posts,
+        twitter_create_post,
+        twitter_delete_post,
+    ]

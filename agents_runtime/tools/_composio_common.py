@@ -40,6 +40,9 @@ TOOLKIT_VERSIONS: Dict[str, str] = {
     "one_drive": "20260804_00",
     "googlemeet": "20250901_00",
     "microsoft_teams": "20250901_00",
+    # Twitter/X — adicionado em 18/08/2026. Verificar versao atualizada
+    # no painel Composio antes de promover.
+    "twitter": "20260818_00",
 }
 
 _CACHED_KEY: Optional[str] = None

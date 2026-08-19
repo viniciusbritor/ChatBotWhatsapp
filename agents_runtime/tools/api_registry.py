@@ -55,6 +55,12 @@ ALLOWED_TOOLKITS: Set[str] = {
     "googlemeet",
     "microsoft_teams",
     "msteams",
+    # Twitter/X (Composio) — adicionado em 18/08/2026.
+    # ANTES de adicionar, confirmar que o toolkit esta conectado na
+    # organizacao Composio do COMPOSIO_API_KEY do orchestrator (panel
+    # web app.composio.dev). SENAO, o toolkit nao sera descoberto e o
+    # log "api_registry_discovered" continuara mostrando composio=N.
+    "twitter",
 }
 
 
