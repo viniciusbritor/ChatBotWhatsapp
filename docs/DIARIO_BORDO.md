@@ -1,3 +1,11 @@
+## 19/08/2026 (13:35 BRT) — Simulação End-to-End de Onboarding no WhatsApp (Vinicius)
+
+### 1. Disparo de Simulação Real via Evolution API v2.3.7
+- Executado teste e simulação de envio de onboarding real para o número do proprietário master `+55 11 96683-0020` (Vinicius Brito Rocha) a partir da instância `Jennifer`.
+- Gerado Magic Link assinado (HMAC-SHA256, validade 7 dias, payload `role: agent_user`, `sub: 5511966830020`).
+- Mensagem enviada com sucesso no WhatsApp: ID `3EB01F35511FB3F51A1E89`, formatada em texto puro, sem cartões ou imagens pesadas, contendo o link exclusivo de conexões e garantia explícita de preservação de credenciais pré-existentes.
+- Script de automação e teste criado em `agents_runtime/scratch/simulate_onboarding_vinicius.py`.
+
 ## 19/08/2026 (12:25 BRT) — Inclusão da Logo Coherence no Portal Agents & Validação Total da Esteira CI/CD
 
 ### 1. Inclusão da Logo Coherence no Portal Agents
