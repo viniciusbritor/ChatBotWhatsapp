@@ -1,5 +1,6 @@
 import React from 'react';
 import { NavigationTab, CurrentUser } from '../types';
+import coherenceLogo from '../../assets/logo-coherence.png';
 
 interface SidebarProps {
   activeTab: NavigationTab;
@@ -56,16 +57,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
           mobileOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full'
         }`}
       >
-        {/* Brand Header */}
+        {/* Brand Header with Coherence Logo */}
         <div className="px-2 mb-2 flex items-center justify-between">
-          <div>
-            <h1 className="font-semibold text-[22px] tracking-tight text-[#0058be] dark:text-[#adc6ff] flex items-center gap-2">
-              <span className="material-symbols-outlined text-[26px]">tune</span>
-              Control Plane
-            </h1>
-            <p className="text-[12px] text-[#424754] dark:text-[#c2c6d6] font-medium tracking-wide mt-0.5">
-              Management Console
-            </p>
+          <div className="flex items-center gap-3">
+            <img
+              src={coherenceLogo}
+              alt="Coherence"
+              className="h-6 object-contain"
+            />
+            <div className="w-px h-5 bg-[#c2c6d6]/50 dark:bg-[#424754]" />
+            <div>
+              <p className="text-[12px] font-bold text-[#0058be] dark:text-[#adc6ff] tracking-tight leading-tight">
+                Control Plane
+              </p>
+              <p className="text-[10px] text-[#727785] dark:text-[#c2c6d6] font-medium tracking-wide">
+                Management Console
+              </p>
+            </div>
           </div>
           <button
             onClick={() => setMobileOpen(false)}
