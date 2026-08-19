@@ -102,14 +102,103 @@ async def composio_call(
     arguments: Dict[str, Any],
     user_id: str = "",
 ) -> Dict[str, Any]:
-    """Chama Composio SDK e retorna o data real extraido.
+    """Chama Composio via REST API direta (workaround 18/08/2026) com SDK fallback.
 
     Esta funcao eh o helper compartilhado por TODOS os tools/*_composio.py.
     Cada tool especifica apenas constroi os arguments e passa pra ca.
+
+    WORKAROUND: o SDK composio (versao 0.10.10 / composio-client 1.27.0) chama
+    o endpoint /api/v3/tools/execute que retorna envelopes inconsistentes
+    para toolkits Custom (Twitter no plano Hobby). A REST API direta retorna
+    o erro real (sem mascaramento) e nos permite detectar o paywall do X API.
+
+    Mantem o SDK como fallback se httpx falhar.
     """
+    api_key = get_composio_api_key()
+
+    # Caminho primario: REST API direta
+    try:
+        import httpx
+
+        def _execute_rest() -> Dict[str, Any]:
+            with httpx.Client(timeout=60.0) as client:
+                resp = client.post(
+                    f"https://backend.composio.dev/api/v3/tools/execute/{tool_slug}",
+                    headers={
+                        "X-API-Key": api_key,
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                    },
+                    json={"user_id": user_id, "arguments": arguments},
+                )
+            try:
+                return resp.json()
+            except Exception:
+                return {
+                    "successful": False,
+                    "status_code": resp.status_code,
+                    "data": {"error": resp.text[:500]},
+                    "error": f"http_{resp.status_code}",
+                }
+
+        result = await asyncio.to_thread(_execute_rest)
+        # Extrair HTTP error code
+        http_status = result.get("status_code")
+        if isinstance(http_status, int) and http_status >= 400:
+            data = result.get("data") or {}
+            err_msg = (
+                data.get("error")
+                or data.get("http_error")
+                or data.get("message")
+                or result.get("error")
+                or "http_error"
+            )
+            logger.warning(
+                "Composio REST call failed: http=%s tool=%s err=%s",
+                http_status, tool_slug, str(err_msg)[:200],
+            )
+            return _error_envelope(f"composio_http_{http_status}: {str(err_msg)[:200]}")
+
+        # Detectar falhas em qualquer nivel do envelope (REST API Composio retorna
+        # tanto outer.successful=False quanto data.successful=False para falhas do tool).
+        if result.get("successful") is False:
+            # Outer level failure (ex: action execute nao existe, rate limit do Composio)
+            err_data = result.get("data") or {}
+            err = (
+                err_data.get("error")
+                or err_data.get("message")
+                or err_data.get("http_error")
+                or result.get("error")
+                or "composio_outer_failure"
+            )
+            logger.warning(
+                "Composio outer failure for tool %s: %s",
+                tool_slug, str(err)[:200],
+            )
+            return _error_envelope(str(err)[:500])
+
+        data = result.get("data")
+        if isinstance(data, dict) and data.get("successful") is False:
+            # Tool executado mas X API retornou 401/403 — propagar o erro real
+            err = data.get("error") or data.get("message") or "tool_returned_failure"
+            logger.warning(
+                "Tool %s returned failure: %s",
+                tool_slug, str(err)[:200],
+            )
+            return _error_envelope(str(err)[:500])
+        return result
+    except ImportError:
+        logger.warning("httpx_missing_falling_back_to_sdk")
+    except Exception as exc:
+        logger.warning(
+            "Composio REST call failed: %s tool=%s — falling back to SDK",
+            exc, tool_slug,
+        )
+
+    # Fallback: SDK (mesmo comportamento de antes)
     try:
         from composio import Composio
-        client = Composio(api_key=get_composio_api_key(), toolkit_versions=TOOLKIT_VERSIONS)
+        client = Composio(api_key=api_key, toolkit_versions=TOOLKIT_VERSIONS)
     except ImportError:
         return _error_envelope("composio_sdk_missing")
     except Exception as exc:
@@ -117,7 +206,6 @@ async def composio_call(
         return _error_envelope(f"composio_client_init_failed: {exc}")
 
     try:
-        # SDK 0.x e sync — chamamos via asyncio.to_thread para nao bloquear
         result = await asyncio.to_thread(
             client.tools.execute,
             slug=tool_slug,
@@ -126,5 +214,5 @@ async def composio_call(
         )
         return _extract_composio_data(result)
     except Exception as exc:
-        logger.warning("Composio call failed: %s tool=%s", exc, tool_slug)
+        logger.warning("Composio SDK call failed: %s tool=%s", exc, tool_slug)
         return _error_envelope(str(exc)[:200])

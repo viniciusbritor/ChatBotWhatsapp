@@ -133,24 +133,105 @@ class ApiRegistry:
             logger.warning("google_apis_discovery_failed: %s", exc)
 
     async def _discover_composio_toolkits(self) -> None:
-        """Descobre toolkits Composio via SDK."""
+        """Descobre toolkits Composio via REST API direta (workaround 18/08/2026).
+
+        BUG HISTORICO: client.auth_configs.list() do SDK composio FILTRA
+        auth_configs Custom (is_composio_managed=False). Como Twitter no
+        plano Hobby sempre nasce Custom, o SDK nao retornava Twitter,
+        causando "Jennifer alucinando" no primeiro deploy.
+
+        WORKAROUND: chamar GET /api/v3/auth_configs diretamente via httpx,
+        que NAO filtra Custom. Mantem SDK como fallback se httpx falhar.
+        """
+        from tools._composio_common import TOOLKIT_VERSIONS
+        api_key = await asyncio.to_thread(self._get_composio_api_key)
+        if not api_key:
+            logger.warning("composio_api_key_missing_skipping_discovery")
+            return
+
+        # Caminho primario: REST API direta (httpx)
         try:
-            from tools._composio_common import TOOLKIT_VERSIONS
-            api_key = await asyncio.to_thread(self._get_composio_api_key)
-            if not api_key:
-                logger.warning("composio_api_key_missing_skipping_discovery")
-                return
-            from composio import Composio
-            client = Composio(api_key=api_key)
-            configs = await asyncio.to_thread(client.auth_configs.list)
-            for cfg in configs.items:
-                slug = cfg.toolkit.slug
-                module_path = f"tools.{slug.replace('-', '_').replace(' ', '_')}_composio"
+            import httpx
+
+            def _fetch_rest() -> list:
+                with httpx.Client(timeout=30.0) as client:
+                    resp = client.get(
+                        "https://backend.composio.dev/api/v3/auth_configs",
+                        headers={
+                            "X-API-Key": api_key,
+                            "Accept": "application/json",
+                        },
+                    )
+                if resp.status_code != 200:
+                    raise RuntimeError(
+                        f"composio_rest_http_{resp.status_code}: {resp.text[:200]}"
+                    )
+                body = resp.json()
+                items = body.get("items", [])
+                if not isinstance(items, list):
+                    raise RuntimeError(
+                        f"composio_rest_invalid_items_type: {type(items).__name__}"
+                    )
+                return items
+
+            raw_items = await asyncio.to_thread(_fetch_rest)
+            for cfg in raw_items:
+                toolkit = cfg.get("toolkit") or {}
+                slug = toolkit.get("slug") or cfg.get("toolkit_slug")
+                if not slug:
+                    continue
+                name = cfg.get("name") or slug
+                module_path = (
+                    f"tools.{slug.replace('-', '_').replace(' ', '_')}_composio"
+                )
                 self._composio_toolkits[slug] = ApiMeta(
                     slug=slug,
-                    name=getattr(cfg, "name", slug),
+                    name=name,
                     category="composio",
-                    description=f"{getattr(cfg, 'name', slug)} via Composio",
+                    description=f"{name} via Composio",
+                    auth_type="composio_user_id",
+                    module_path=module_path,
+                    scopes=[],
+                    version=TOOLKIT_VERSIONS.get(slug, "latest"),
+                )
+            return  # sucesso
+        except ImportError:
+            logger.warning("httpx_missing_falling_back_to_sdk")
+        except Exception as exc:
+            logger.warning(
+                "composio_rest_discovery_failed_falling_back_to_sdk: %s", exc
+            )
+
+        # Fallback: SDK (pode filtrar Custom, mas funciona para Managed)
+        try:
+            from composio import Composio
+
+            def _fetch_sdk() -> list:
+                client = Composio(api_key=api_key)
+                configs = client.auth_configs.list()
+                return [
+                    {
+                        "toolkit": {"slug": cfg.toolkit.slug},
+                        "name": getattr(cfg, "name", cfg.toolkit.slug),
+                    }
+                    for cfg in configs.items
+                ]
+
+            raw_items = await asyncio.to_thread(_fetch_sdk)
+            for cfg in raw_items:
+                toolkit = cfg.get("toolkit") or {}
+                slug = toolkit.get("slug") or cfg.get("toolkit_slug")
+                if not slug:
+                    continue
+                name = cfg.get("name") or slug
+                module_path = (
+                    f"tools.{slug.replace('-', '_').replace(' ', '_')}_composio"
+                )
+                self._composio_toolkits[slug] = ApiMeta(
+                    slug=slug,
+                    name=name,
+                    category="composio",
+                    description=f"{name} via Composio",
                     auth_type="composio_user_id",
                     module_path=module_path,
                     scopes=[],
@@ -159,7 +240,7 @@ class ApiRegistry:
         except ImportError:
             logger.warning("composio_sdk_missing_skipping_discovery")
         except Exception as exc:
-            logger.warning("composio_discovery_failed: %s", exc)
+            logger.warning("composio_sdk_discovery_failed: %s", exc)
 
     @staticmethod
     def _get_composio_api_key() -> str:

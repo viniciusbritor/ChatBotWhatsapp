@@ -13,7 +13,8 @@ Rodar com: pytest tests/test_manager_twitter.py -v
 import os
 import sys
 import pytest
-from unittest.mock import AsyncMock, patch
+import json
+from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -181,3 +182,206 @@ def test_no_twitter_in_legacy_allowed():
     from tools import api_registry as _ar
     count = sum(1 for s in _ar.ALLOWED_TOOLKITS if s == "twitter")
     assert count == 1, f"'twitter' aparece {count}x em ALLOWED_TOOLKITS (esperado 1)"
+
+
+# =============================================================================
+# Tests do workaround REST API (workaround 18/08/2026)
+# =============================================================================
+
+def test_api_registry_module_has_httpx_fallback_constant():
+    """GUARDRAIL (workaround 18/08/2026): api_registry deve ter rota de fallback
+    SDK quando REST API falha. Verifica que o codigo compila e tem estrutura."""
+    from tools import api_registry as _ar
+
+    # Verifica que _discover_composio_toolkits tem um fallback
+    import inspect
+    src = inspect.getsource(_ar.ApiRegistry._discover_composio_toolkits)
+    assert "httpx" in src, "Codigo de _discover_composio_toolkits nao usa httpx"
+    assert "fall" in src.lower() or "else" in src, "Codigo nao tem fallback"
+
+
+def test_composio_common_module_uses_httpx_in_helper():
+    """GUARDRAIL: composio_call (helper compartilhado) deve usar httpx."""
+    from tools import _composio_common as _cc
+    import inspect
+    src = inspect.getsource(_cc.composio_call)
+    assert "httpx" in src, "composio_call nao usa httpx"
+    assert "fall" in src.lower() or "else" in src, "composio_call nao tem fallback SDK"
+    assert "POST" in src.upper() or "post(" in src, "composio_call nao faz POST"
+
+
+@pytest.mark.asyncio
+async def test_discover_composio_reads_from_httpx_with_valid_response():
+    """GUARDRAIL: _discover_composio_toolkits deve conseguir ler
+    auth configs Custom (twitter) via REST direta."""
+
+    sample_items = [
+        {
+            "id": "ac_yiUL",
+            "name": "twitter",
+            "auth_scheme": "OAUTH2",
+            "is_composio_managed": False,
+            "status": "ENABLED",
+            "toolkit": {"slug": "twitter"},
+            "no_of_connections": 1,
+        },
+        {
+            "id": "ac_Mr6py",
+            "name": "Linkedin",
+            "auth_scheme": "OAUTH2",
+            "is_composio_managed": True,
+            "status": "ENABLED",
+            "toolkit": {"slug": "linkedin"},
+            "no_of_connections": 2,
+        },
+    ]
+
+    from tools.api_registry import ApiRegistry
+
+    registry = ApiRegistry()
+    registry._composio_toolkits = {}
+
+    # Mock asyncio.to_thread para retornar a lista diretamente
+    # (simula uma chamada REST que ja foi executada)
+    with patch(
+        "tools.api_registry.asyncio.to_thread",
+        new=AsyncMock(return_value=sample_items),
+    ):
+        await registry._discover_composio_toolkits()
+
+    slugs = set(registry._composio_toolkits.keys())
+    assert "twitter" in slugs, (
+        f"Twitter NAO foi descoberto (workaround falhou). Descobertos: {slugs}"
+    )
+    assert "linkedin" in slugs, f"Linkedin NAO descoberto: {slugs}"
+
+
+@pytest.mark.asyncio
+async def test_composio_call_parses_successful_response():
+    """composio_call deve retornar data bem-formedado."""
+    from tools import _composio_common as _cc
+
+    success_response = {
+        "successful": True,
+        "data": {"id": "12345", "username": "vinicius"},
+    }
+
+    fake_response = MagicMock()
+    fake_response.status_code = 200
+    fake_response.json.return_value = success_response
+    fake_response.text = '{"success": true}'
+
+    fake_client = MagicMock()
+    fake_client.__enter__ = MagicMock(return_value=fake_client)
+    fake_client.__exit__ = MagicMock(return_value=False)
+    fake_client.post = MagicMock(return_value=fake_response)
+
+    with patch.object(_cc, "get_composio_api_key", return_value="test_key"):
+        with patch("httpx.Client", return_value=fake_client):
+            result = await _cc.composio_call(
+                "TWITTER_USER_LOOKUP_ME", {"x": 1}, user_id="+5511966830020"
+            )
+
+    assert result == success_response, (
+        f"Esperava response cru. Recebido: {result}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_composio_call_returns_envelope_on_x_api_paywall_403():
+    """composio_call deve retornar error envelope quando X API recusa com 403
+    (paywall: 'Client must use keys attached to a Project')."""
+    from tools import _composio_common as _cc
+
+    paywall_body = {
+        "successful": False,
+        "data": {
+            "http_error": "403 Client Error: Forbidden for url: https://api.x.com/2/users/me",
+            "status_code": 403,
+            "message": '{"title":"Client Forbidden","detail":"You must use keys from a developer App attached to a Project."}',
+        },
+    }
+
+    fake_response = MagicMock()
+    fake_response.status_code = 200  # Composio retornou 200, mas data é falha
+    fake_response.json.return_value = paywall_body
+    fake_response.text = '{"paywall"}'
+
+    fake_client = MagicMock()
+    fake_client.__enter__ = MagicMock(return_value=fake_client)
+    fake_client.__exit__ = MagicMock(return_value=False)
+    fake_client.post = MagicMock(return_value=fake_response)
+
+    with patch.object(_cc, "get_composio_api_key", return_value="test_key"):
+        with patch("httpx.Client", return_value=fake_client):
+            result = await _cc.composio_call(
+                "TWITTER_USER_LOOKUP_ME", {}, user_id="+5511966830020"
+            )
+
+    assert "error" in result, f"Faltando 'error' key. Recebido: {result}"
+    err = result["error"]
+    assert "403" in err or "Forbidden" in err or "client-forbidden" in err.lower(), (
+        f"Erro nao menciona 403/Forbidden. Recebido: {err}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_composio_call_returns_envelope_on_no_account_404():
+    """composio_call deve retornar error quando Composio reporta
+    'No connected account found'."""
+    from tools import _composio_common as _cc
+
+    no_account_body = {
+        "successful": False,
+        "data": {
+            "error": "No connected account found for user ID 5511966830020 for toolkit twitter",
+            "status_code": 404,
+        },
+    }
+
+    fake_response = MagicMock()
+    fake_response.status_code = 200
+    fake_response.json.return_value = no_account_body
+    fake_response.text = "{}"
+
+    fake_client = MagicMock()
+    fake_client.__enter__ = MagicMock(return_value=fake_client)
+    fake_client.__exit__ = MagicMock(return_value=False)
+    fake_client.post = MagicMock(return_value=fake_response)
+
+    with patch.object(_cc, "get_composio_api_key", return_value="test_key"):
+        with patch("httpx.Client", return_value=fake_client):
+            result = await _cc.composio_call(
+                "TWITTER_RECENT_SEARCH", {"query": "test"}, user_id="+5511966830020"
+            )
+
+    assert "error" in result
+    err = result["error"]
+    assert "no connected account" in err.lower() or "5511966830020" in err, (
+        f"Erro nao menciona 'no connected account' ou user_id. Recebido: {err}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_composio_call_returns_envelope_on_http_error_status():
+    """composio_call deve retornar error quando httpx recebe HTTP >=400."""
+    from tools import _composio_common as _cc
+
+    fake_response = MagicMock()
+    fake_response.status_code = 500
+    fake_response.json.side_effect = ValueError("not json")
+    fake_response.text = "Internal Server Error"
+
+    fake_client = MagicMock()
+    fake_client.__enter__ = MagicMock(return_value=fake_client)
+    fake_client.__exit__ = MagicMock(return_value=False)
+    fake_client.post = MagicMock(return_value=fake_response)
+
+    with patch.object(_cc, "get_composio_api_key", return_value="test_key"):
+        with patch("httpx.Client", return_value=fake_client):
+            result = await _cc.composio_call(
+                "TWITTER_USER_LOOKUP_ME", {}, user_id="+5511966830020"
+            )
+
+    assert "error" in result
+    assert "500" in result["error"]
