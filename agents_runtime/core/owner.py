@@ -11,7 +11,7 @@ import logging
 import os
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, Iterable, Optional
 
 from agent_loader import _get_firestore_client
@@ -43,6 +43,9 @@ class OwnerResolution:
     owner_uid: str
     account_id: str
     instance: str
+    # Front 1d: numeros de celular que sempre passam como owner para
+    # esta instancia (ex.: admin do sistema). Lista de digits puros.
+    admin_phones: list = field(default_factory=list)
 
     @property
     def owner_candidates(self) -> Iterable[str]:
@@ -60,10 +63,15 @@ def resolve_owner(instance: str, fallback_phone: str = "") -> Optional[OwnerReso
        deployments still work, but tools requiring Google scopes will treat
        the caller as the owner only when the inbound phone matches the
        resolved ``owner_phone``.
+
+    Front 1d: retorna tambem ``admin_phones`` (lista) no OwnerResolution
+    para que ``is_owner_request`` e ``deny_if_not_owner`` aceitem numeros
+    cadastrados como admin.
     """
     db = _get_firestore_client()
     instance_norm = (instance or "").strip()
     fallback_norm = normalize_phone(fallback_phone)
+    admin_phones: list = []
     if db is not None and instance_norm:
         try:
             docs = db.collection(WHATSAPP_ACCOUNTS_COLLECTION).where(
@@ -74,11 +82,16 @@ def resolve_owner(instance: str, fallback_phone: str = "") -> Optional[OwnerReso
                 owner_phone = normalize_phone(data.get("owner_phone", ""))
                 if not owner_phone:
                     continue
+                admin_phones = [
+                    normalize_phone(p) for p in (data.get("admin_phones") or [])
+                    if normalize_phone(p)
+                ]
                 return OwnerResolution(
                     owner_phone=owner_phone,
                     owner_uid=str(data.get("owner_uid", owner_phone)),
                     account_id=str(data.get("account_id", doc.id)),
                     instance=instance_norm,
+                    admin_phones=admin_phones,
                 )
         except Exception as exc:  # noqa: BLE001
             logger.warning("resolve_owner firestore (instance) failed: %s", exc)
@@ -89,11 +102,16 @@ def resolve_owner(instance: str, fallback_phone: str = "") -> Optional[OwnerReso
             ).limit(1).stream()
             for doc in docs:
                 data = doc.to_dict() or {}
+                admin_phones = [
+                    normalize_phone(p) for p in (data.get("admin_phones") or [])
+                    if normalize_phone(p)
+                ]
                 return OwnerResolution(
                     owner_phone=fallback_norm,
-                    owner_uid=str(data.get("owner_uid", fallback_norm)),
+                    owner_uid=fallback_norm,
                     account_id=str(data.get("account_id", doc.id)),
                     instance=str(data.get("instance", instance_norm)),
+                    admin_phones=admin_phones,
                 )
         except Exception as exc:  # noqa: BLE001
             logger.warning("resolve_owner firestore (owner_phone) failed: %s", exc)
@@ -104,6 +122,7 @@ def resolve_owner(instance: str, fallback_phone: str = "") -> Optional[OwnerReso
         owner_uid=fallback_norm,
         account_id=f"fallback:{fallback_norm}",
         instance=instance_norm or "unknown",
+        admin_phones=admin_phones,
     )
 
 
@@ -115,7 +134,14 @@ def is_owner_request(resolution: Optional[OwnerResolution], inbound_phone: str) 
     target = normalize_phone(inbound_phone)
     if not target:
         return False
-    return any(target == candidate for candidate in resolution.owner_candidates)
+    if any(target == candidate for candidate in resolution.owner_candidates):
+        return True
+    # Front 1d: admin_phones tambem passa (o admin pode usar qualquer
+    # instancia cadastrada mesmo que nao seja o owner numerico).
+    for admin_phone in resolution.admin_phones:
+        if any(target == _c for _c in _candidates(admin_phone)):
+            return True
+    return False
 
 
 def deny_if_not_owner(resolution: Optional[OwnerResolution], inbound_phone: str, capability: str) -> Optional[Dict[str, str]]:
