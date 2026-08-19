@@ -1,3 +1,16 @@
+## 19/08/2026 (12:25 BRT) — Inclusão da Logo Coherence no Portal Agents & Validação Total da Esteira CI/CD
+
+### 1. Inclusão da Logo Coherence no Portal Agents
+- Logotipo oficial `logo-top-v2.png` copiado do `Coherence_Portal` para `agents_runtime/portal/assets/logo-coherence.png`.
+- Componente `Sidebar.tsx` atualizado seguindo rigorosamente a skill `coherence_logo` (§B - Cabeçalho de Dashboard: altura `h-6`, divisor sutil `h-5` e alinhamento com título `Control Plane / Management Console`).
+- Build do Vite validado com sucesso e empacotado no bundle final.
+
+### 2. Validação da Esteira Oficial de CI/CD (Guardrail §10)
+- Identificado o Trigger 2nd-Gen `deploy-agents-runtime-test` na região `us-central1` associado ao repositório GitHub `chat-bot-whatsapp` na branch `test`.
+- Atualizados testes de orquestração legados em `tests/test_orchestrator.py` para sincronizar com a arquitetura atual (10/10 testes passando).
+- Corrigido escape de regex no template JavaScript de `main.py` para conformidade com Python 3.12 (`SyntaxWarning: invalid escape sequence '\w'`).
+- Build `deba296a-83a3-4f9a-91db-64ead5a103f4` executado 100% via esteira automatizada Cloud Build com **STATUS: SUCCESS**. Nova revisão `agents-runtime-test-00495-gn5` em produção (200 OK).
+
 ## 19/08/2026 (03:50 BRT) — Revisão do Fluxo de Onboarding Unificado & Multi-OAuth
 
 ### 1. Mensagens Limpas & Links Comprimidos no WhatsApp
