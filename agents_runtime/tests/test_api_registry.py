@@ -9,12 +9,12 @@ if str(ROOT) not in sys.path:
 
 
 def test_allowed_toolkits_hardcoded():
-    """ALLOWED_TOOLKITS deve conter os 16 toolkits conhecidos (6 Google + 10 Composio)."""
+    """ALLOWED_TOOLKITS deve conter os 17 toolkits conhecidos (6 Google + 11 Composio)."""
     from tools.api_registry import ALLOWED_TOOLKITS
     expected = {"calendar", "gmail", "drive", "people", "tasks", "maps",
                 "linkedin", "youtube", "github", "notion",
                 "onedrive", "googledocs", "googlesheets", "googlemeet",
-                "microsoft_teams", "msteams"}
+                "microsoft_teams", "msteams", "twitter"}
     assert ALLOWED_TOOLKITS == expected, f"diff: {ALLOWED_TOOLKITS.symmetric_difference(expected)}"
 
 
@@ -36,7 +36,7 @@ def test_is_allowed_returns_true_for_known():
 
 def test_is_allowed_blocks_unknown():
     from tools.api_registry import api_registry
-    assert api_registry.is_allowed("twitter") is False  # nao esta em ALLOWED_TOOLKITS
+    assert api_registry.is_allowed("facebook") is False  # nao esta em ALLOWED_TOOLKITS
     assert api_registry.is_allowed("notion2") is False
     assert api_registry.is_allowed("evil_toolkit") is False
 
@@ -67,11 +67,11 @@ def test_get_meta_returns_none_for_unallowed():
     asyncio.run(api_registry.discover_all())
     # Simular toolkit descoberto mas NAO permitido
     fake_meta = MagicMock()
-    fake_meta.slug = "twitter"
+    fake_meta.slug = "facebook"
     fake_meta.category = "composio"
-    api_registry._composio_toolkits["twitter"] = fake_meta
-    assert api_registry.is_allowed("twitter") is False
-    assert api_registry.get_meta("twitter") is None
+    api_registry._composio_toolkits["facebook"] = fake_meta
+    assert api_registry.is_allowed("facebook") is False
+    assert api_registry.get_meta("facebook") is None
 
 
 def test_get_meta_returns_meta_for_allowed():
@@ -105,7 +105,7 @@ def test_list_all_filters_by_allowlist():
     listed = api_registry.list_all()
     slugs = [m.slug for m in listed]
     assert "evil_toolkit" not in slugs
-    assert "twitter" not in slugs
+    assert "facebook" not in slugs
     assert "linkedin" in slugs or len([s for s in slugs if s == "linkedin"]) == 0  # pode nao descobrir
 
 
@@ -113,4 +113,4 @@ def test_list_allowed_slugs_returns_sorted():
     from tools.api_registry import api_registry
     slugs = api_registry.list_allowed_slugs()
     assert slugs == sorted(slugs)
-    assert len(slugs) == 16  # 6 Google + 10 Composio
+    assert len(slugs) == 17  # 6 Google + 11 Composio

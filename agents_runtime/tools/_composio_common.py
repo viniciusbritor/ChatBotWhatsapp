@@ -116,86 +116,78 @@ async def composio_call(
     """
     api_key = get_composio_api_key()
 
-    # Caminho primario: REST API direta
-    try:
-        import httpx
+    # Twitter (Custom auth config no plano Hobby) exige REST API direta
+    if tool_slug.lower().startswith("twitter_"):
+        try:
+            import httpx
 
-        def _execute_rest() -> Dict[str, Any]:
-            with httpx.Client(timeout=60.0) as client:
-                resp = client.post(
-                    f"https://backend.composio.dev/api/v3/tools/execute/{tool_slug}",
-                    headers={
-                        "X-API-Key": api_key,
-                        "Content-Type": "application/json",
-                        "Accept": "application/json",
-                    },
-                    json={"user_id": user_id, "arguments": arguments},
+            def _execute_rest() -> Dict[str, Any]:
+                with httpx.Client(timeout=60.0) as client:
+                    resp = client.post(
+                        f"https://backend.composio.dev/api/v3/tools/execute/{tool_slug}",
+                        headers={
+                            "X-API-Key": api_key,
+                            "Content-Type": "application/json",
+                            "Accept": "application/json",
+                        },
+                        json={"user_id": user_id, "arguments": arguments},
+                    )
+                try:
+                    return resp.json()
+                except Exception:
+                    return {
+                        "successful": False,
+                        "status_code": resp.status_code,
+                        "data": {"error": resp.text[:500]},
+                        "error": f"http_{resp.status_code}",
+                    }
+
+            result = await asyncio.to_thread(_execute_rest)
+            http_status = result.get("status_code")
+            if isinstance(http_status, int) and http_status >= 400:
+                data = result.get("data") or {}
+                err_msg = (
+                    data.get("error")
+                    or data.get("http_error")
+                    or data.get("message")
+                    or result.get("error")
+                    or "http_error"
                 )
-            try:
-                return resp.json()
-            except Exception:
-                return {
-                    "successful": False,
-                    "status_code": resp.status_code,
-                    "data": {"error": resp.text[:500]},
-                    "error": f"http_{resp.status_code}",
-                }
+                logger.warning(
+                    "Composio REST call failed: http=%s tool=%s err=%s",
+                    http_status, tool_slug, str(err_msg)[:200],
+                )
+                return _error_envelope(f"composio_http_{http_status}: {str(err_msg)[:200]}")
 
-        result = await asyncio.to_thread(_execute_rest)
-        # Extrair HTTP error code
-        http_status = result.get("status_code")
-        if isinstance(http_status, int) and http_status >= 400:
-            data = result.get("data") or {}
-            err_msg = (
-                data.get("error")
-                or data.get("http_error")
-                or data.get("message")
-                or result.get("error")
-                or "http_error"
-            )
-            logger.warning(
-                "Composio REST call failed: http=%s tool=%s err=%s",
-                http_status, tool_slug, str(err_msg)[:200],
-            )
-            return _error_envelope(f"composio_http_{http_status}: {str(err_msg)[:200]}")
+            if result.get("successful") is False:
+                err_data = result.get("data") or {}
+                err = (
+                    err_data.get("error")
+                    or err_data.get("message")
+                    or err_data.get("http_error")
+                    or result.get("error")
+                    or "composio_outer_failure"
+                )
+                logger.warning(
+                    "Composio outer failure for tool %s: %s",
+                    tool_slug, str(err)[:200],
+                )
+                return _error_envelope(str(err)[:500])
 
-        # Detectar falhas em qualquer nivel do envelope (REST API Composio retorna
-        # tanto outer.successful=False quanto data.successful=False para falhas do tool).
-        if result.get("successful") is False:
-            # Outer level failure (ex: action execute nao existe, rate limit do Composio)
-            err_data = result.get("data") or {}
-            err = (
-                err_data.get("error")
-                or err_data.get("message")
-                or err_data.get("http_error")
-                or result.get("error")
-                or "composio_outer_failure"
-            )
-            logger.warning(
-                "Composio outer failure for tool %s: %s",
-                tool_slug, str(err)[:200],
-            )
-            return _error_envelope(str(err)[:500])
+            data = result.get("data")
+            if isinstance(data, dict) and data.get("successful") is False:
+                err = data.get("error") or data.get("message") or "tool_returned_failure"
+                logger.warning(
+                    "Tool %s returned failure: %s",
+                    tool_slug, str(err)[:200],
+                )
+                return _error_envelope(str(err)[:500])
+            return result
+        except Exception as exc:
+            logger.warning("Composio Twitter REST call failed: %s tool=%s", exc, tool_slug)
+            return _error_envelope(str(exc)[:200])
 
-        data = result.get("data")
-        if isinstance(data, dict) and data.get("successful") is False:
-            # Tool executado mas X API retornou 401/403 — propagar o erro real
-            err = data.get("error") or data.get("message") or "tool_returned_failure"
-            logger.warning(
-                "Tool %s returned failure: %s",
-                tool_slug, str(err)[:200],
-            )
-            return _error_envelope(str(err)[:500])
-        return result
-    except ImportError:
-        logger.warning("httpx_missing_falling_back_to_sdk")
-    except Exception as exc:
-        logger.warning(
-            "Composio REST call failed: %s tool=%s — falling back to SDK",
-            exc, tool_slug,
-        )
-
-    # Fallback: SDK (mesmo comportamento de antes)
+    # Demais ferramentas: SDK padrao
     try:
         from composio import Composio
         client = Composio(api_key=api_key, toolkit_versions=TOOLKIT_VERSIONS)
