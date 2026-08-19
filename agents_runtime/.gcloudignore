@@ -12,5 +12,4 @@
 **/whisper_models/
 **/portal/
 **/secrets/
-**/data/
 **/firestore.indexes.json
