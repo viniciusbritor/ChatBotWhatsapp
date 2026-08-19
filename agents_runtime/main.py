@@ -3013,7 +3013,7 @@ async def onboarding_conectar(phone: str, request: Request):
         }
         let html = '<p class="text-sm text-slate-600 mb-2"><strong>' + already + '/' + total + '</strong> ja conectados, <strong>' + links.length + '</strong> pendentes:</p><ul class="space-y-1.5">';
         links.forEach((l, idx) => {
-          const name = (l.toolkit || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+          const name = (l.toolkit || '').replace(/_/g, ' ').replace(/\\b\\w/g, c => c.toUpperCase());
           html += '<li class="flex items-center gap-2 text-xs"><span class="text-slate-400">' + (idx + 1) + '.</span><a href="' + l.url + '" target="_blank" rel="noopener" class="text-blue-600 hover:underline">' + name + '</a></li>';
         });
         html += '</ul>';
