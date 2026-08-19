@@ -58,22 +58,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
         }`}
       >
         {/* Brand Header with Coherence Logo */}
-        <div className="px-2 mb-2 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+        <div className="px-1 mb-2 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
             <img
               src={coherenceLogo}
               alt="Coherence"
               className="h-6 object-contain"
             />
-            <div className="w-px h-5 bg-[#c2c6d6]/50 dark:bg-[#424754]" />
-            <div>
-              <p className="text-[12px] font-bold text-[#0058be] dark:text-[#adc6ff] tracking-tight leading-tight">
-                Control Plane
-              </p>
-              <p className="text-[10px] text-[#727785] dark:text-[#c2c6d6] font-medium tracking-wide">
-                Management Console
-              </p>
-            </div>
+            <div className="w-px h-4 bg-[#c2c6d6]/60 dark:bg-[#424754]" />
+            <span className="text-[12px] font-bold text-[#0058be] dark:text-[#adc6ff] tracking-tight whitespace-nowrap">
+              Agents Console
+            </span>
           </div>
           <button
             onClick={() => setMobileOpen(false)}
