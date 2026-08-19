@@ -1,3 +1,19 @@
+## 19/08/2026 (02:05 BRT) — Diagnóstico de Painel em Branco e Avaliação de Impacto: Relay Webhook & Novo Owner
+
+### 1. Diagnóstico e Correção da UI do Módulo Agentes (Tela em Branco no Dashboard)
+- **Causa Raiz**: O arquivo `agents_runtime/core/module_ui.py` continha na linha 1229 a quebra de linha `\n\n---\n\n` dentro de aspas simples em JavaScript. No carregamento do HTML no navegador, o Python convertia isso em quebra de linha literal, gerando `SyntaxError: Invalid or unexpected token` antes de qualquer execução de script. O container `<div id="root">` ficava completamente em branco.
+- **Correção**: Escapado `\\n\\n---\\n\\n`. Validado com compilação via Node.js (`returncode 0`). 46 testes de UI e Relay passaram com sucesso.
+
+### 2. Avaliação de Impacto: Nova URL de Webhook (`https://evolution.coherenceai.com.br/relay/jennifer`)
+- **Roteamento do Relay**: O Nginx da VM Evolution atua como proxy reverso com regra coringa `/relay/{instance}` direcionando para o Cloud Run do runtime.
+- **Compatibilidade no Runtime**: O endpoint `@app.post("/relay/{instance_path:path}")` em `main.py` aceita a rota coringa e encaminha diretamente para o handler `evolution_webhook`. O roteamento interno utiliza o campo `"instance"` do payload JSON (`"instance": "Jennifer"`).
+- **Sem Quebra**: A esteira Pub/Sub, desduplicação por ledger, e anti-flood mantêm operação normal.
+
+### 3. Avaliação de Impacto: Novo Owner na Evolution API e Firestore
+- **Resolução de Owner**: `core/owner.py::resolve_owner` e `core/owner_guard.py` consultam `whatsapp_accounts/{instance}`. O campo `owner_phone` define quem é o administrador do bot e destinatário de alertas FinOps / Quarentena.
+- **Resolução de JID do Bot em Grupos**: `core/evolution_webhook.py` consulta `/instance/fetchInstances` na Evolution e lê `ownerJid` (com cache TTL 300s). Mudanças de chip/número do bot refletem automaticamente em até 5 minutos para menções `@Jennifer`.
+- **Multi-Tenant OAuth**: Usuários autorizados operam com isolamento per-user em `usuarios/{phone}.google_oauth_token`. Mudanças de owner não afetam os tokens dos analistas nem a base de conhecimento privada.
+
 ## 17/08/2026 (00:30 BRT) — Auto-Discovery Unificado (Google + Composio) com Allowlist
 
 ### Contexto & Motivação

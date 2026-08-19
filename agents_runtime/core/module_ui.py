@@ -1226,7 +1226,7 @@ function viewKnowledgeDetail(sourceTitle) {
     const doc = data.document || {};
     const chunks = (doc.chunks || []).map(c =>
       '[' + c.chunk_index + '] ' + (c.text || '')
-    ).join('\n\n---\n\n');
+    ).join('\\n\\n---\\n\\n');
     const el = document.getElementById('fld-chunks');
     if (el) el.value = chunks || '(vazio)';
   }).catch(e => { toast('Erro ao carregar doc: ' + e.message, 'warn'); closeDrawer(); });
