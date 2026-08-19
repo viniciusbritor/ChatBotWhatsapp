@@ -1242,6 +1242,12 @@ async def admin_accounts_get(account_id: str):
 
 
 async def _write_account(account_id: str, body: Dict[str, Any]) -> bool:
+    """Escreve doc em ``whatsapp_accounts/{account_id}`` com merge.
+
+    Preserva campos existentes (ex.: ``google_oauth_token``,
+    ``composio_linked_at`` e outros campos de credenciais). Apenas os
+    campos enviados em ``body`` sao atualizados.
+    """
     from agent_loader import _get_firestore_client
 
     db = _get_firestore_client()
@@ -1256,6 +1262,15 @@ async def _write_account(account_id: str, body: Dict[str, Any]) -> bool:
         "status": str(body.get("status", "active")),
         "updated_at": now_brt().isoformat(),
     }
+    # Front 1d: admin_phones - numeros de celular que sempre passam
+    # como owner (ex.: administrador do sistema que precisa acessar
+    # qualquer instancia). Lista de digits puros.
+    admin_phones_raw = body.get("admin_phones", [])
+    if isinstance(admin_phones_raw, list):
+        payload["admin_phones"] = [
+            re.sub(r"\D", "", str(p)) for p in admin_phones_raw
+        ]
+        payload["admin_phones"] = [p for p in payload["admin_phones"] if p]
     db.collection("whatsapp_accounts").document(account_id).set(payload, merge=True)
     return True
 
@@ -1337,6 +1352,91 @@ async def admin_instances_create(request: Request):
         "qr_base64": qr.get("qr_base64", ""),
         "qr_code": qr.get("code", ""),
         "connected": False,
+    })
+
+
+@app.post("/admin/instances/{instance_id}/register")
+async def admin_instances_register(instance_id: str, request: Request):
+    """Registra/cadastra uma instancia Evolution em whatsapp_accounts.
+
+    Endpoint dedicado (admin only, SA token) para o fluxo de "Front 1b":
+    apos criar a instancia via painel Evolution (ou via API), o admin
+    chama este endpoint para preencher owner_phone + admin_phones.
+
+    Body:
+        {
+          "owner_phone": "5511966830020",  // obrigatorio
+          "admin_phones": ["5511966830020"],  // opcional
+          "name": "Vinicius"  // opcional, default = instance_id
+        }
+
+    Resposta:
+        {
+          "instance": "vinicius",
+          "webhook_url": "https://evolution.coherenceai.com.br/relay/vinicius",
+          "owner_phone": "5511966830020",
+          "admin_phones": ["5511966830020"],
+          "status": "registered"
+        }
+
+    Nao toca em google_oauth_token, composio_* ou outros campos de
+    credenciais (preserva via _write_account com merge=True).
+    """
+    _require_admin(request)
+    instance = (instance_id or "").strip()
+    if not instance:
+        raise HTTPException(status_code=422, detail="instance_id required")
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid_json")
+
+    owner_phone = re.sub(r"\D", "", str(body.get("owner_phone", "") or ""))
+    if not owner_phone:
+        raise HTTPException(status_code=422, detail="owner_phone required")
+
+    admin_phones_raw = body.get("admin_phones", [])
+    if not isinstance(admin_phones_raw, list):
+        raise HTTPException(status_code=422, detail="admin_phones must be a list")
+    admin_phones = [re.sub(r"\D", "", str(p)) for p in admin_phones_raw]
+    admin_phones = [p for p in admin_phones if p]
+
+    account_id = instance.lower()
+    ok = await _write_account(account_id, {
+        "name": str(body.get("name", "")).strip() or instance,
+        "instance": instance,
+        "owner_phone": owner_phone,
+        "admin_phones": admin_phones,
+        "status": "registered",
+    })
+    if not ok:
+        raise HTTPException(status_code=503, detail="firestore_unavailable")
+
+    # Front 1a: limpa o cache para esta instancia (force re-check)
+    invalidate_instance_registry_cache(instance)
+    invalidate_instance_registry_cache(account_id)
+
+    base_url = (
+        os.getenv("EVO_BASE_URL") or "https://evolution.coherenceai.com.br"
+    ).rstrip("/")
+    webhook_url = f"{base_url}/relay/{account_id}"
+
+    logger.info(
+        "instance_registered",
+        extra={
+            "event_name": "instance_registered",
+            "instance": instance,
+            "owner_phone": owner_phone,
+            "admin_phones": admin_phones,
+        },
+    )
+    return JSONResponse(content={
+        "instance": instance,
+        "webhook_url": webhook_url,
+        "owner_phone": owner_phone,
+        "admin_phones": admin_phones,
+        "status": "registered",
     })
 
 

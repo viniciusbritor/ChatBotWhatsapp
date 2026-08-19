@@ -49,8 +49,9 @@ async def test_relay_path_queues_message_like_legacy_webhook():
     request = _request(VALID_PAYLOAD)
     with patch("core.pubsub_publisher.get_publisher", return_value=publisher):
         with patch("core.message_ledger.register_or_load", return_value=None):
-            with patch("main._schedule_mark_read") as mock_mark:
-                response = await evolution_webhook(request, instance_path="jennifer")
+            with patch("main.is_instance_registered", return_value=True):
+                with patch("main._schedule_mark_read") as mock_mark:
+                    response = await evolution_webhook(request, instance_path="jennifer")
     assert response.body is not None
     import json as _json
     payload = _json.loads(response.body)
@@ -70,7 +71,8 @@ async def test_relay_path_with_subpath_also_works():
     request = _request(payload)
     with patch("core.pubsub_publisher.get_publisher", return_value=publisher):
         with patch("core.message_ledger.register_or_load", return_value=None):
-            response = await evolution_webhook(request, instance_path="jennifer-prod")
+            with patch("main.is_instance_registered", return_value=True):
+                response = await evolution_webhook(request, instance_path="jennifer-prod")
     import json as _json
     body = _json.loads(response.body)
     assert body["queued"] is True
@@ -206,3 +208,112 @@ async def test_auto_webhook_accepts_instanceName_payload(shared_secret):
     body = _json.loads(response.body)
     assert body["status"] == "created"
     assert body["instance"] == "jennifer"
+# ---- Front 1b: /admin/instances/{instance_id}/register ----
+
+
+@pytest.mark.asyncio
+async def test_register_requires_admin():
+    """POST /admin/instances/{instance_id}/register exige admin (SA token)."""
+    from main import admin_instances_register
+    request = MagicMock()
+    request.headers = {}
+    request.json = AsyncMock(return_value={"owner_phone": "5511966830020"})
+    with patch("main._require_admin", side_effect=HTTPException(status_code=403, detail="admin_required")):
+        with pytest.raises(HTTPException) as exc_info:
+            await admin_instances_register("vinicius", request)
+    assert exc_info.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_register_missing_owner_phone_returns_422():
+    from main import admin_instances_register
+    request = MagicMock()
+    request.headers = {}
+    request.json = AsyncMock(return_value={})
+    with patch("main._require_admin"):
+        with pytest.raises(HTTPException) as exc_info:
+            await admin_instances_register("vinicius", request)
+    assert exc_info.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_register_invalid_json_returns_400():
+    from main import admin_instances_register
+    request = MagicMock()
+    request.headers = {}
+    request.json = AsyncMock(side_effect=Exception("bad json"))
+    with patch("main._require_admin"):
+        with pytest.raises(HTTPException) as exc_info:
+            await admin_instances_register("vinicius", request)
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_register_success_returns_webhook_url():
+    """POST /admin/instances/{instance_id}/register com owner_phone valido
+    cria o doc em whatsapp_accounts/{id} e retorna a URL do webhook."""
+    from main import admin_instances_register
+
+    request = MagicMock()
+    request.headers = {}
+    request.json = AsyncMock(return_value={
+        "owner_phone": "5511966830020",
+        "admin_phones": ["5511966830020", "5511917389901"],
+        "name": "Vinicius",
+    })
+    with patch("main._require_admin"):
+        with patch("main._write_account", AsyncMock(return_value=True)) as mock_write:
+            with patch("main.invalidate_instance_registry_cache") as mock_invalidate:
+                response = await admin_instances_register("Vinicius", request)
+    import json as _json
+    body = _json.loads(response.body)
+    assert body["instance"] == "Vinicius"
+    assert body["webhook_url"].endswith("/relay/vinicius")
+    assert body["owner_phone"] == "5511966830020"
+    assert body["admin_phones"] == ["5511966830020", "5511917389901"]
+    assert body["status"] == "registered"
+    call_args = mock_write.call_args
+    assert call_args.args[0] == "vinicius"
+    assert call_args.args[1]["instance"] == "Vinicius"
+    assert call_args.args[1]["owner_phone"] == "5511966830020"
+    assert call_args.args[1]["admin_phones"] == ["5511966830020", "5511917389901"]
+    invalidate_keys = [c.args[0] if c.args else c.kwargs.get("instance_name", "")
+                       for c in mock_invalidate.call_args_list]
+    assert "Vinicius" in invalidate_keys
+    assert "vinicius" in invalidate_keys
+
+
+@pytest.mark.asyncio
+async def test_register_preserves_existing_credentials():
+    """_write_account usa merge=True, entao google_oauth_token/composio
+    existentes nao sao apagados quando o admin registra/usa o endpoint."""
+    from main import admin_instances_register
+
+    request = MagicMock()
+    request.headers = {}
+    request.json = AsyncMock(return_value={"owner_phone": "5511966830020"})
+    with patch("main._require_admin"):
+        with patch("main._write_account", AsyncMock(return_value=True)) as mock_write:
+            await admin_instances_register("vinicius", request)
+    call_kwargs = mock_write.call_args.args[1]
+    assert "google_oauth_token" not in call_kwargs
+    assert "composio_linked_at" not in call_kwargs
+
+
+@pytest.mark.asyncio
+async def test_register_strips_phone_formatting():
+    """owner_phone deve ser normalizado para digits puros."""
+    from main import admin_instances_register
+
+    request = MagicMock()
+    request.headers = {}
+    request.json = AsyncMock(return_value={
+        "owner_phone": "+55 (11) 96683-0020",
+        "admin_phones": ["+55 11 91738-9901"],
+    })
+    with patch("main._require_admin"):
+        with patch("main._write_account", AsyncMock(return_value=True)) as mock_write:
+            await admin_instances_register("vinicius", request)
+    call_kwargs = mock_write.call_args.args[1]
+    assert call_kwargs["owner_phone"] == "5511966830020"
+    assert call_kwargs["admin_phones"] == ["5511917389901"]
