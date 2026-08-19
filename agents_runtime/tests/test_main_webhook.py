@@ -48,6 +48,60 @@ def _request(body=None, error=None):
     return request
 
 
+@pytest.mark.asyncio
+async def test_webhook_ignores_unregistered_instance():
+    """Front 1a: instancia nao cadastrada em whatsapp_accounts -> 200 ignored.
+
+    Defesa contra instancias 'fantasma' (criadas por engano via painel
+    sem passar pelo fluxo de registro). Vide incidente Vinicius
+    18/08/2026.
+    """
+    payload = dict(VALID_PAYLOAD)
+    payload["instance"] = "vinicius"
+    request = _request(payload)
+    with patch("main.is_instance_registered", return_value=False):
+        response = await evolution_webhook(request)
+    import json as _json
+    body = _json.loads(response.body)
+    assert body["status"] == "ignored"
+    assert body["reason"] == "instance_not_registered"
+
+
+@pytest.mark.asyncio
+async def test_webhook_processes_registered_instance():
+    """Front 1a: instancia cadastrada -> processamento normal continua."""
+    payload = dict(VALID_PAYLOAD)
+    request = _request(payload)
+    publisher = MagicMock()
+    publisher.publish.return_value = "pubsub-registered"
+    with patch("main.is_instance_registered", return_value=True):
+        with patch("core.pubsub_publisher.get_publisher", return_value=publisher):
+            with patch("core.message_ledger.register_or_load", return_value=None):
+                with patch("main._schedule_mark_read"):
+                    response = await evolution_webhook(request)
+    import json as _json
+    body = _json.loads(response.body)
+    assert body["queued"] is True
+    assert body["message_id"] == "pubsub-registered"
+
+
+@pytest.mark.asyncio
+async def test_webhook_check_runs_before_extract():
+    """Front 1a: o check de whitelist roda ANTES do extract_envelope.
+
+    Garante que payloads para instancias nao registradas sao rejeitados
+    cedo, sem processar campos (defesa em profundidade).
+    """
+    request = _request({"event": "MESSAGES_UPSERT", "instance": "fantasma"})
+    with patch("main.is_instance_registered", return_value=False):
+        with patch("core.evolution_webhook.extract_envelope") as mock_extract:
+            response = await evolution_webhook(request)
+            mock_extract.assert_not_called()
+    import json as _json
+    body = _json.loads(response.body)
+    assert body["status"] == "ignored"
+
+
 def _noop(*args, **kwargs):
     return None
 

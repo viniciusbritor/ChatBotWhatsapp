@@ -10,7 +10,8 @@ from __future__ import annotations
 import logging
 import os
 import re
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from typing import Dict, Iterable, Optional
 
 from agent_loader import _get_firestore_client
@@ -42,6 +43,9 @@ class OwnerResolution:
     owner_uid: str
     account_id: str
     instance: str
+    # Front 1d: numeros de celular que sempre passam como owner para
+    # esta instancia (ex.: admin do sistema). Lista de digits puros.
+    admin_phones: list = field(default_factory=list)
 
     @property
     def owner_candidates(self) -> Iterable[str]:
@@ -59,10 +63,15 @@ def resolve_owner(instance: str, fallback_phone: str = "") -> Optional[OwnerReso
        deployments still work, but tools requiring Google scopes will treat
        the caller as the owner only when the inbound phone matches the
        resolved ``owner_phone``.
+
+    Front 1d: retorna tambem ``admin_phones`` (lista) no OwnerResolution
+    para que ``is_owner_request`` e ``deny_if_not_owner`` aceitem numeros
+    cadastrados como admin.
     """
     db = _get_firestore_client()
     instance_norm = (instance or "").strip()
     fallback_norm = normalize_phone(fallback_phone)
+    admin_phones: list = []
     if db is not None and instance_norm:
         try:
             docs = db.collection(WHATSAPP_ACCOUNTS_COLLECTION).where(
@@ -73,11 +82,16 @@ def resolve_owner(instance: str, fallback_phone: str = "") -> Optional[OwnerReso
                 owner_phone = normalize_phone(data.get("owner_phone", ""))
                 if not owner_phone:
                     continue
+                admin_phones = [
+                    normalize_phone(p) for p in (data.get("admin_phones") or [])
+                    if normalize_phone(p)
+                ]
                 return OwnerResolution(
                     owner_phone=owner_phone,
                     owner_uid=str(data.get("owner_uid", owner_phone)),
                     account_id=str(data.get("account_id", doc.id)),
                     instance=instance_norm,
+                    admin_phones=admin_phones,
                 )
         except Exception as exc:  # noqa: BLE001
             logger.warning("resolve_owner firestore (instance) failed: %s", exc)
@@ -88,11 +102,16 @@ def resolve_owner(instance: str, fallback_phone: str = "") -> Optional[OwnerReso
             ).limit(1).stream()
             for doc in docs:
                 data = doc.to_dict() or {}
+                admin_phones = [
+                    normalize_phone(p) for p in (data.get("admin_phones") or [])
+                    if normalize_phone(p)
+                ]
                 return OwnerResolution(
                     owner_phone=fallback_norm,
-                    owner_uid=str(data.get("owner_uid", fallback_norm)),
+                    owner_uid=fallback_norm,
                     account_id=str(data.get("account_id", doc.id)),
                     instance=str(data.get("instance", instance_norm)),
+                    admin_phones=admin_phones,
                 )
         except Exception as exc:  # noqa: BLE001
             logger.warning("resolve_owner firestore (owner_phone) failed: %s", exc)
@@ -103,6 +122,7 @@ def resolve_owner(instance: str, fallback_phone: str = "") -> Optional[OwnerReso
         owner_uid=fallback_norm,
         account_id=f"fallback:{fallback_norm}",
         instance=instance_norm or "unknown",
+        admin_phones=admin_phones,
     )
 
 
@@ -114,7 +134,14 @@ def is_owner_request(resolution: Optional[OwnerResolution], inbound_phone: str) 
     target = normalize_phone(inbound_phone)
     if not target:
         return False
-    return any(target == candidate for candidate in resolution.owner_candidates)
+    if any(target == candidate for candidate in resolution.owner_candidates):
+        return True
+    # Front 1d: admin_phones tambem passa (o admin pode usar qualquer
+    # instancia cadastrada mesmo que nao seja o owner numerico).
+    for admin_phone in resolution.admin_phones:
+        if any(target == _c for _c in _candidates(admin_phone)):
+            return True
+    return False
 
 
 def deny_if_not_owner(resolution: Optional[OwnerResolution], inbound_phone: str, capability: str) -> Optional[Dict[str, str]]:
@@ -156,3 +183,73 @@ def deny_if_not_owner(resolution: Optional[OwnerResolution], inbound_phone: str,
         "instance": resolution.instance if resolution else "",
         "phone": normalize_phone(inbound_phone),
     }
+
+
+# ---- Whitelist de instancias registradas (Front 1a) ----
+
+# Cache in-process: instance_name -> (timestamp, exists_bool)
+_INSTANCE_REGISTRY_CACHE: Dict[str, tuple] = {}
+_INSTANCE_REGISTRY_TTL_SEC = 30.0
+
+
+def _fetch_instance_registry(instance_name: str) -> bool:
+    """Look up ``whatsapp_accounts`` por ``instance`` (case-insensitive).
+
+    Cache in-process de 30s para reduzir leituras Firestore em rajadas
+    de webhook. ``_get_firestore_client()`` ja trata Firestore indisponivel
+    retornando None - nesse caso retornamos True (fail-open) para nao
+    bloquear instancias legadas durante incidentes de Firestore.
+
+    Caso real (confirmado em 18/08/2026): o doc no Firestore tem
+    ``id="Jennifer"`` e ``instance="Jennifer"`` (mesmo casing). Mas o
+    payload do webhook pode chegar com ``instance="jennifer"``
+    (lowercase, normalizado pelo extract_envelope). A query do Firestore
+    e case-sensitive, entao fazemos a busca de forma robusta:
+    1. Tenta lookup por doc ID com o nome normalizado.
+    2. Tenta lookup por doc ID com o nome exato do payload.
+    3. Tenta query pelo campo ``instance`` (case-insensitive no cliente).
+    """
+    norm = (instance_name or "").strip()
+    if not norm:
+        return False
+    cached = _INSTANCE_REGISTRY_CACHE.get(norm)
+    if cached and (time.time() - cached[0]) < _INSTANCE_REGISTRY_TTL_SEC:
+        return cached[1]
+    db = _get_firestore_client()
+    exists = True  # fail-open por padrao
+    if db is not None:
+        try:
+            # 1) Doc ID com nome normalizado (lowercase)
+            if db.collection(WHATSAPP_ACCOUNTS_COLLECTION).document(norm.lower()).get().exists:
+                exists = True
+            # 2) Doc ID com nome exato (preserva casing original)
+            elif db.collection(WHATSAPP_ACCOUNTS_COLLECTION).document(norm).get().exists:
+                exists = True
+            # 3) Query pelo campo "instance" com case-insensitive no cliente
+            else:
+                exists = any(
+                    (d.to_dict() or {}).get("instance", "").lower() == norm.lower()
+                    for d in db.collection(WHATSAPP_ACCOUNTS_COLLECTION).limit(50).stream()
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("instance_registry_lookup_failed instance=%s exc=%s", norm, exc)
+            exists = True  # fail-open
+    _INSTANCE_REGISTRY_CACHE[norm] = (time.time(), exists)
+    return exists
+
+
+def is_instance_registered(instance_name: str) -> bool:
+    """True se a instancia Evolution esta cadastrada em whatsapp_accounts.
+
+    Usado pelo ``evolution_webhook`` (Front 1a) para ignorar webhooks
+    de instancias nao registradas (ex.: criadas por engano via painel).
+    """
+    return _fetch_instance_registry(instance_name)
+
+
+def invalidate_instance_registry_cache(instance_name: str = "") -> None:
+    """Limpa o cache de registry. Util para testes e apos POST /admin/instances/.../register."""
+    if instance_name:
+        _INSTANCE_REGISTRY_CACHE.pop(instance_name, None)
+    else:
+        _INSTANCE_REGISTRY_CACHE.clear()

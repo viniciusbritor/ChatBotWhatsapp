@@ -25,6 +25,7 @@ from core.auth import auth_middleware
 from core.delay_calculator import calculate_delay_ms
 from core.logging import configure_logging
 from core.masker import mask_pii
+from core.owner import invalidate_instance_registry_cache, is_instance_registered
 from core.timezone import now_brt
 from core import metrics
 from agent_loader import start_loader, stop_loader, list_agents, list_skills, list_tools, get_agent
@@ -352,6 +353,22 @@ async def evolution_webhook(request: Request, instance_path: str = ""):
             extra={"event_name": "webhook_invalid_payload", "payload_type": type(body).__name__},
         )
         raise HTTPException(status_code=422, detail="payload must be an object")
+
+    # Front 1a: ignorar webhooks de instancias nao registradas em
+    # whatsapp_accounts (defesa contra instancias "fantasma" criadas
+    # por engano via painel - vide incidente Vinicius 18/08/2026).
+    payload_instance = (body.get("instance") or "").strip()
+    if payload_instance and not is_instance_registered(payload_instance):
+        logger.info(
+            "webhook_unknown_instance",
+            extra={
+                "event_name": "webhook_unknown_instance",
+                "evolution_instance": payload_instance,
+                "evolution_event": body.get("event") or body.get("type") or "",
+                "latency_ms": round((time.monotonic() - webhook_started) * 1000, 2),
+            },
+        )
+        return JSONResponse(content={"status": "ignored", "reason": "instance_not_registered"})
 
     envelope = extract_envelope(body)
     if envelope is None:
@@ -995,11 +1012,39 @@ async def admin_evolution_auto_webhook(request: Request, webhook_token: str = ""
             "detail": result,
         }, status_code=502)
 
-    logger.info("auto_webhook_set instance=%s url=%s", instance_name, relay_url)
+    # Front 1c: auto-link no Firestore (whatsapp_accounts). Cria o doc
+    # com owner_phone=None e status="pending_owner" se ainda nao
+    # existir. Isso garante que a whitelist (Front 1a) nao bloqueia
+    # mensagens de uma instancia recem-criada pelo auto-webhook. O
+    # admin completa com POST /admin/instances/{instance}/register
+    # depois. merge=True preserva google_oauth_token/composio_*.
+    firestore_linked = False
+    try:
+        from agent_loader import _get_firestore_client
+        db = _get_firestore_client()
+        if db is not None:
+            db.collection("whatsapp_accounts").document(canonical_name.lower()).set(
+                {
+                    "name": canonical_name,
+                    "instance": canonical_name,
+                    "status": "pending_owner",
+                    "webhook_url": relay_url,
+                    "updated_at": now_brt().isoformat(),
+                },
+                merge=True,
+            )
+            invalidate_instance_registry_cache(canonical_name)
+            invalidate_instance_registry_cache(canonical_name.lower())
+            firestore_linked = True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("auto_webhook_firestore_link_failed instance=%s exc=%s", canonical_name, exc)
+
+    logger.info("auto_webhook_set instance=%s url=%s firestore=%s", instance_name, relay_url, firestore_linked)
     return JSONResponse(content={
         "status": "created",
         "instance": instance_name,
         "webhook_url": relay_url,
+        "firestore_linked": firestore_linked,
     })
 
 
@@ -1225,6 +1270,12 @@ async def admin_accounts_get(account_id: str):
 
 
 async def _write_account(account_id: str, body: Dict[str, Any]) -> bool:
+    """Escreve doc em ``whatsapp_accounts/{account_id}`` com merge.
+
+    Preserva campos existentes (ex.: ``google_oauth_token``,
+    ``composio_linked_at`` e outros campos de credenciais). Apenas os
+    campos enviados em ``body`` sao atualizados.
+    """
     from agent_loader import _get_firestore_client
 
     db = _get_firestore_client()
@@ -1239,6 +1290,15 @@ async def _write_account(account_id: str, body: Dict[str, Any]) -> bool:
         "status": str(body.get("status", "active")),
         "updated_at": now_brt().isoformat(),
     }
+    # Front 1d: admin_phones - numeros de celular que sempre passam
+    # como owner (ex.: administrador do sistema que precisa acessar
+    # qualquer instancia). Lista de digits puros.
+    admin_phones_raw = body.get("admin_phones", [])
+    if isinstance(admin_phones_raw, list):
+        payload["admin_phones"] = [
+            re.sub(r"\D", "", str(p)) for p in admin_phones_raw
+        ]
+        payload["admin_phones"] = [p for p in payload["admin_phones"] if p]
     db.collection("whatsapp_accounts").document(account_id).set(payload, merge=True)
     return True
 
@@ -1320,6 +1380,91 @@ async def admin_instances_create(request: Request):
         "qr_base64": qr.get("qr_base64", ""),
         "qr_code": qr.get("code", ""),
         "connected": False,
+    })
+
+
+@app.post("/admin/instances/{instance_id}/register")
+async def admin_instances_register(instance_id: str, request: Request):
+    """Registra/cadastra uma instancia Evolution em whatsapp_accounts.
+
+    Endpoint dedicado (admin only, SA token) para o fluxo de "Front 1b":
+    apos criar a instancia via painel Evolution (ou via API), o admin
+    chama este endpoint para preencher owner_phone + admin_phones.
+
+    Body:
+        {
+          "owner_phone": "5511966830020",  // obrigatorio
+          "admin_phones": ["5511966830020"],  // opcional
+          "name": "Vinicius"  // opcional, default = instance_id
+        }
+
+    Resposta:
+        {
+          "instance": "vinicius",
+          "webhook_url": "https://evolution.coherenceai.com.br/relay/vinicius",
+          "owner_phone": "5511966830020",
+          "admin_phones": ["5511966830020"],
+          "status": "registered"
+        }
+
+    Nao toca em google_oauth_token, composio_* ou outros campos de
+    credenciais (preserva via _write_account com merge=True).
+    """
+    _require_admin(request)
+    instance = (instance_id or "").strip()
+    if not instance:
+        raise HTTPException(status_code=422, detail="instance_id required")
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid_json")
+
+    owner_phone = re.sub(r"\D", "", str(body.get("owner_phone", "") or ""))
+    if not owner_phone:
+        raise HTTPException(status_code=422, detail="owner_phone required")
+
+    admin_phones_raw = body.get("admin_phones", [])
+    if not isinstance(admin_phones_raw, list):
+        raise HTTPException(status_code=422, detail="admin_phones must be a list")
+    admin_phones = [re.sub(r"\D", "", str(p)) for p in admin_phones_raw]
+    admin_phones = [p for p in admin_phones if p]
+
+    account_id = instance.lower()
+    ok = await _write_account(account_id, {
+        "name": str(body.get("name", "")).strip() or instance,
+        "instance": instance,
+        "owner_phone": owner_phone,
+        "admin_phones": admin_phones,
+        "status": "registered",
+    })
+    if not ok:
+        raise HTTPException(status_code=503, detail="firestore_unavailable")
+
+    # Front 1a: limpa o cache para esta instancia (force re-check)
+    invalidate_instance_registry_cache(instance)
+    invalidate_instance_registry_cache(account_id)
+
+    base_url = (
+        os.getenv("EVO_BASE_URL") or "https://evolution.coherenceai.com.br"
+    ).rstrip("/")
+    webhook_url = f"{base_url}/relay/{account_id}"
+
+    logger.info(
+        "instance_registered",
+        extra={
+            "event_name": "instance_registered",
+            "instance": instance,
+            "owner_phone": owner_phone,
+            "admin_phones": admin_phones,
+        },
+    )
+    return JSONResponse(content={
+        "instance": instance,
+        "webhook_url": webhook_url,
+        "owner_phone": owner_phone,
+        "admin_phones": admin_phones,
+        "status": "registered",
     })
 
 
