@@ -54,22 +54,21 @@ class TestOrchestrate:
     async def test_orchestrate_fallback_to_jennifer(self):
         from orchestrator import orchestrate
 
-        with patch("orchestrator.get_agent", return_value=None):
-            with patch("orchestrator._classify_intent_llm", return_value="conversa"):
-                with patch("orchestrator._execute_deep_agent", new_callable=AsyncMock) as mock_exec:
-                    mock_exec.return_value = {
-                        "reply": "Ola, em que posso ajudar?",
-                        "delay_ms": 100,
-                        "presence": "composing",
-                        "metadata": {"agent_id": "manager-jennifier"},
-                    }
-                    result = await orchestrate({
-                        "instance": "jennifer",
-                        "phone": "+5511966830020",
-                        "text": "oi",
-                        "sender_name": "Vinicius",
-                        "extra": {},
-                    })
+        with patch("orchestrator._classify_intent_llm", return_value="conversa"):
+            with patch("pipelines.jennifer_pipeline.run", new_callable=AsyncMock) as mock_run:
+                mock_run.return_value = {
+                    "reply": "Ola, em que posso ajudar?",
+                    "delay_ms": 100,
+                    "presence": "composing",
+                    "metadata": {"agent_id": "manager-jennifier"},
+                }
+                result = await orchestrate({
+                    "instance": "jennifer",
+                    "phone": "+5511966830020",
+                    "text": "oi",
+                    "sender_name": "Vinicius",
+                    "extra": {},
+                })
 
         assert result["reply"] == "Ola, em que posso ajudar?"
         assert "manager-jennifier" in result["metadata"].get("agent_id", "")
