@@ -1,4 +1,14 @@
-## 19/08/2026 (03:15 BRT) — Correções de Contas, Proprietários, Catálogo de Tools, Nomes de Conhecimento e Whitelist FinOps
+## 19/08/2026 (03:50 BRT) — Revisão do Fluxo de Onboarding Unificado & Multi-OAuth
+
+### 1. Mensagens Limpas & Links Comprimidos no WhatsApp
+- `orchestrator._onboarding_url` atualizado para integrar `core.link_shortener.shorten_urls_in_text`, gerando links curtos e limpos (TinyURL / rota interna) sem URLs longas expostas.
+- Mensagens de erro de autorização de tools (Google Workspace e Composio) e `_maybe_onboarding_nudge` configuradas para emitir **estritamente texto puro** com o link limpo, sem envio de imagens ou cartões pesados no WhatsApp.
+- Implementado debounce de 60 segundos por telefone (`_LAST_NUDGE_TS`) para impedir envio repetitivo de links na mesma sessão.
+
+### 2. Preservação Total de Acessos & Não-Revogação
+- Garantida a não-revogação de credenciais pré-existentes: ao conectar novos aplicativos, os tokens gravados em `usuarios/{phone}.google_oauth_token` e as contas ativas do Composio são integralmente preservados com operações de `merge=True`.
+- Adicionado banner de segurança e garantia de não-revogação em `ConnectionsView.tsx`.
+- Adicionados botões "Autorizar Google (Todos os escopos)" e "Conectar Todos os Apps" no portal.
 
 ### 1. Contas WhatsApp (Jennifer = 5511917389901, Dono = 5511966830020)
 - Atualizado `whatsapp_accounts/Jennifer` no Firestore e `_enrich_accounts_with_evolution_state` em `main.py` para normalizar o chip do bot (`+55 11 91738-9901`) e o dono (`+55 11 96683-0020` - Vinicius Brito Rocha).

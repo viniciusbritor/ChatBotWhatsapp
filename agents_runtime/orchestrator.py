@@ -362,11 +362,14 @@ async def _user_has_any_connection(phone: str):
         return None
 
 
-async def _maybe_onboarding_nudge(payload: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
-    """Onboarding (P5/loop 12/08/2026): user novo sem conexao recebe link.
+_LAST_NUDGE_TS: Dict[str, float] = {}
 
-    Apenas conversa PRIVADA (nao grupo), sem erro na resposta, e sem o link
-    ja presente no texto. Anexa uma sugestao discreta de conectar contas.
+
+async def _maybe_onboarding_nudge(payload: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
+    """Onboarding (P5/loop 12/08/2026): user novo sem conexao recebe link limpo.
+
+    Apenas conversa PRIVADA (nao grupo), sem erro na resposta, sem link duplicado,
+    e respeitando debounce de 60s.
     """
     extra = payload.get("extra", {}) or {}
     if extra.get("is_group"):
@@ -374,6 +377,13 @@ async def _maybe_onboarding_nudge(payload: Dict[str, Any], result: Dict[str, Any
     phone = str(payload.get("phone", "") or "")
     if not phone:
         return result
+
+    # Debounce de 60s para evitar flood de links na mesma sessao
+    now = time.time()
+    last_ts = _LAST_NUDGE_TS.get(phone, 0.0)
+    if now - last_ts < 60.0:
+        return result
+
     metadata = result.get("metadata", {}) or {}
     reply_lower = result.get("reply", "").lower()
     if (
@@ -383,6 +393,7 @@ async def _maybe_onboarding_nudge(payload: Dict[str, Any], result: Dict[str, Any
         or "conecte suas contas" in reply_lower
         or "oauth/google" in reply_lower
         or "/portal" in reply_lower
+        or "tinyurl.com" in reply_lower
     ):
         return result
     has_conn = await _user_has_any_connection(phone)
@@ -392,6 +403,7 @@ async def _maybe_onboarding_nudge(payload: Dict[str, Any], result: Dict[str, Any
     if not reply:
         return result
     url = _onboarding_url(phone)
+    _LAST_NUDGE_TS[phone] = now
     nudge = (
         f"\n\n💡 *Dica:* para eu acessar seus emails, agenda, Drive, "
         f"YouTube, LinkedIn e mais, conecte suas contas aqui: {url}"
@@ -2884,7 +2896,13 @@ def _onboarding_url(phone: str) -> str:
     try:
         from core.magic_link import build_magic_link_url
 
-        return build_magic_link_url(phone)
+        raw_url = build_magic_link_url(phone)
+        try:
+            from core.link_shortener import shorten_urls_in_text
+
+            return shorten_urls_in_text(raw_url)
+        except Exception:
+            return raw_url
     except Exception:
         digits = "".join(c for c in str(phone) if c.isdigit())
         return f"/portal/?phone={digits}"
@@ -3137,14 +3155,24 @@ async def _execute_agent(
         except Exception as e:
             logger.exception("tool_error tool=%s", tool_name)
             err_msg = f"{type(e).__name__}: {str(e)[:200]}"
-            # Onboarding (P5): quando a tool precisa de OAuth Google, devolve
-            # mensagem com link para o user autorizar de forma autonoma.
-            if "oauth_required" in err_msg or "user_google_oauth_required" in err_msg:
+            # Onboarding: quando a tool precisa de OAuth Google ou Composio, devolve
+            # mensagem com link limpo encurtado para o user autorizar de forma autonoma (sem imagens).
+            err_lower = err_msg.lower()
+            if (
+                "oauth_required" in err_lower
+                or "user_google_oauth_required" in err_lower
+                or "composio_oauth_required" in err_lower
+                or "unregistered callers" in err_lower
+                or "no active connection found" in err_lower
+                or "needs_connection" in err_lower
+                or "folder_permission_required" in err_lower
+                or "scope_missing" in err_lower
+            ):
                 return json.dumps({
                     "error": (
                         "acao_requer_autorizacao",
-                        f"O usuario precisa conectar sua conta Google. "
-                        f"Envie: 'Conecte suas contas aqui: {_onboarding_url(phone)}'",
+                        f"O usuario precisa conectar ou autorizar seu servico. "
+                        f"Envie uma mensagem curta e amigavel (sem imagens) com o link: 'Para eu acessar este servico por voce, conecte suas contas aqui: {_onboarding_url(phone)}'",
                     ),
                 })
             return json.dumps({"error": err_msg})

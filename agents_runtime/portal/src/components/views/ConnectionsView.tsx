@@ -112,6 +112,14 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({
           Serviços que a Jennifer pode acessar por você — conecte sua conta para liberar cada funcionalidade
         </p>
 
+        {/* Banner de Garantia de Segurança & Preservação */}
+        <div className="bg-[#e7f5ef] dark:bg-[#132f26] border border-[#196b52]/30 rounded-xl p-3.5 flex items-center gap-3">
+          <span className="material-symbols-outlined text-[#196b52] text-[22px] shrink-0">verified_user</span>
+          <p className="text-[13px] text-[#145541] dark:text-[#a3efcf] leading-relaxed">
+            <strong>Acesso Seguro & Não-Revogação:</strong> Suas credenciais são isoladas e protegidas via OAuth 2.0 por usuário. Conectar novos aplicativos mantém todas as suas contas anteriores ativas e salvas sem perda de permissões.
+          </p>
+        </div>
+
         <div className="flex flex-wrap items-center gap-3 pt-2">
           <label htmlFor="user-select" className="text-[14px] font-semibold text-[#191b23] dark:text-white">
             Usuário:
@@ -159,13 +167,14 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-[20px] font-bold text-[#191b23] dark:text-white">
-            Conta Google
+            Conta Google (Workspace & Serviços)
           </h3>
           <button
             onClick={() => onAuthorizeGoogle(selectedUser.replace('+', ''))}
-            className="text-[#0058be] font-semibold text-[12px] hover:bg-[#d8e2ff]/30 px-3 py-1 rounded-lg transition-colors border border-[#0058be]/20"
+            className="text-[#0058be] font-semibold text-[12px] hover:bg-[#d8e2ff]/30 px-3 py-1 rounded-lg transition-colors border border-[#0058be]/20 flex items-center gap-1"
           >
-            Atualizar permissões
+            <span className="material-symbols-outlined text-[16px]">lock_open</span>
+            Autorizar Google (Todos os escopos)
           </button>
         </div>
         <div className="flex flex-col gap-3">
@@ -214,9 +223,18 @@ export const ConnectionsView: React.FC<ConnectionsViewProps> = ({
 
       {/* Outros Serviços Section */}
       <div className="space-y-3">
-        <h3 className="text-[20px] font-bold text-[#191b23] dark:text-white">
-          Outros serviços
-        </h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-[20px] font-bold text-[#191b23] dark:text-white">
+            Aplicativos & Redes Integradas (Composio)
+          </h3>
+          <button
+            onClick={() => onAuthorizeComposio(selectedUser.replace('+', ''))}
+            className="text-[#0058be] font-semibold text-[12px] hover:bg-[#d8e2ff]/30 px-3 py-1 rounded-lg transition-colors border border-[#0058be]/20 flex items-center gap-1"
+          >
+            <span className="material-symbols-outlined text-[16px]">hub</span>
+            Conectar Todos os Apps
+          </button>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {otherConns.map((conn) => (
             <div

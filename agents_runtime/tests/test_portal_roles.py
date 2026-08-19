@@ -94,11 +94,12 @@ class TestResolveCallerHybrid:
 
         with patch("core.auth.get_sa_token", return_value="sa-token"):
             with patch("core.auth._firebase_claims", return_value=claims):
-                request = MagicMock()
-                request.headers = {"Authorization": "Bearer jwt"}
-                request.query_params = {}
-                request.cookies = {}
-                return resolve_caller(request)
+                with patch("agent_loader.sync_user_profile"):
+                    request = MagicMock()
+                    request.headers = {"Authorization": "Bearer jwt"}
+                    request.query_params = {}
+                    request.cookies = {}
+                    return resolve_caller(request)
 
     def test_phone_claim_wins(self):
         """Claim phone_number tem prioridade sobre lookup."""
@@ -117,16 +118,19 @@ class TestResolveCallerHybrid:
     def test_admin_email_without_phone_is_admin(self):
         """Email admin na whitelist, sem phone vinculado -> admin."""
         with patch("agent_loader.lookup_phone_by_email", return_value=""):
-            with patch("agent_loader.get_user_role", side_effect=lambda x: "admin" if "@" in x else "agent_user"):
-                role, phone = self._request({"sub": "uid1", "email": "viniciusbritor@gmail.com"})
+            with patch("agent_loader.lookup_phone_by_uid", return_value=""):
+                with patch("agent_loader.get_user_role", side_effect=lambda x: "admin" if "@" in x else "agent_user"):
+                    with patch("agent_loader.resolve_owner_phone", return_value="5511966830020"):
+                        role, phone = self._request({"sub": "uid1", "email": "viniciusbritor@gmail.com"})
         assert role == "admin"
         assert phone in ("5511966830020", "")
 
     def test_unknown_email_is_agent_user(self):
         """Email desconhecido e sem phone vinculado -> agent_user (seguro)."""
         with patch("agent_loader.lookup_phone_by_email", return_value=""):
-            with patch("agent_loader.get_user_role", return_value="agent_user"):
-                role, phone = self._request({"sub": "uid1", "email": "nobody@example.com"})
+            with patch("agent_loader.lookup_phone_by_uid", return_value=""):
+                with patch("agent_loader.get_user_role", return_value="agent_user"):
+                    role, phone = self._request({"sub": "uid1", "email": "nobody@example.com"})
         assert role == "agent_user"
         assert phone == ""
 
