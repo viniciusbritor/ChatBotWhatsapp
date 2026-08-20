@@ -271,7 +271,17 @@ def get_user_credentials(phone: str) -> Optional[Credentials]:
     Refreshes the access token if expired, persists the new token, and returns
     a Credentials object that can be used with googleapiclient.discovery.build.
     Returns None if the user has not connected or refresh failed.
+
+    GUARDRAIL §0.7 (19/08/2026): defesa em profundidade — checa
+    is_user_connected() antes de retornar credentials, garantindo
+    que tokens apos "desconectar" no Portal NAO sejam usados.
     """
+    if not is_user_connected(phone):
+        logger.info(
+            "get_user_credentials blocked: user disconnected phone_suffix=%s",
+            re.sub(r"\D", "", str(phone or ""))[-4:],
+        )
+        return None
     token_data = get_user_oauth(phone)
     if not token_data:
         return None
@@ -312,3 +322,137 @@ def get_user_credentials(phone: str) -> Optional[Credentials]:
         scopes=token_data.get("scopes") or [],
         expiry=expiry_dt,
     )
+
+
+def is_user_connected(phone: str) -> bool:
+    """Verifica se o usuario tem token OAuth Google ativo no Firestore.
+
+    GUARDRAIL §0.7 (19/08/2026): protege contra uso de tokens apos
+    desconexao no Portal. Antes desta funcao, get_user_credentials
+    retornava o token mesmo apos o usuario "desconectar" na UI
+    (que apenas mudava o state React sem chamar backend).
+    """
+    token_data = get_user_oauth(phone)
+    if not token_data:
+        return False
+    if not token_data.get("token") and not token_data.get("refresh_token"):
+        return False
+    return True
+
+
+def revoke_google_token(token: str, timeout: int = 10) -> bool:
+    """Revoga um token (access ou refresh) no Google OAuth.
+
+    Endpoint: POST https://oauth2.googleapis.com/revoke?token=<token>
+    Resposta 200 = sucesso, retorna True.
+    Resposta 400 = token invalido/expirado, ainda retorna True (ja nao serve).
+    Falha de rede = retorna False (chamador decide se aborta).
+    """
+    if not token:
+        return False
+    try:
+        r = requests.post(
+            "https://oauth2.googleapis.com/revoke",
+            params={"token": token},
+            timeout=timeout,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        # 200 = sucesso; 400 = ja expirado/revogado (considerar sucesso)
+        return r.status_code in (200, 400)
+    except Exception as exc:
+        logger.warning("oauth revoke failed for token suffix=%s: %s", token[-6:], exc)
+        return False
+
+
+def delete_oauth_token(phone: str) -> bool:
+    """Apaga o token OAuth do usuario no Firestore.
+
+    GUARDRAIL §0.7 (19/08/2026): o Portal "desconectar" deve chamar
+    isto para invalidar de fato o token. Sem isto, o cache _calendar_services
+    e o token em si continuam validos e a Jennifier continua a acessar Calendar/Drive/Gmail.
+    Retorna True se apagou com sucesso, False se ja nao existia ou Firestore indisponivel.
+    """
+    from google.cloud import firestore as _fs  # local import para ciclo
+
+    db = _get_firestore()
+    if db is None:
+        logger.warning("delete_oauth_token: firestore unavailable for phone=%s", phone)
+        return False
+    norm_phone = re.sub(r"\D", "", str(phone or ""))
+    if not norm_phone:
+        return False
+    candidates = _candidate_phones(phone)
+    deleted_any = False
+    for target in candidates:
+        try:
+            doc_ref = db.collection(OAUTH_USER_COLLECTION).document(target)
+            doc = doc_ref.get()
+            if doc.exists:
+                data = doc.to_dict() or {}
+                if "google_oauth_token" in data or "google_oauth_linked_at" in data:
+                    doc_ref.update({
+                        "google_oauth_token": _fs.DELETE_FIELD,
+                        "google_oauth_linked_at": _fs.DELETE_FIELD,
+                        "google_oauth_revoked_at": _fs.SERVER_TIMESTAMP,
+                    })
+                    logger.info("oauth_token_deleted phone=%s target=%s", phone, target)
+                    deleted_any = True
+        except Exception as exc:
+            logger.warning("delete_oauth_token failed for %s: %s", target, exc)
+    return deleted_any
+
+
+def revoke_user_oauth(phone: str) -> Dict[str, Any]:
+    """Revoga todos os tokens do usuario no Google + apaga do Firestore.
+
+    Combina revoke_google_token (revoga access+refresh) + delete_oauth_token
+    (limpa Firestore) + clear_all_google_caches (limpa caches em memoria).
+    Retorna status detalhado para auditoria.
+    """
+    token_data = get_user_oauth(phone)
+    access_revoked = False
+    refresh_revoked = False
+    if token_data:
+        access_revoked = revoke_google_token(token_data.get("token") or "")
+        if token_data.get("refresh_token") and token_data.get("refresh_token") != token_data.get("token"):
+            refresh_revoked = revoke_google_token(token_data.get("refresh_token"))
+        else:
+            refresh_revoked = access_revoked
+    deleted = delete_oauth_token(phone)
+    caches_cleared = clear_all_google_caches(phone)
+    return {
+        "phone": phone,
+        "access_revoked": access_revoked,
+        "refresh_revoked": refresh_revoked,
+        "firestore_deleted": deleted,
+        "caches_cleared": caches_cleared,
+        "revoked_at": now_brt().isoformat(),
+    }
+
+
+def clear_all_google_caches(phone: str) -> Dict[str, bool]:
+    """GUARDRAIL §0.7 (19/08/2026): limpa caches de todos os servicos Google
+    em todos os tools apos desconexao. Cada tool expoe sua propria funcao
+    clear_user_cache; aqui agregamos o resultado para o caller.
+    Retorna dict {service: cleared} para auditoria.
+    """
+    import importlib
+
+    services = [
+        ("calendar", "tools.google_calendar"),
+        ("drive", "tools.google_drive"),
+        ("gmail", "tools.google_gmail"),
+        ("tasks", "tools.google_tasks"),
+        ("people", "tools.google_people"),
+    ]
+    cleared: Dict[str, bool] = {}
+    for name, module_path in services:
+        try:
+            mod = importlib.import_module(module_path)
+            fn = getattr(mod, "clear_user_cache", None)
+            if fn is not None:
+                cleared[name] = bool(fn(phone))
+        except Exception as exc:
+            logger.debug("clear_user_cache skipped for %s: %s", name, exc)
+            cleared[name] = False
+    return cleared

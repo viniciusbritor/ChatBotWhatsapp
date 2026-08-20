@@ -17,6 +17,15 @@ SCOPES = ["https://www.googleapis.com/auth/tasks"]
 _tasks_services: Dict[str, Any] = {}
 
 
+def clear_user_cache(phone: str) -> bool:
+    """GUARDRAIL §0.7 (19/08/2026): remove o servico Tasks em cache."""
+    if not phone:
+        return False
+    cache_key = str(phone)
+    removed = _tasks_services.pop(cache_key, None)
+    return removed is not None
+
+
 def _get_credentials(phone: str) -> Credentials:
     if not phone:
         logger.error("tasks_oauth_missing phone=empty")

@@ -3311,3 +3311,154 @@ async def oauth_callback(request: Request):
             extra={"event_name": "oauth_callback_failed", "error_type": type(exc).__name__},
         )
         return HTMLResponse(content="<h2>Erro ao concluir autorizacao</h2>", status_code=502)
+
+
+# ---------------------------------------------------------------------------
+# GUARDRAIL §0.7 (19/08/2026): revogacao de OAuth Google por usuario
+# Resolve o bug onde o "Desconectar" no Portal apenas mudava o state React
+# e o token continuava valido no Firestore. Agora desconectar chama este
+# endpoint, que revoga no Google, apaga do Firestore e limpa caches em
+# memoria, garantindo que a Jennifier NAO acesse Calendar/Drive/Gmail
+# ate nova autorizacao.
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/v1/google/oauth/revoke")
+async def google_oauth_revoke(request: Request):
+    """Revoga o OAuth Google do usuario. Apos sucesso, o usuario precisa
+    re-autorizar via /oauth/google antes de usar Calendar/Drive/Gmail.
+
+    Body:
+        {"phone": "5511966830020"} (opcional; default = caller do JWT)
+
+    Resposta 200:
+        {"status": "ok", "phone": "...", "access_revoked": bool,
+         "refresh_revoked": bool, "firestore_deleted": bool,
+         "caches_cleared": {"calendar": bool, ...}, "revoked_at": "..."}
+    """
+    body: Dict[str, Any] = {}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    # Telefone vem do body OU do JWT do caller (RBAC enforcement)
+    requested_phone = str(body.get("phone") or "").strip()
+    role, caller_phone = _caller_role(request)
+    canonical_phone = requested_phone or caller_phone or ""
+    canonical_phone = re.sub(r"\D", "", canonical_phone)
+
+    # Guard: agent_user so pode revogar o proprio telefone; admin revoga qualquer um.
+    if role != "admin":
+        caller_digits = re.sub(r"\D", "", caller_phone or "")
+        if not caller_digits or canonical_phone != caller_digits:
+            logger.warning(
+                "google_oauth_revoke forbidden role=%s caller_suffix=%s requested_suffix=%s",
+                role,
+                caller_digits[-4:] if caller_digits else "----",
+                canonical_phone[-4:] if canonical_phone else "----",
+            )
+            return JSONResponse(
+                content={
+                    "detail": f"Acesso negado: agente nao pode revogar OAuth de outro telefone",
+                },
+                status_code=403,
+            )
+
+    if not canonical_phone:
+        return JSONResponse(
+            content={"detail": "phone_required"},
+            status_code=400,
+        )
+
+    from core.oauth_per_user import revoke_user_oauth
+
+    result = revoke_user_oauth(canonical_phone)
+    logger.info(
+        "google_oauth_revoked phone_suffix=%s access=%s refresh=%s firestore=%s",
+        canonical_phone[-4:],
+        result.get("access_revoked"),
+        result.get("refresh_revoked"),
+        result.get("firestore_deleted"),
+    )
+
+    # LGPD audit log
+    try:
+        from agent_loader import _get_firestore_client as _db_client
+        from google.cloud import firestore as _fs
+
+        db = _db_client()
+        if db is not None:
+            db.collection("audit_logs").add({
+                "event": "GOOGLE_OAUTH_REVOKED",
+                "phone_suffix": canonical_phone[-4:],
+                "actor_role": role,
+                "caches_cleared": result.get("caches_cleared", {}),
+                "timestamp": _fs.SERVER_TIMESTAMP,
+            })
+    except Exception as exc:
+        logger.warning("audit_log_oauth_revoke_failed: %s", exc)
+
+    return JSONResponse(content={"status": "ok", **result})
+
+
+@app.get("/api/v1/google/oauth/status")
+async def google_oauth_status(request: Request):
+    """Retorna o status da conexao OAuth Google do usuario.
+
+    Query:
+        ?phone=5511966830020 (opcional; default = caller do JWT)
+
+    Resposta 200:
+        {"phone": "...", "connected": bool, "linked_at": "...",
+         "scopes": [...], "revoked_at": "..."}
+    """
+    phone_param = (request.query_params.get("phone") or "").strip()
+    role, caller_phone = _caller_role(request)
+    canonical_phone = re.sub(r"\D", "", phone_param or caller_phone or "")
+
+    if role != "admin":
+        caller_digits = re.sub(r"\D", "", caller_phone or "")
+        if not caller_digits or canonical_phone != caller_digits:
+            return JSONResponse(
+                content={"detail": "Acesso negado"},
+                status_code=403,
+            )
+
+    if not canonical_phone:
+        return JSONResponse(content={"connected": False, "phone": ""})
+
+    from core.oauth_per_user import is_user_connected, get_user_oauth
+
+    connected = is_user_connected(canonical_phone)
+    token = get_user_oauth(canonical_phone) if connected else None
+    linked_at = ""
+    revoked_at = ""
+    if token:
+        linked_at = str(token.get("updated_at", ""))
+
+    # Procurar revoked_at diretamente no Firestore
+    if not connected:
+        try:
+            from agent_loader import _get_firestore_client as _db_client
+
+            db = _db_client()
+            if db is not None:
+                for cand in (canonical_phone, canonical_phone[2:] if canonical_phone.startswith("55") else f"55{canonical_phone}"):
+                    doc = db.collection("usuarios").document(cand).get()
+                    if doc.exists:
+                        data = doc.to_dict() or {}
+                        revoked_at = str(data.get("google_oauth_revoked_at", ""))
+                        break
+        except Exception:
+            pass
+
+    return JSONResponse(
+        content={
+            "phone": canonical_phone,
+            "connected": connected,
+            "linked_at": linked_at,
+            "revoked_at": revoked_at,
+            "scopes": (token or {}).get("scopes", []),
+        }
+    )
