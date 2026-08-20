@@ -1,0 +1,198 @@
+{
+  "version": "1.0",
+  "updated_at": "2026-08-19T22:00:00-03:00",
+  "schema_notes": {
+    "agent_id": "Identificador unico (opencode, antigravity, human-vini)",
+    "claimed_files": "Paths relativos ao repo root. Use barra normal '/'",
+    "status": "active | idle | stale (>30min sem heartbeat)",
+    "since": "ISO 8601 com offset BRT (-03:00)",
+    "last_heartbeat": "ISO 8601 - atualizado a cada claim/release/edit"
+  },
+  "agents": {
+    "opencode": {
+      "task": "FASE 4.3: composio progress card",
+      "branch": "feat/composio-progress-card",
+      "claimed_files": [
+        "agents_runtime/tests/test_module_ui_admin.py",
+        "agents_runtime/tools/composio_connect.py"
+      ],
+      "status": "stale",
+      "since": "2026-08-16T04:39:38-03:00",
+      "last_heartbeat": "2026-08-16T04:39:38-03:00"
+    },
+    "opencode-fix-oauth": {
+      "task": "fix(google-oauth): revoke token on disconnect (LOOP 19/08/2026)",
+      "branch": "fix/google-oauth-revoke-on-disconnect",
+      "claimed_files": [
+        "agents_runtime/core/oauth_per_user.py",
+        "agents_runtime/main.py",
+        "agents_runtime/tools/google_calendar.py",
+        "agents_runtime/tools/google_drive.py",
+        "agents_runtime/tools/google_gmail.py",
+        "agents_runtime/portal/src/App.tsx",
+        "agents_runtime/tests/test_oauth_per_user.py",
+        "agents_runtime/tests/test_oauth_revoke_endpoint.py"
+      ],
+      "status": "active",
+      "since": "2026-08-19T22:00:00-03:00",
+      "last_heartbeat": "2026-08-19T22:00:00-03:00"
+    }
+  },
+  "denylist": [
+    "cloudbuild-*.yaml",
+    "cloudbuild-*.yml",
+    "Dockerfile",
+    "Dockerfile.*",
+    "firestore.indexes.json",
+    "firestore.rules",
+    "requirements.txt",
+    "requirements-*.txt",
+    "pyproject.toml",
+    "secrets.txt",
+    "oauth_client_id.txt",
+    "oauth_client_secret.txt",
+    "harness_actual.txt",
+    "iap_status.txt",
+    "webhook_*.txt",
+    "audio_send.txt",
+    "pr_whatsapp_agente_pubsub.md",
+    ".agent_locks.json",
+    "scripts/agent_sync/**"
+  ],
+  "denylist_reason": "Arquivos criticos de infra, segredos, CI/CD ou proprios do coordinator. Bloqueia AMBOS agentes para evitar corrupcao.",
+  "conflicts": [],
+  "recent_merges": [
+    {
+      "sha": "dc700bd931e28180c7772fa9d12a1430ea072bde",
+      "pr": 39,
+      "merged_at": "2026-08-16T00:53:47-03:00",
+      "subject": "Merge pull request #39 from viniciusbritor/fix/portal-finops-light-theme",
+      "files": []
+    },
+    {
+      "sha": "75184dd48991d5967b89240f05b15d7ee8b78240",
+      "pr": 38,
+      "merged_at": "2026-08-16T00:51:40-03:00",
+      "subject": "Merge pull request #38 from viniciusbritor/fix/portal-composio-naming-and-ui",
+      "files": []
+    },
+    {
+      "sha": "8fe472f6229d58451f7561c91161cc74ecd341d8",
+      "pr": 37,
+      "merged_at": "2026-08-16T00:49:53-03:00",
+      "subject": "Merge pull request #37 from viniciusbritor/fix/portal-owners-and-accounts",
+      "files": []
+    },
+    {
+      "sha": "3254515944249a63f0d306e5b5ee9ac1361590be",
+      "pr": 36,
+      "merged_at": "2026-08-16T00:47:18-03:00",
+      "subject": "Merge pull request #36 from viniciusbritor/fix/portal-llm-dropdown",
+      "files": []
+    },
+    {
+      "sha": "6feeb253643cda90f579c62ae409b67d0bcf4188",
+      "pr": 35,
+      "merged_at": "2026-08-16T00:45:07-03:00",
+      "subject": "Merge pull request #35 from viniciusbritor/fix/portal-phone-number",
+      "files": []
+    },
+    {
+      "sha": "b7a98834640b4347616c2dd3c0a1d1d5347bf2b3",
+      "pr": 34,
+      "merged_at": "2026-08-15T23:16:07-03:00",
+      "subject": "Merge pull request #34 from viniciusbritor/fix/post-cleanup-minor-fixes",
+      "files": []
+    },
+    {
+      "sha": "0bf9f630aa97e900a175e131da287d8795802c75",
+      "pr": 33,
+      "merged_at": "2026-08-15T22:54:48-03:00",
+      "subject": "Merge pull request #33 from viniciusbritor/feat/cloudbuild-br-region",
+      "files": []
+    },
+    {
+      "sha": "57dde3140096a50590a372e54880a66dd075af41",
+      "pr": 32,
+      "merged_at": "2026-08-15T22:53:25-03:00",
+      "subject": "Merge pull request #32 from viniciusbritor/chore/audit-firestore-location",
+      "files": []
+    },
+    {
+      "sha": "d1719addb7af5309bc90ef7b7c1ec0d4a6f19266",
+      "pr": 31,
+      "merged_at": "2026-08-15T22:47:25-03:00",
+      "subject": "Merge pull request #31 from viniciusbritor/feat/br-region-migration",
+      "files": []
+    },
+    {
+      "sha": "62836a838f847bdf0632f3bee44587b72dbf9b8d",
+      "pr": 30,
+      "merged_at": "2026-08-15T22:45:09-03:00",
+      "subject": "Merge pull request #30 from viniciusbritor/feat/link-shortener-opt-in",
+      "files": []
+    },
+    {
+      "sha": "f6e100e018e76100dd5ed830338f90251ca89cbb",
+      "pr": 27,
+      "merged_at": "2026-08-15T22:20:39-03:00",
+      "subject": "Merge pull request #27 from viniciusbritor/fix/pubsub-mark-read-async",
+      "files": []
+    },
+    {
+      "sha": "bfaaba1d9133d53cf305d0b20b9c26a96975e1ab",
+      "pr": 24,
+      "merged_at": "2026-08-15T21:04:10-03:00",
+      "subject": "Merge pull request #24 from viniciusbritor/fix/migrate-agents-model-firestore",
+      "files": []
+    },
+    {
+      "sha": "fc8758e779fd186538c9ab36539f113e91101142",
+      "pr": 23,
+      "merged_at": "2026-08-15T21:03:37-03:00",
+      "subject": "Merge pull request #23 from viniciusbritor/docs/cleanup-minimax-references",
+      "files": []
+    },
+    {
+      "sha": "03accc5c9d444c0d1d291223eb8df582ce70b2e5",
+      "pr": 22,
+      "merged_at": "2026-08-15T21:02:40-03:00",
+      "subject": "Merge pull request #22 from viniciusbritor/chore/remove-minimax-secrets-and-benchmark",
+      "files": []
+    },
+    {
+      "sha": "880cdc2f3bf4ad98bdf797ee112d6a1cc904e1c3",
+      "pr": 25,
+      "merged_at": "2026-08-15T21:01:40-03:00",
+      "subject": "Merge pull request #25 from viniciusbritor/feat/backend-owner-name-hybrid",
+      "files": []
+    },
+    {
+      "sha": "310c0aa4462c27b3bfa33455b4b80f4d2a13a8f3",
+      "pr": 26,
+      "merged_at": "2026-08-15T20:59:25-03:00",
+      "subject": "Merge pull request #26 from viniciusbritor/feat/link-shortener-global",
+      "files": []
+    },
+    {
+      "sha": "303009a1e26792ff1566559885ccb45dcd5de20a",
+      "pr": 20,
+      "merged_at": "2026-08-15T16:18:59-03:00",
+      "subject": "Merge pull request #20 from viniciusbritor/feat/portal-finops-auth-and-user-names",
+      "files": []
+    },
+    {
+      "sha": "4e77e79",
+      "pr": 19,
+      "merged_at": "2026-08-15T07:35:49-03:00",
+      "branch": "fix/finops-view-group-serialization-and-phantom-doc",
+      "merged_by": "GitHub",
+      "author": "viniciusbritor",
+      "files": [
+        "agents_runtime/core/flood_protection.py",
+        "agents_runtime/portal/src/components/views/FinOpsView.tsx"
+      ],
+      "subject": "fix(finops): normalizacao defensiva de grupos no portal e filtro de telefones invalidos"
+    }
+  ]
+}

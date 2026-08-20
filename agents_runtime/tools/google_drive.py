@@ -28,6 +28,16 @@ _ATAS_SUBFOLDER = "Atas"
 _drive_services: Dict[str, Any] = {}
 
 
+def clear_user_cache(phone: str) -> bool:
+    """GUARDRAIL §0.7 (19/08/2026): remove o servico Drive em cache
+    apos o usuario desconectar no Portal."""
+    if not phone:
+        return False
+    cache_key = str(phone)
+    removed = _drive_services.pop(cache_key, None)
+    return removed is not None
+
+
 def _get_credentials(phone: str) -> Credentials:
     """Load Google OAuth credentials for the given user (per-user, Fase D)."""
     if not phone:

@@ -1,3 +1,42 @@
+## 19/08/2026 (21:02 BRT) — Resolução de Conectividade Evolution API (Webhook 404 Fix)
+
+### 1. Diagnóstico e Causa Raiz
+- **Sintoma**: Mensagens enviadas no WhatsApp da Jennifer ficavam apenas com 1 tick cinza (`✓`) ou sem resposta.
+- **Causa Raiz**: O webhook registrado na Evolution API v2.3.7 para a instância `Jennifer` estava apontando para `https://evolution.coherenceai.com.br/relay/jennifer` (rota legada que retornava `HTTP 404 Not Found`). Consequentemente, as notificações de `MESSAGES_UPSERT` eram descartadas pela Evolution API antes de alcançar o Cloud Run.
+
+### 2. Ação Corretiva
+- Reconfigurado o webhook oficial da instância `Jennifer` na Evolution API (`POST /webhook/set/Jennifer`) apontando para `https://agents-runtime-test-c5nbfc5meq-uc.a.run.app/webhook`.
+- Habilitados os eventos essenciais: `MESSAGES_UPSERT`, `MESSAGES_UPDATE`, `SEND_MESSAGE` com `webhookBase64: true`.
+- Validada a entrega e retorno `HTTP 200 OK` nos logs do Cloud Run.
+- Disparada mensagem de confirmação de disponibilidade no WhatsApp do administrador (`5511966830020`).
+
+## 19/08/2026 (15:25 BRT) — Refinamento Visual do Cabeçalho da Sidebar & Deploy em Produção
+
+### 1. Refinamento de Tipografia e Alinhamento da Logo Coherence
+- Atualizado o cabeçalho da `Sidebar.tsx` no Portal Agents para exibir a logo oficial `COHERENCE`, uma divisória vertical elegante e o título `Agents Console` em linha única (`whitespace-nowrap`).
+- Eliminada a quebra de texto inadequada que colidia com a borda da barra lateral.
+- Build do Vite (`npm run build`) validado com 100% dos módulos transformados.
+
+### 2. Esteira CI/CD Cloud Build
+- Commit `bfdf051` promovido via branch `test`.
+- Build `a3fbe0a0-b2aa-4de0-867e-4ba138c6f875` (Cloud Build regional `us-central1`) concluído com **STATUS: SUCCESS**.
+- Nova revisão ativada no Cloud Run.
+
+## 19/08/2026 (14:05 BRT) — Landing Page Dedicada de Onboarding & Disparo de Simulação Real (Vinicius)
+
+### 1. Landing Page Dedicada de Onboarding (`/a/{phone}/conectar`)
+- Substituído o redirecionamento do Magic Link de `/portal/?token=...` para a rota isolada e dedicada `/a/{phone}/conectar?token=...` em `core/magic_link.py`.
+- Eliminada toda a sobrecarga cognitiva e menus administrativos do Portal Control Plane para contatos que recebem o link no WhatsApp.
+- Página completamente redesenhada com identidade visual Clean Light da Coherence (`coherence_logo` e `coherence_identity`), responsividade mobile total para celulares e cards com:
+  1. **Google Workspace**: Botão oficial "Conectar Google Workspace" (OAuth 2.0 unificado para Calendar, Gmail e Drive).
+  2. **Aplicativos de Trabalho**: Botão "Conectar Apps de Trabalho" com acionamento em lote das integrações Composio (LinkedIn, YouTube, GitHub, Notion, OneDrive, Docs).
+  3. **Segurança & Não-Revogação**: Banner destacando que acessos e credenciais anteriores são 100% preservados.
+- Testes automatizados atualizados em `tests/test_module_ui_admin.py` (26/26 passando).
+
+### 2. Esteira CI/CD Cloud Build & Simulação Real no WhatsApp
+- Build `5ef405df-4b1b-432d-acee-268817cd54bb` executado via esteira regional `us-central1` com 1.575 testes passando e deploy com **STATUS: SUCCESS**.
+- Executada nova simulação via `simulate_onboarding_vinicius.py` com disparo para o WhatsApp pessoal de Vinicius (`5511966830020`): mensagem `3EB0177DE3F1C5465A10D7` entregue com o novo link dedicado.
+
 ## 19/08/2026 (13:35 BRT) — Simulação End-to-End de Onboarding no WhatsApp (Vinicius)
 
 ### 1. Disparo de Simulação Real via Evolution API v2.3.7

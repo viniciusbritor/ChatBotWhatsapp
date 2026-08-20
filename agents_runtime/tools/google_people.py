@@ -16,6 +16,15 @@ SCOPES = ["https://www.googleapis.com/auth/contacts.readonly"]
 _people_services: Dict[str, Any] = {}
 
 
+def clear_user_cache(phone: str) -> bool:
+    """GUARDRAIL §0.7 (19/08/2026): remove o servico People em cache."""
+    if not phone:
+        return False
+    cache_key = str(phone)
+    removed = _people_services.pop(cache_key, None)
+    return removed is not None
+
+
 def _get_credentials(phone: str) -> Credentials:
     if not phone:
         logger.error("people_oauth_missing phone=empty")

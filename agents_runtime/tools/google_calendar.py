@@ -27,6 +27,27 @@ DEFAULT_CALENDAR_ID = "primary"
 _calendar_services: Dict[str, Any] = {}
 
 
+def clear_user_cache(phone: str) -> bool:
+    """GUARDRAIL §0.7 (19/08/2026): remove o servico Calendar em cache
+    apos o usuario desconectar no Portal. Sem isto, a Jennifier
+    continuaria usando o servico antigo mesmo apos o token ser
+    apagado do Firestore.
+    """
+    if not phone:
+        return False
+    cache_key = str(phone)
+    removed = _calendar_services.pop(cache_key, None)
+    # Tentar tambem variacoes com codigo de pais
+    for prefix in ("55", "+55"):
+        if (prefix + cache_key) in _calendar_services:
+            _calendar_services.pop(prefix + cache_key, None)
+            removed = True
+        if cache_key.startswith(prefix) and cache_key[len(prefix):] in _calendar_services:
+            _calendar_services.pop(cache_key[len(prefix):], None)
+            removed = True
+    return removed is not None
+
+
 def _get_credentials(phone: str) -> Credentials:
     """Load Google OAuth credentials for the given user (per-user, Fase D).
 

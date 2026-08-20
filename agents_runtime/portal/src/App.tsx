@@ -364,10 +364,66 @@ export default function App() {
     }
   };
 
-  const handleToggleConnection = (id: string) => {
+  const handleToggleConnection = async (id: string) => {
+    // GUARDRAIL §0.7 (19/08/2026): antes desta versao, esta funcao apenas
+    // mudava o state React, deixando o token OAuth ativo no Firestore.
+    // Agora, ao desconectar (status 'OK' -> 'Desconectado'), chamamos o
+    // endpoint real /api/v1/google/oauth/revoke que revoga no Google,
+    // apaga do Firestore e limpa caches em memoria. Reverter (re-conectar)
+    // continua a chamar o fluxo de authorizeGoogle.
+
+    const target = connections.find((c) => c.id === id);
+    if (!target) return;
+    const isOk = target.status === 'OK';
+    const isGoogle = target.category === 'Conta Google';
+
+    if (!isOk) {
+      // Re-conectar: abrir fluxo OAuth normalmente
+      const parts = id.split('__');
+      const phone = parts[0] || '';
+      if (isGoogle) {
+        authorizeGoogle(phone);
+      } else {
+        authorizeComposio(phone, parts[2]);
+      }
+      return;
+    }
+
+    // Desconectar: chamar backend real
     setConnections((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, status: c.status === 'OK' ? 'Desconectado' : 'OK' } : c))
+      prev.map((c) => (c.id === id ? { ...c, status: 'Desconectando...' } : c))
     );
+    try {
+      const parts = id.split('__');
+      const phone = parts[0] || '';
+      const tok = sessionStorage.getItem('_ctok') || new URLSearchParams(location.search).get('token') || '';
+      const url = `/api/v1/google/oauth/revoke?token=${tok}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.detail || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      setConnections((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, status: 'Desconectado' } : c))
+      );
+      // Recarregar lista do backend para garantir consistencia
+      await refreshConnections();
+      // Mostrar toast com resumo
+      setInviteStatus(`Desconectado: access=${data.access_revoked ? 'OK' : 'FAIL'} firestore=${data.firestore_deleted ? 'OK' : 'FAIL'}`);
+      setTimeout(() => setInviteStatus(null), 5000);
+    } catch (e: any) {
+      // Reverter optimistic update em caso de erro
+      setConnections((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, status: 'OK' } : c))
+      );
+      setInviteStatus(`Erro ao desconectar: ${e?.message || 'Falha de rede'}`);
+      setTimeout(() => setInviteStatus(null), 5000);
+    }
   };
 
   const refreshConnections = async () => {
