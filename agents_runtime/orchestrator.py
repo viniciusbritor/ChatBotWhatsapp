@@ -2420,6 +2420,16 @@ async def _orchestrate_inner(payload: Dict[str, Any], instance: str, phone: str,
             manager_id = f"manager-{toolkit_slug}"
             from deepagent_layer.agents import get_deep_agent, MANAGER_PROMPTS
             if manager_id in MANAGER_PROMPTS and get_deep_agent(manager_id) is not None:
+                # GUARDRAIL (21/08/2026): log estruturado do dispatch para
+                # diagnostico. Antes o roteamento tier15 nao emitia nenhum
+                # log, tornando impossivel saber se "qual meu perfil no
+                # linkedin" chegou ao manager-linkedin ou caiu no tier LLM.
+                logger.info(
+                    "tier15_dispatch toolkit=%s manager=%s phone_suffix=%s",
+                    toolkit_slug,
+                    manager_id,
+                    phone[-4:] if phone else "----",
+                )
                 result = await _execute_agent(
                     {"id": manager_id, "system_prompt": ""},
                     masked_text, payload, payload.get("extra", {}),

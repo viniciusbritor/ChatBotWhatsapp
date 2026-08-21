@@ -227,8 +227,7 @@ MANAGER_PROMPTS: Dict[str, str] = {
         "Se o usuario pedir algo fora do escopo (vagas, mensagens, conexoes), "
         "diga: 'Essa ferramenta nao pode fazer isso. Posso ajudar com mais alguma coisa?'\n\n"
         "[ERRO DE PERMISSAO] Se a tool retornar erro de OAuth/permissao, "
-        "responda: 'Preciso que voce reconecte o LinkedIn pelo Portal Coherence "
-        "agents-runtime-test-c5nbfc5meq-uc.a.run.app/a/<phone>/composio?toolkit=linkedin'."
+        "responda: 'Preciso que voce reconecte o LinkedIn. Use o link de conexao segura que a Jennifer envia no chat.'."
     ),
     # GUARDRAIL §0.8 (17/08/2026): manager dedicado para Google Docs via Composio.
     "manager-googledocs": (
@@ -248,8 +247,7 @@ MANAGER_PROMPTS: Dict[str, str] = {
         "Se o usuario pedir algo fora do escopo (planilhas, presentations), "
         "diga: 'Essa ferramenta e so para documentos de texto. Posso ajudar com mais alguma coisa?'\n\n"
         "[ERRO DE PERMISSAO] Se a tool retornar erro de OAuth, "
-        "responda: 'Preciso que voce reconecte o Google Docs pelo Portal Coherence "
-        "agents-runtime-test-c5nbfc5meq-uc.a.run.app/a/<phone>/composio?toolkit=googledocs'."
+        "responda: 'Preciso que voce reconecte o Google Docs. Use o link de conexao segura que a Jennifer envia no chat.'."
     ),
     # GUARDRAIL §0.8 (17/08/2026): manager dedicado para Google Sheets via Composio.
     "manager-googlesheets": (
@@ -268,8 +266,7 @@ MANAGER_PROMPTS: Dict[str, str] = {
         "Se o usuario pedir algo fora do escopo (documentos, presentations), "
         "diga: 'Essa ferramenta e so para planilhas. Posso ajudar com mais alguma coisa?'\n\n"
         "[ERRO DE PERMISSAO] Se a tool retornar erro de OAuth, "
-        "responda: 'Preciso que voce reconecte o Google Sheets pelo Portal Coherence "
-        "agents-runtime-test-c5nbfc5meq-uc.a.run.app/a/<phone>/composio?toolkit=googlesheets'."
+        "responda: 'Preciso que voce reconecte o Google Sheets. Use o link de conexao segura que a Jennifer envia no chat.'."
     ),
     # GUARDRAIL §0.8 (17/08/2026): manager dedicado para OneDrive via Composio.
     "manager-onedrive": (
@@ -288,8 +285,7 @@ MANAGER_PROMPTS: Dict[str, str] = {
         "Se o usuario pedir algo fora do escopo (download, upload), "
         "diga: 'Essa ferramenta e so para listagem. Posso ajudar com mais alguma coisa?'\n\n"
         "[ERRO DE PERMISSAO] Se a tool retornar erro de OAuth, "
-        "responda: 'Preciso que voce reconecte o OneDrive pelo Portal Coherence "
-        "agents-runtime-test-c5nbfc5meq-uc.a.run.app/a/<phone>/composio?toolkit=onedrive'."
+        "responda: 'Preciso que voce reconecte o OneDrive. Use o link de conexao segura que a Jennifer envia no chat.'."
     ),
     # GUARDRAIL §0.8 (17/08/2026): manager dedicado para Google Meet via Composio.
     # Meet usa Calendar API (cada evento criado tem link Meet automatico).
@@ -310,8 +306,7 @@ MANAGER_PROMPTS: Dict[str, str] = {
         "Se o usuario pedir algo fora do escopo (gravar, transcripts), "
         "diga: 'Essa ferramenta e so para criar e gerenciar reunioes. Posso ajudar com mais alguma coisa?'\n\n"
         "[ERRO DE PERMISSAO] Se a tool retornar erro de OAuth, "
-        "responda: 'Preciso que voce reconecte o Google Calendar pelo Portal Coherence "
-        "agents-runtime-test-c5nbfc5meq-uc.a.run.app/a/<phone>/composio?toolkit=googlemeet'."
+        "responda: 'Preciso que voce reconecte o Google Calendar. Use o link de conexao segura que a Jennifer envia no chat.'."
     ),
     # GUARDRAIL §0.8 (17/08/2026): manager dedicado para Microsoft Teams via Composio.
     "manager-msteams": (
@@ -331,8 +326,7 @@ MANAGER_PROMPTS: Dict[str, str] = {
         "Se o usuario pedir algo fora do escopo (videochamada, arquivos), "
         "diga: 'Essa ferramenta e so para mensagens. Posso ajudar com mais alguma coisa?'\n\n"
         "[ERRO DE PERMISSAO] Se a tool retornar erro de OAuth, "
-        "responda: 'Preciso que voce reconecte o Microsoft Teams pelo Portal Coherence "
-        "agents-runtime-test-c5nbfc5meq-uc.a.run.app/a/<phone>/composio?toolkit=microsoft_teams'."
+        "responda: 'Preciso que voce reconecte o Microsoft Teams. Use o link de conexao segura que a Jennifer envia no chat.'."
     ),
     # GUARDRAIL §0.8 (18/08/2026): manager dedicado para YouTube via Composio.
     # 1 API = 1 manager — completa a matriz de managers Composio.
@@ -351,8 +345,7 @@ MANAGER_PROMPTS: Dict[str, str] = {
         "Se o usuario pedir algo fora do escopo (upload, comentarios), "
         "diga: 'Essa ferramenta e so para pesquisa de videos. Posso ajudar com mais alguma coisa?'\n\n"
         "[ERRO DE PERMISSAO] Se a tool retornar erro de OAuth, "
-        "responda: 'Preciso que voce reconecte o YouTube pelo Portal Coherence "
-        "agents-runtime-test-c5nbfc5meq-uc.a.run.app/a/<phone>/composio?toolkit=youtube'."
+        "responda: 'Preciso que voce reconecte o YouTube. Use o link de conexao segura que a Jennifer envia no chat.'."
     ),
     # GUARDRAIL §0.8 (18/08/2026): manager dedicado para GitHub via Composio.
     "manager-github": (
@@ -370,8 +363,7 @@ MANAGER_PROMPTS: Dict[str, str] = {
         "Se o usuario pedir algo fora do escopo (issues, PRs, commits), "
         "diga: 'Essa ferramenta e so para listagem de repos. Posso ajudar com mais alguma coisa?'\n\n"
         "[ERRO DE PERMISSAO] Se a tool retornar erro de OAuth, "
-        "responda: 'Preciso que voce reconecte o GitHub pelo Portal Coherence "
-        "agents-runtime-test-c5nbfc5meq-uc.a.run.app/a/<phone>/composio?toolkit=github'."
+        "responda: 'Preciso que voce reconecte o GitHub. Use o link de conexao segura que a Jennifer envia no chat.'."
     ),
     # GUARDRAIL §0.8 (18/08/2026): manager dedicado para Notion via Composio.
     "manager-notion": (
@@ -389,8 +381,7 @@ MANAGER_PROMPTS: Dict[str, str] = {
         "Se o usuario pedir algo fora do escopo (criar/editar paginas), "
         "diga: 'Essa ferramenta e so para leitura do Notion. Posso ajudar com mais alguma coisa?'\n\n"
         "[ERRO DE PERMISSAO] Se a tool retornar erro de OAuth, "
-        "responda: 'Preciso que voce reconecte o Notion pelo Portal Coherence "
-        "agents-runtime-test-c5nbfc5meq-uc.a.run.app/a/<phone>/composio?toolkit=notion'."
+        "responda: 'Preciso que voce reconecte o Notion. Use o link de conexao segura que a Jennifer envia no chat.'."
     ),
     # GUARDRAIL §0.8 (18/08/2026): manager dedicado para X/Twitter via Composio.
     # ANTES DE INVOCAR WRITE TOOLS: confirmar texto com usuario (post eh
@@ -438,8 +429,7 @@ MANAGER_PROMPTS: Dict[str, str] = {
         "Se pedir retweet/like, diga: 'Essa ferramenta nao tem retweet/like. Posso postar ou buscar tweets.'\n\n"
 
         "[ERRO DE PERMISSAO] Se a tool retornar erro de OAuth/permissao, "
-        "responda: 'Preciso que voce reconecte o Twitter/X pelo Portal Coherence "
-        "agents-runtime-test-c5nbfc5meq-uc.a.run.app/a/<phone>/composio?toolkit=twitter'."
+        "responda: 'Preciso que voce reconecte o Twitter/X. Use o link de conexao segura que a Jennifer envia no chat.'."
     ),
     # GUARDRAIL §0.8 (18/08/2026): manager dedicado para Google Contacts (people).
     # Google API (OAuth per-user) — 1 API = 1 manager.

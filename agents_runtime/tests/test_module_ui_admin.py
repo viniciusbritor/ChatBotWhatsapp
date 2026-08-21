@@ -353,12 +353,28 @@ class TestOnboardingEndpoints(_AuthFixture):
         self.client = __import__("fastapi.testclient", fromlist=["TestClient"]).TestClient(app)
 
     def test_conectar_page_public(self):
+        from core.magic_link import generate_magic_link_token
+
+        token = generate_magic_link_token("5511966830020")
         with patch("agent_loader.get_user", return_value=None):
-            resp = self.client.get("/a/5511966830020/conectar")
+            resp = self.client.get(f"/a/5511966830020/conectar?token={token}")
         assert resp.status_code == 200, resp.text
         assert "Jennifer - Conectar Contas" in resp.text
         assert "Conectar Apps de Trabalho" in resp.text
-        assert "Conectar Apps de Trabalho" in resp.text
+
+    def test_conectar_page_requires_valid_token(self):
+        resp = self.client.get("/a/5511966830020/conectar")
+        assert resp.status_code == 403, resp.text
+
+        resp = self.client.get("/a/5511966830020/conectar?token=ml.invalido.forjado")
+        assert resp.status_code == 403, resp.text
+
+    def test_conectar_page_rejects_phone_mismatch(self):
+        from core.magic_link import generate_magic_link_token
+
+        token = generate_magic_link_token("5511999999999")
+        resp = self.client.get(f"/a/5511966830020/conectar?token={token}")
+        assert resp.status_code == 403, resp.text
 
     def test_composio_endpoint_public_returns_links(self):
         fake_result = {

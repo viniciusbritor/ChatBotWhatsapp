@@ -133,7 +133,9 @@ class TestGuardModule:
         }
         result = blocked_response(guard)
         assert result["metadata"]["blocked"] is True
-        assert "autorize" in result["reply"].lower()
+        assert "conecte" in result["reply"].lower()
+        assert "auth.example.com" in result["reply"]
+        assert "e-mails" in result["reply"]
 
 
 class TestPrefetchModule:

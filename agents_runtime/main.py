@@ -2900,10 +2900,56 @@ def _oauth_redirect_uri(request: Request) -> str:
 
 @app.get("/a/{phone}/conectar")
 async def onboarding_conectar(phone: str, request: Request, token: Optional[str] = None):
-    """Página pública e dedicada de onboarding: conecta Google Workspace + TODOS os apps Composio."""
+    """Página pública e dedicada de onboarding: conecta Google Workspace + TODOS os apps Composio.
+
+    GUARDRAIL (21/08/2026): validacao obrigatoria do magic link (HMAC). O endpoint
+    antes aceitava qualquer telefone na URL sem checar o token, permitindo enumeracao
+    de usuarios e vazamento de status OAuth. Agora exige token valido cujo ``sub``
+    corresponde ao telefone da URL.
+    """
     from agent_loader import get_user
 
     canonical_phone = "".join(c for c in str(phone or "") if c.isdigit())
+
+    # --- Validacao de magic link (HMAC + sub == phone) ---
+    from core.magic_link import verify_magic_link_token
+
+    claims = verify_magic_link_token(token or "")
+    if not claims:
+        logger.warning(
+            "conectar_access_denied reason=invalid_token phone_suffix=%s",
+            canonical_phone[-4:] if canonical_phone else "----",
+        )
+        return HTMLResponse(
+            content=(
+                "<!DOCTYPE html><html lang='pt-BR'><head><meta charset='utf-8'>"
+                "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+                "<title>Link invalido | Coherence</title></head>"
+                "<body style='font-family:system-ui,sans-serif;background:#f8fafc;display:flex;"
+                "align-items:center;justify-content:center;min-height:100vh;margin:0'>"
+                "<div style='text-align:center;max-width:360px;padding:24px'>"
+                "<h2 style='color:#0f172a'>Link invalido ou expirado</h2>"
+                "<p style='color:#475569;font-size:14px'>Este link de conexao nao e mais valido. "
+                "Peca para a Jennifer reenviar o link no WhatsApp.</p>"
+                "</div></body></html>"
+            ),
+            status_code=403,
+        )
+
+    token_phone = "".join(
+        c for c in str(claims.get("sub") or claims.get("phone") or "") if c.isdigit()
+    )
+    if canonical_phone and token_phone != canonical_phone:
+        logger.warning(
+            "conectar_access_denied reason=phone_mismatch phone_suffix=%s token_suffix=%s",
+            canonical_phone[-4:],
+            token_phone[-4:] if token_phone else "----",
+        )
+        return HTMLResponse(
+            content="<h2>Acesso negado</h2><p>Este link nao pertence a este usuario.</p>",
+            status_code=403,
+        )
+
     user = get_user(canonical_phone) or {}
     has_google = bool(user.get("google_oauth_token"))
     user_name = user.get("name") or user.get("push_name") or "Usuário"

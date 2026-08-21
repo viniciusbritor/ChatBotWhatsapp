@@ -56,19 +56,27 @@ class TestOrchestrate:
 
         with patch("orchestrator._classify_intent_llm", return_value="conversa"):
             with patch("pipelines.jennifer_pipeline.run", new_callable=AsyncMock) as mock_run:
-                mock_run.return_value = {
-                    "reply": "Ola, em que posso ajudar?",
-                    "delay_ms": 100,
-                    "presence": "composing",
-                    "metadata": {"agent_id": "manager-jennifier"},
-                }
-                result = await orchestrate({
-                    "instance": "jennifer",
-                    "phone": "+5511966830020",
-                    "text": "oi",
-                    "sender_name": "Vinicius",
-                    "extra": {},
-                })
+                # GUARDRAIL (21/08/2026): mocka a verificacao de conexao para
+                # que o onboarding nudge NAO seja anexado a resposta (o teste
+                # valida o reply exato do pipeline jennifier).
+                with patch(
+                    "orchestrator._user_has_any_connection",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ):
+                    mock_run.return_value = {
+                        "reply": "Ola, em que posso ajudar?",
+                        "delay_ms": 100,
+                        "presence": "composing",
+                        "metadata": {"agent_id": "manager-jennifier"},
+                    }
+                    result = await orchestrate({
+                        "instance": "jennifer",
+                        "phone": "+5511966830020",
+                        "text": "oi",
+                        "sender_name": "Vinicius",
+                        "extra": {},
+                    })
 
         assert result["reply"] == "Ola, em que posso ajudar?"
         assert "manager-jennifier" in result["metadata"].get("agent_id", "")

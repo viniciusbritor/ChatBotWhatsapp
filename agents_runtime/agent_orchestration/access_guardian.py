@@ -22,8 +22,6 @@ function directly and stores the verdict on the graph state.
 from __future__ import annotations
 
 import logging
-import os
-import re
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, Iterable, Optional
 
@@ -83,11 +81,14 @@ class GuardianDecision:
 
 
 def _build_oauth_link(instance: str, phone: str) -> str:
-    base = os.getenv(
-        "AGENTS_RUNTIME_PUBLIC_URL",
-        "https://agents-runtime-test-c5nbfc5meq-uc.a.run.app",
-    )
-    return f"{base}/oauth/google?phone={phone}"
+    # GUARDRAIL (21/08/2026): em vez de expor a URL crua /oauth/google?phone=...
+    # (que mostra o telefone no preview do WhatsApp e nao explica seguranca),
+    # aponta para o mini-portal dedicado /a/{phone}/conectar com magic link
+    # HMAC de curta validade. O portal explica a seguranca e oferece os botoes
+    # "Conectar Google Workspace" + "Conectar Apps de Trabalho" (Composio).
+    from core.magic_link import build_magic_link_url
+
+    return build_magic_link_url(phone)
 
 
 def _has_required_scope(granted: Iterable[str], required: str) -> bool:

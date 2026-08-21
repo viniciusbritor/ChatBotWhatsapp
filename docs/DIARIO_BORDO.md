@@ -1,3 +1,23 @@
+## 21/08/2026 (BRT) — Diagnóstico Composio/LinkedIn + Mini-Portal de Conexão Segura
+
+### 1. Diagnóstico: Jennifer "não tem acesso ao LinkedIn" (imagem 1)
+- **Causa raiz (dados, não código)**: o doc Firestore `usuarios/5511966830020` (Vinicius) NÃO possui `composio`, `composio_linked_at`, nem `google_oauth_token` (revogado em `2026-08-21T02:59:35Z`). O roteamento tier15 e o `manager-linkedin` (4 tools) estão corretos no código deployado `da36e49` — em 19/08 o mesmo pedido respondeu "Achei seu perfil! 👤".
+- **Portal "tudo conectado" = dado stale**: `tools/composio_connect.get_status` tem cache `_STATUS_CACHE` (TTL 120s) que não era invalidado após desconexão. O portal (ConnectionsView) exibia "OK" com base em status defasado.
+
+### 2. Correções aplicadas (PR1 + PR2)
+- **`agent_orchestration/access_guardian.py`**: `_build_oauth_link` agora gera **magic link** (`/a/{phone}/conectar?token=ml.*`) em vez da URL crua `/oauth/google?phone=...` (que vazava telefone no preview do WhatsApp). Removidos imports `os`/`re` não utilizados.
+- **`main.py`**: endpoint `/a/{phone}/conectar` agora **valida o token HMAC** (`verify_magic_link_token`) e rejeita com 403 se ausente/inválido ou se `sub` ≠ telefone da URL. Antes aceitava qualquer telefone sem checar token (enumeração + vazamento de status OAuth).
+- **`pipelines/_guard.py`**: mensagem de `request_oauth` traduz termos técnicos (`calendar.list_events` → "sua agenda") e inclui nota de segurança ("senhas nunca são armazenadas"). Adicionado `_FRIENDLY_CAPABILITY`.
+- **`deepagent_layer/agents.py`**: 10 prompts de managers (linkedin, googledocs, googlesheets, onedrive, googlemeet, msteams, youtube, github, notion, twitter) tiveram a URL quebrada `a/<phone>/composio?toolkit=X` (placeholder `<phone>` literal nunca substituído) substituída por "Use o link de conexao segura que a Jennifer envia no chat".
+- **`orchestrator.py`**: instrumentação `tier15_dispatch` (log estruturado) para diagnosticar roteamento futuro — antes o tier15 não emitia nenhum log.
+
+### 3. Testes
+- Atualizados: `test_module_ui_admin.py` (validação de token), `test_manager_twitter.py`, `test_calendar_pipeline.py`, `test_infra.py`, `test_orchestrator.py` (mock de `_user_has_any_connection`).
+- Suíte verde: 128 manager + 85 module/composio/portal + 40 guard + 10 orchestrator. `ruff` limpo nos arquivos não-teste.
+
+### 4. Observação (não bloqueante)
+- TinyURL `api/create.php` retorna 404 (endpoint descontinuado). O `core/link_shortener.py` tem fallback gracioso (mantém URL original), e o magic link já é limpo — sem impacto funcional.
+
 ## 19/08/2026 (21:02 BRT) — Resolução de Conectividade Evolution API (Webhook 404 Fix)
 
 ### 1. Diagnóstico e Causa Raiz

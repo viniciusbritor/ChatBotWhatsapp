@@ -120,7 +120,8 @@ class TestCalendarRun:
         ):
             result = await run(self._payload())
         assert result["metadata"]["blocked"] is True
-        assert "autorize" in result["reply"].lower()
+        assert "conecte" in result["reply"].lower()
+        assert "auth.example.com" in result["reply"]
 
     @pytest.mark.asyncio
     async def test_run_success_with_prefetch(self):

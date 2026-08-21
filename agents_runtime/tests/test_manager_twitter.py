@@ -149,8 +149,8 @@ def test_manager_twitter_prompt_exists():
     assert "anti-ban" in prompt.lower() or "max 5" in prompt or "5 tweets" in prompt, (
         "manager-twitter prompt NAO menciona regra anti-ban"
     )
-    assert "Portal Coherence" in prompt, (
-        "manager-twitter prompt NAO tem mensagem de erro de permissao (Portal Coherence)"
+    assert "reconecte" in prompt.lower() and "link de conexao segura" in prompt, (
+        "manager-twitter prompt NAO tem mensagem de erro de permissao (reconexao segura)"
     )
     assert "irrevers" in prompt.lower(), (
         "manager-twitter prompt NAO avisa sobre post/delete irreversivel"

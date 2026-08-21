@@ -29,6 +29,29 @@ _CAPABILITY_MAP = {
     "drive": "drive.search_files",
 }
 
+# GUARDRAIL (21/08/2026): rotulo amigavel para o usuario final. Antes o
+# texto vazava o nome tecnico da tool ("calendar.list_events"), expondo
+# jargao interno no WhatsApp. Agora traduzimos para linguagem de negocio.
+_FRIENDLY_CAPABILITY = {
+    "calendar.list_events": "sua agenda",
+    "calendar.create_event": "sua agenda",
+    "calendar.write": "sua agenda",
+    "calendar.read": "sua agenda",
+    "gmail.search_messages": "seus e-mails",
+    "gmail.send_message": "enviar e-mails",
+    "gmail.send": "enviar e-mails",
+    "gmail.read": "seus e-mails",
+    "drive.search_files": "seus arquivos",
+    "drive.read": "seus arquivos",
+    "drive.write": "seus arquivos",
+    "drive.upload_file": "seus arquivos",
+    "drive.create_folder": "seus arquivos",
+}
+
+
+def _friendly_capability(capability: str) -> str:
+    return _FRIENDLY_CAPABILITY.get(capability, "esta funcionalidade")
+
 
 async def check_google_access(
     instance: str,
@@ -182,11 +205,13 @@ def blocked_response(guard: Dict[str, Any], envelope: Dict[str, Any] = None) -> 
         }
     if verdict == "request_oauth":
         link = guard.get("oauth_link", "")
+        friendly = _friendly_capability(capability)
         return {
             "reply": (
-                f"Oi! Para acessar {capability}, "
-                f"preciso que voce autorize sua conta Google. "
-                f"Acesse este link e faca o login: {link}"
+                f"Oi! Para eu acessar {friendly}, preciso que voce conecte sua "
+                f"conta com seguranca. Toque no link e siga as instrucoes: {link}\n\n"
+                f"🔒 Seus acessos anteriores sao preservados e suas senhas nunca "
+                f"sao armazenadas."
             ),
             "delay_ms": 0,
             "presence": "composing",
