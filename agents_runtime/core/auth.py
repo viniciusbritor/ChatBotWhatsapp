@@ -20,12 +20,14 @@ PROTECTED_PATHS = ("/admin", "/chat", "/proactive/send", "/version")
 PUBLIC_PATHS = (
     "/webhook",
     "/healthz",
+    "/health",
     "/oauth/callback",
     "/oauth/google",
     "/pubsub",
     "/a",
     "/admin/approve-user",
     "/admin/evolution/auto-webhook",
+    "/chat/public",
 )
 FIREBASE_PROJECT = os.getenv("GCP_PROJECT", "coherence-ominichannel-fs")
 

@@ -214,6 +214,68 @@ async def metrics_endpoint():
     return Response(content=payload, media_type=metrics.METRICS_CONTENT_TYPE)
 
 
+@app.options("/chat/public")
+async def chat_public_options():
+    return Response(
+        status_code=204,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
+        },
+    )
+
+
+@app.post("/chat/public")
+async def chat_public(request: Request):
+    """Public web chat endpoint for Coherence website visitors."""
+    try:
+        body = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"invalid_json: {e}")
+
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="text required")
+
+    raw_phone = str(body.get("phone") or "").strip()
+    if raw_phone:
+        digits = re.sub(r"\D", "", raw_phone)
+        if len(digits) >= 10:
+            if not digits.startswith("55") and len(digits) in (10, 11):
+                phone = f"55{digits}"
+            else:
+                phone = digits
+        else:
+            phone = f"551199{digits}"[:13]
+    else:
+        session_id = (body.get("session_id") or "web_user").strip()
+        clean_id = re.sub(r"[^a-zA-Z0-9_]", "", session_id)[:16] or "web_user"
+        phone = f"551199{clean_id}"[:13]
+        if len(phone) < 12:
+            phone = "551199000000"
+
+    payload = {
+        "instance": "jennifer",
+        "phone": phone,
+        "text": text,
+        "sender_name": body.get("sender_name") or "Visitante do Site",
+        "extra": {"source": "website", "session_id": body.get("session_id") or phone},
+    }
+
+    result = await orchestrate(payload)
+    reply = result.get("reply", "")
+
+    return JSONResponse(
+        content={"reply": reply, "metadata": result.get("metadata")},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
+        },
+    )
+
+
 @app.post("/chat")
 async def chat(request: Request):
     """Receive a WhatsApp message and return Jennifer's response.
