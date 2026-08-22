@@ -2188,9 +2188,12 @@ _KEYWORD_TO_TOOLKIT: Dict[str, str] = {
     "google sheets": "googlesheets",
     "googlesheets": "googlesheets",
     "sheets": "googlesheets",
-    "google meet": "googlemeet",
-    "googlemeet": "googlemeet",
-    "meet": "googlemeet",
+    # GUARDRAIL (21/08/2026): removidos os keywords "meet"/"google meet"/
+    # "googlemeet" do tier15. A keyword "meet" (substring de "meets") estava
+    # capturando pedidos de "marcar reuniao as 16:00 pelo meet" e roteando
+    # para manager-googlemeet (Composio), que usa GOOGLECALENDAR_CREATE_EVENT
+    # (toolkit googlecalendar NAO conectado). O calendar pipeline nativo
+    # (tier 1.7) ja cria evento com link de Meet via conferenceData.
     "microsoft teams": "microsoft_teams",
     "teams": "microsoft_teams",
     "contatos": "people",

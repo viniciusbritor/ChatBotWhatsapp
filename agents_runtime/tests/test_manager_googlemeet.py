@@ -34,17 +34,25 @@ class TestManagerGooglemeetAllowlist:
 
 
 class TestManagerGooglemeetKeywordDetection:
-    def test_criar_reuniao_triggers_googlemeet(self):
+    # GUARDRAIL (21/08/2026): "meet" foi removido do tier15. Pedidos de
+    # "marcar reuniao ... pelo meet" agora caem no calendar pipeline nativo
+    # (tier 1.7), que cria evento com link de Meet via conferenceData.
+    def test_reuniao_meet_nao_mais_roteia_para_googlemeet(self):
         from orchestrator import _detect_dynamic_toolkit
         with patch("orchestrator.api_registry") as mock_reg:
             mock_reg.is_allowed.return_value = True
-            assert _detect_dynamic_toolkit("criar reuniao no google meet") == "googlemeet"
+            assert _detect_dynamic_toolkit("criar reuniao no google meet") is None
 
-    def test_google_meet_keyword_triggers(self):
+    def test_agendar_chamada_meet_nao_mais_roteia_para_googlemeet(self):
         from orchestrator import _detect_dynamic_toolkit
         with patch("orchestrator.api_registry") as mock_reg:
             mock_reg.is_allowed.return_value = True
-            assert _detect_dynamic_toolkit("agendar chamada no google meet") == "googlemeet"
+            assert _detect_dynamic_toolkit("agendar chamada no google meet") is None
+
+    def test_calendar_detecta_reuniao_meet(self):
+        # O calendar pipeline (tier 1.7) deve capturar "marcar reuniao ... pelo meet"
+        from pipelines.calendar_pipeline import detect as cal_detect
+        assert cal_detect("marcar uma reuniao as 16:00 com a clarrisa e o mikaelmsoares@gmail.com pelo meets") is True
 
     def test_sem_keyword_nao_triggers(self):
         from orchestrator import _detect_dynamic_toolkit

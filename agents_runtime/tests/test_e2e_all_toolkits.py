@@ -102,7 +102,6 @@ class TestE2EKeywordRouting:
                 ("criar doc no google docs", "googledocs"),
                 ("ler planilha do google sheets", "googlesheets"),
                 ("listar arquivos do onedrive", "onedrive"),
-                ("criar reuniao no google meet", "googlemeet"),
                 ("enviar mensagem no microsoft teams", "microsoft_teams"),
             ]
             for phrase, expected_slug in test_cases:

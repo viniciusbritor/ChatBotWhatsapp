@@ -1,3 +1,21 @@
+## 21/08/2026 (BRT) — Correção do Meet + Enriquecimento de Prompts (agenda/contatos/memória)
+
+### 1. Diagnóstico (incidente "marcar reunião às 16:00 pelo meet")
+- **Causa raiz = ROTEAMENTO, não Composio**. A keyword `meet`/`meets`/`google meet` no `_KEYWORD_TO_TOOLKIT` (tier 1.5) capturava pedidos de "marcar reunião ... pelo meet" e roteava para `manager-googlemeet` (Composio), ANTES do calendar pipeline (tier 1.7) rodar.
+- O `manager-googlemeet` chama `GOOGLECALENDAR_CREATE_EVENT` (toolkit `googlecalendar`), mas o usuário só tem `googlemeet` conectado no Composio (10 contas: linkedin/youtube/github/notion/onedrive/googledocs/googlesheets/one_drive/microsoft_teams/twitter/googlemeet — sem `googlecalendar`). Resultado: `Composio SDK call failed: Toolkit version not specified`.
+- O Google OAuth nativo (com scopes `calendar`, `calendar.events`, `contacts.readonly`) estava VÁLIDO (relinked 21/08 02:13 BRT), então o calendar nativo teria funcionado se a mensagem tivesse chegado lá.
+
+### 2. Correções
+- **`orchestrator.py`**: removidos `meet`/`google meet`/`googlemeet` do `_KEYWORD_TO_TOOLKIT` (tier 1.5). "marcar reunião pelo meet" agora cai no calendar pipeline nativo (tier 1.7), que cria evento + link de Meet via `conferenceData`.
+- **`deepagent_layer/agents.py`**:
+  - `manager-calendar`: regra OBRIGATÓRIA "MEET EH CALENDAR" — pedidos de meet/reunião online são sempre `calendar.create_event` com conferenceData, nunca API separada.
+  - `manager-people`: instrução de que Composio people é só leitura; salvar/atualizar contato usa `memory.save_fact(key='contato_{nome}')` como fallback, e `memory.search_facts` antes de buscar.
+- **`data/agents/jennifier.yaml`**: regra OBRIGATÓRIA de memória (chamar `memory.save_fact` antes de dizer "anotei"; `memory.search_facts` antes de perguntar dado já salvo) + nota de que contatos é só leitura via memory.
+
+### 3. Testes
+- Atualizados `test_manager_googlemeet.py` (meet não roteia mais para googlemeet; calendar captura) e `test_e2e_all_toolkits.py` (removido caso "criar reuniao no google meet").
+- Suíte verde: 38 (googlemeet/e2e/composio) + 122 (managers/deepagent/calendar) + 62 (orchestrator/memory/loader) + 70 (people/calendar) passando. `ruff` limpo nos arquivos não-teste.
+
 ## 21/08/2026 (BRT) — Diagnóstico Composio/LinkedIn + Mini-Portal de Conexão Segura
 
 ### 1. Diagnóstico: Jennifer "não tem acesso ao LinkedIn" (imagem 1)
